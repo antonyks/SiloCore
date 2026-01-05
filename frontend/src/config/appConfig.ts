@@ -1,0 +1,5 @@
+export const appConfig = {
+  appName: "InsightBase",
+  version: "1.0.0",
+  apiUrl: import.meta.env.VITE_API_URL || "http://localhost:3000",
+};
