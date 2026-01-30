@@ -1,0 +1,20 @@
+meta {
+  name: User Ban
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{host}}/api/users/ban/3
+  body: json
+  auth: inherit
+}
+
+headers {
+  Authorization: {{token}}
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

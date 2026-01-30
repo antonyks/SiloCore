@@ -1,0 +1,28 @@
+meta {
+  name: User Create
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{host}}/api/users/
+  body: json
+  auth: inherit
+}
+
+headers {
+  Authorization: {{token}}
+}
+
+body:json {
+  {
+    "name": "Test User",
+    "email": "test@example.com",
+    "password": "Password123!"
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

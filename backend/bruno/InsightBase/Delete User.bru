@@ -1,0 +1,20 @@
+meta {
+  name: User Delete
+  type: http
+  seq: 6
+}
+
+delete {
+  url: {{host}}/api/users/1
+  body: json
+  auth: inherit
+}
+
+headers {
+  Authorization: {{token}}
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

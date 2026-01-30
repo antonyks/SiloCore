@@ -1,0 +1,20 @@
+meta {
+  name: User Activate
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{host}}/api/users/activate/4
+  body: json
+  auth: inherit
+}
+
+headers {
+  Authorization: {{token}}
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
