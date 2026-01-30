@@ -1,0 +1,20 @@
+meta {
+  name: User Search
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{host}}/api/users/?name=Test&skip=0&take=10
+  body: json
+  auth: inherit
+}
+
+headers {
+  Authorization: {{token}}
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
