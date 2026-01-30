@@ -18,9 +18,10 @@ export const UserRepository = {
 
   async createUser(userData: IUserCreateInput): Promise<SelectedUser> {
 
+    let lowerCaseEmail:string=userData.email.toLowerCase();
     return UserModel.create({
       data: {
-        email: userData.email,
+        email: lowerCaseEmail,
         passwordHash: userData.password,
         name: userData.name,
       },
@@ -30,6 +31,7 @@ export const UserRepository = {
 
   async findByEmail(email: string, includePassword: boolean = false): Promise<SelectedUser | AuthUser | null> {
 
+    let lowerCaseEmail:string=email.toLowerCase();
     let selection: Prisma.UserSelect = SelectedUserFields;
 
     if (includePassword) {
@@ -39,7 +41,7 @@ export const UserRepository = {
       } as Prisma.UserSelect;
     }
 
-    return UserModel.findUnique({ where: { email:email, NOT:{status:UserStatus.DELETED} }, select: selection });
+    return UserModel.findUnique({ where: { email:lowerCaseEmail, NOT:{status:UserStatus.DELETED} }, select: selection });
   },
 
   async findById(id: number, includePassword: boolean = false): Promise<SelectedUser | null> {
