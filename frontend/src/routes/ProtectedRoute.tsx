@@ -1,19 +1,32 @@
 import React from "react";
-import { Navigate } from "react-router-dom";
-import { useAuth } from "../hooks/useAuth";
+import { Navigate, Outlet } from "react-router-dom";
+import { useAuth } from "../features/auth/hooks/useAuth";
+import { UserRole } from "../types/user";
+import { authService } from "../features/auth/services/authService";
 
 interface ProtectedRouteProps {
-  children: React.ReactNode;
+  allowedRoles?: UserRole[];
 }
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
-  const { isAuthenticated, loading } = useAuth();
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles }) => {
+  const { isAuthenticated, loading, user } = useAuth();
 
   if (loading) {
     return <div>Loading...</div>;
   }
 
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
+    if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (allowedRoles && user && !allowedRoles.includes(user.role)) {
+    
+    const url=authService.getRedirectPath(user.role)
+    return <Navigate to={url} replace />
+  }
+
+
+  return  <Outlet />
 };
 
 export default ProtectedRoute;

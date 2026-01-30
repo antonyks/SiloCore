@@ -15,7 +15,17 @@ export const storage = {
 
   getUser: (): any => {
     const user = localStorage.getItem(USER_KEY);
-    return user ? JSON.parse(user) : null;
+
+    if (!user || user === "undefined") {
+    return null;
+  }
+
+  try {
+    return JSON.parse(user);
+  } catch (e) {
+    console.error("Corrupted storage found for user key");
+    return null;
+  }
   },
 
   setUser: (user: any): void => {
@@ -23,6 +33,11 @@ export const storage = {
   },
 
   removeUser: (): void => {
+    localStorage.removeItem(USER_KEY);
+  },
+
+  clear: () => {
+    localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
   },
 };

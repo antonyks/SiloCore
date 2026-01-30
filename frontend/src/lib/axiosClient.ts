@@ -1,5 +1,7 @@
-import axios, { type AxiosInstance } from "axios";
+import axios, { AxiosError, type AxiosInstance } from "axios";
 import { API_BASE_URL } from "../config/constants";
+import { logger } from './logger';
+import { logoutAndRedirect } from "./navigation";
 
 const axiosClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
@@ -9,7 +11,6 @@ const axiosClient: AxiosInstance = axios.create({
   },
 });
 
-// Request interceptor to add auth token
 axiosClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
@@ -19,24 +20,24 @@ axiosClient.interceptors.request.use(
     return config;
   },
   (error) => {
+    logger.error('Request error:', error);
     return Promise.reject(error);
   },
 );
 
-// Response interceptor to handle errors
 axiosClient.interceptors.response.use(
   (response) => {
     return response;
   },
-  (error) => {
+  (error: AxiosError) => {
+
     if (error.response?.status === 401) {
-      // Handle unauthorized access
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
-      window.location.href = "/login";
+      logoutAndRedirect();
     }
     return Promise.reject(error);
   },
 );
+
+
 
 export default axiosClient;
