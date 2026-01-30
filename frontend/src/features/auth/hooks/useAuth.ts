@@ -3,31 +3,20 @@ import { authService } from "../services/authService";
 import { storage } from "../../../lib/storage";
 import { useNavigate } from "react-router-dom";
 import type { LoginCredentials } from "../types";
-import { useApp } from "../../../contexts/AppContext";
 
-
-export const useUser = () => {
-  
-  return useQuery({
-    queryKey: ["auth-user"],
-    queryFn: ()=>authService.getCurrentUser(),
-    initialData: storage.getUser(),
-    staleTime: Infinity,
-  });
-};
 
 export const useLogin = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const { setUser } = useApp();
 
   return useMutation({
     mutationFn: ({ email, password }: LoginCredentials) => authService.login({email, password}),
     onSuccess: (data) => {
-      queryClient.setQueryData(["auth-user"], data.data.user);
-      setUser(data.data.user);
+      const user = data.data.user;
+      storage.setUser(user);
+      queryClient.setQueryData(["auth-user"],user);
       
-      const url=authService.getRedirectPath(data.data.user.role)
+      const url=authService.getRedirectPath(user.role)
       navigate(url);
     },
   });
@@ -39,6 +28,7 @@ export const useLogout = () => {
 
   return () => {
     authService.logout();
+    queryClient.setQueryData(["auth-user"], null);
     queryClient.clear(); 
     navigate("/login");
   };
