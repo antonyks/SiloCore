@@ -176,3 +176,8 @@ test-results/
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+venv
+.venv
+*.py
+.aider.conf.yml
