@@ -41,7 +41,7 @@ describe('UserService', () => {
 
 
       expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
-        where: { email: userData.email },
+        where: { email: userData.email, NOT:{status:UserStatus.DELETED }},
         select: SelectedUserFields,
       });
       expect(bcrypt.hash).toHaveBeenCalledWith(userData.password, BCRYPT_SALT_ROUNDS);
@@ -81,7 +81,7 @@ describe('UserService', () => {
         new DuplicateResourceError('Email already registered')
       );
 
-      expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({where: { email:userData.email}, select: expect.any(Object)});
+      expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({where: { email:userData.email, NOT:{status:UserStatus.DELETED }}, select: SelectedUserFields});
     });
   });
 

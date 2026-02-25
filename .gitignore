@@ -181,3 +181,4 @@ venv
 .venv
 *.py
 .aider.conf.yml
+ai-tools/*

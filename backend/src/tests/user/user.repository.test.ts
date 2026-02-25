@@ -1,7 +1,8 @@
 import { mockPrisma } from '../setup';
 import { UserRepository } from '../../modules/user/user.repository';
 import { UserStatus, UserRole, SelectedUserFields, SelectedUser } from '../../modules/user/user.model';
-import { selectUnknownFields } from 'express-validator/lib/field-selection';
+import { selectFields, selectUnknownFields } from 'express-validator/lib/field-selection';
+import { Prisma } from '@prisma/client';
 
 describe('UserRepository', () => {
   beforeEach(() => {
@@ -63,7 +64,7 @@ describe('UserRepository', () => {
 
       expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
         where: { email: 'test@example.com', NOT:{status:UserStatus.DELETED} },
-        select: expect.any(Object),
+        select: SelectedUserFields,
       });
 
       expect(result).toEqual(mockUser);
@@ -85,9 +86,14 @@ describe('UserRepository', () => {
 
       const result = await UserRepository.findByEmail('test@example.com', true);
 
+      const selection = {
+        ...SelectedUserFields,
+        passwordHash: true
+      } as Prisma.UserSelect;
+
       expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
-        where: { email: 'test@example.com' },
-        select: expect.objectContaining({ passwordHash: true }),
+        where: { email: 'test@example.com' , NOT:{status:UserStatus.DELETED} },
+        select: selection,
       });
 
       expect(result).toEqual(mockUser);

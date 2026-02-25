@@ -38,7 +38,7 @@ describe('AuthService', () => {
       const result = await loginUser(loginData);
 
       expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
-        where: { email:loginData.email }, 
+        where: { email:loginData.email, NOT:{status:UserStatus.DELETED}  }, 
         select: {...SelectedUserFields,passwordHash: true}
     });
       expect(bcrypt.compare).toHaveBeenCalledWith(loginData.password, 'hashedPassword');
