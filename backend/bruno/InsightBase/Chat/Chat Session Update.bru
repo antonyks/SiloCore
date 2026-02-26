@@ -1,11 +1,11 @@
 meta {
-  name: User Change Password
+  name: Chat Session Update
   type: http
-  seq: 9
+  seq: 16
 }
 
-post {
-  url: {{host}}/api/users/change-password
+put {
+  url: {{host}}/api/chat/{{sessionId}}
   body: json
   auth: inherit
 }
@@ -16,8 +16,7 @@ headers {
 
 body:json {
   {
-    "oldPassword": "Admin123!",
-    "newPassword": "NewPassword123!"
+    "title": "Updated Test Chat Session"
   }
 }
 

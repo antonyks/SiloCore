@@ -1,12 +1,12 @@
 meta {
-  name: User Delete
+  name: Chat Session Delete
   type: http
-  seq: 6
+  seq: 17
 }
 
 delete {
-  url: {{host}}/api/users/1
-  body: json
+  url: {{host}}/api/chat/{{sessionId}}
+  body: none
   auth: inherit
 }
 
@@ -18,3 +18,4 @@ settings {
   encodeUrl: true
   timeout: 0
 }
+

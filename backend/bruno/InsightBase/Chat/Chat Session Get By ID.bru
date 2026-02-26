@@ -1,12 +1,12 @@
 meta {
-  name: User Delete
+  name: Chat Session Get By ID
   type: http
-  seq: 6
+  seq: 15
 }
 
-delete {
-  url: {{host}}/api/users/1
-  body: json
+get {
+  url: {{host}}/api/chat/{{sessionId}}
+  body: none
   auth: inherit
 }
 

@@ -1,0 +1,33 @@
+meta {
+  name: Chat Session Create
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{host}}/api/chat/
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "title": "Test Chat Session"
+  }
+}
+
+headers {
+  Authorization: {{token}}
+}
+
+tests {
+  const responseData = res.body;
+  if(responseData.data) {
+    bru.setEnvVar("sessionId", responseData.data.id);
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
