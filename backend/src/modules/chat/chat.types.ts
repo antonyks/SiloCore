@@ -17,13 +17,14 @@ export interface IChatMetadata {
   tokens: {
     prompt: number;
     completion: number;
+    total: number;
   };
   latency: number;
   isFavorited: boolean;
 }
 
 export interface IChatMessage {
-  id: bigint;
+  id: number;
   content: string;
   author: 'USER' | 'ASSISTANT' | 'SYSTEM';
   metadata?: Record<string, any>;//IChatMetadata
