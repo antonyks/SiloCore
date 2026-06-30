@@ -2,10 +2,9 @@ import { login } from '../../modules/auth/auth.controller';
 import { mockPrisma } from '../setup';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { SelectedUserFields, UserRole, UserStatus } from '../../modules/user/user.model';
-import * as AuthService from  '../../modules/auth/auth.service';
-import { UserService } from '../../modules/user/user.service';
-import { AuthenticationError, NotFoundError } from '../../errors';
+import { UserRole, UserStatus } from '../../modules/user/user.model';
+import { NotFoundError } from '../../errors';
+import { createMockRequest, createMockResponse } from '../testUtils';
 
 describe('AuthController', () => {
   beforeEach(() => {
@@ -31,14 +30,11 @@ describe('AuthController', () => {
         updatedAt: new Date(),
       };
 
-      const req = {
+      const req = createMockRequest({
         body: loginData,
-      } as any;
+      });
 
-      const mockRes = {
-        json: jest.fn(),
-        status: jest.fn().mockReturnThis()
-      } as any;
+      const mockRes = createMockResponse();
 
       const mockAuthResult = {
         message: "Login successful",
@@ -66,17 +62,14 @@ describe('AuthController', () => {
     });
 
     it('should handle authentication error during login', async () => {
-      const req = {
+      const req = createMockRequest({
         body: {
           email: 'test@example.com',
           password: 'wrongpassword',
         },
-      } as any;
+      });
 
-      const mockRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn(),
-      } as any;
+      const mockRes = createMockResponse();
 
       mockPrisma.user.findUnique.mockResolvedValue(null);
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);

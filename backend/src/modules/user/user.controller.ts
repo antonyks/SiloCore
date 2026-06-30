@@ -3,7 +3,6 @@ import { AuthenticatedRequest} from '../../types/authenticatedRequest'
 import { UserService } from './user.service';
 import { InvalidInputError } from '../../errors';
 import { IUserUpdate, IUserUpdatePassword } from './user.types';
-import { UserUpdateInput } from './user.model';
 
 export const UserController = {
     async createUser(req: Request, res: Response): Promise<void> {

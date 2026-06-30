@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from '@jest/globals';
+import { describe, it, expect } from '@jest/globals';
 import { ChatService } from '../../modules/chat/chat.service';
 import { mockPrisma } from '../setup';
 import { NotFoundError, AuthenticationError } from '../../errors';

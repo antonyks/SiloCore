@@ -1,4 +1,4 @@
-import { ChatSession, ChatMessage } from './chat.model';
+import { Prisma } from '@prisma/client';
 
 export interface IChatSession {
   id: number;
@@ -27,7 +27,7 @@ export interface IChatMessage {
   id: number;
   content: string;
   author: 'USER' | 'ASSISTANT' | 'SYSTEM';
-  metadata?: Record<string, any>;//IChatMetadata
+  metadata?: Prisma.InputJsonObject;//IChatMetadata
   sessionId: number;
   createdAt: Date;
 }
@@ -45,7 +45,7 @@ export interface IChatMessageCreateInput {
   content: string;
   author: 'USER' | 'ASSISTANT' | 'SYSTEM';
   sessionId: number;
-  metadata?: Record<string, any>;
+  metadata?: Prisma.InputJsonObject;
 }
 
 export interface IChatSessionListParams {

@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { AuthenticatedRequest } from '../../types/authenticatedRequest';
 import { ChatService } from './chat.service';
 import { InvalidInputError } from '../../errors';

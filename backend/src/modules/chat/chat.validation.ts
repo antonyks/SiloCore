@@ -1,5 +1,5 @@
-import { body, param, query, validationResult } from 'express-validator';
-import { Request, Response } from 'express';
+import { body, param, validationResult } from 'express-validator';
+import { NextFunction, Request, Response } from 'express';
 
 export const validateChatSessionCreate = [
   body('title')
@@ -32,7 +32,7 @@ export const validateSessionId = [
     .withMessage('Valid session ID is required')
 ];
 
-export const handleValidationErrors = (req: Request, res: Response, next: Function) => {
+export const handleValidationErrors = (req: Request, res: Response, next: NextFunction) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({

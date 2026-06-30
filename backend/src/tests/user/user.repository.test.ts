@@ -1,7 +1,6 @@
 import { mockPrisma } from '../setup';
 import { UserRepository } from '../../modules/user/user.repository';
 import { UserStatus, UserRole, SelectedUserFields, SelectedUser } from '../../modules/user/user.model';
-import { selectFields, selectUnknownFields } from 'express-validator/lib/field-selection';
 import { Prisma } from '@prisma/client';
 
 describe('UserRepository', () => {

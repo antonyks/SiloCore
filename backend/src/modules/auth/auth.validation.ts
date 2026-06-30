@@ -1,5 +1,5 @@
 import { body, validationResult } from 'express-validator';
-import { Request, Response } from 'express';
+import { NextFunction, Request, Response } from 'express';
 
 export const validateLogin = [
   body('email')
@@ -11,7 +11,7 @@ export const validateLogin = [
     .withMessage('Password must be at least 6 characters long')
 ];
 
-export const handleValidationErrors = (req: Request, res: Response, next: Function) => {
+export const handleValidationErrors = (req: Request, res: Response, next: NextFunction) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({

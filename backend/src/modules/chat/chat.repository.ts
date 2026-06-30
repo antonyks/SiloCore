@@ -14,7 +14,6 @@ import {
   IChatMessageCreateInput,
   IChatSessionListParams
 } from './chat.types';
-import { Prisma } from '@prisma/client';
 
 export const ChatRepository = {
   async createSession(data: IChatSessionCreateInput): Promise<SelectedChatSession> {

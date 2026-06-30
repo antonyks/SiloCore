@@ -46,7 +46,11 @@ describe('UserService', () => {
       });
       expect(bcrypt.hash).toHaveBeenCalledWith(userData.password, BCRYPT_SALT_ROUNDS);
 
-      const {password,...createUserData}={...userData,passwordHash: 'hashedPassword'}
+      const createUserData = {
+        email: userData.email,
+        name: userData.name,
+        passwordHash: 'hashedPassword'
+      };
 
       expect(mockPrisma.user.create).toHaveBeenCalledWith({
         data:createUserData,

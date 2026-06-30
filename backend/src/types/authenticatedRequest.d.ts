@@ -1,6 +1,6 @@
 import { JwtPayload } from 'jsonwebtoken';
 import { SelectedUser } from '../modules/user/user.model';
-import { Request, Response, NextFunction } from 'express';
+import { Request } from 'express';
 
 
 export interface AuthenticatedRequest extends Request {

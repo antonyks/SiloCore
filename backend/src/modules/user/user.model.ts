@@ -20,26 +20,12 @@ type SelectedUser = Prisma.UserGetPayload<{
   select: typeof userSelection 
 }>;
 
-const authSelection = { 
-    ...userSelection, 
-    passwordHash: true 
-} as const;
-
-type AuthUser = Prisma.UserGetPayload<{ 
-  select: typeof authSelection 
-}>;
+type AuthUser = SelectedUser & Pick<User, 'passwordHash'>;
 
 export type { SelectedUser, AuthUser};
 export const SelectedUserFields = userSelection;
 
-const userUpdate = { 
-    name: true, 
-    email: true
-} as const;
-
-type UserUpdateInput = Prisma.UserGetPayload<{ 
-  select: typeof userUpdate 
-}>;
+type UserUpdateInput = Pick<User, 'name' | 'email'>;
 
 export type { UserUpdateInput };
 
