@@ -1,0 +1,28 @@
+meta {
+  name: Chat Message Create
+  type: http
+  seq: 18
+}
+
+post {
+  url: {{host}}/api/chat/messages
+  body: json
+  auth: inherit
+}
+
+headers {
+  Authorization: {{token}}
+}
+
+body:json {
+  {
+    "content": "Manual user message from Bruno",
+    "sessionId": {{sessionId}},
+    "metadata": {}
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

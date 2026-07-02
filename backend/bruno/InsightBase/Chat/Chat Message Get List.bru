@@ -1,0 +1,20 @@
+meta {
+  name: Chat Message Get List
+  type: http
+  seq: 19
+}
+
+get {
+  url: {{host}}/api/chat/{{sessionId}}/messages
+  body: none
+  auth: inherit
+}
+
+headers {
+  Authorization: {{token}}
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

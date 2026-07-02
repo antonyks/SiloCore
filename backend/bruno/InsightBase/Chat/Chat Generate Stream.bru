@@ -1,0 +1,32 @@
+meta {
+  name: Chat Generate Stream
+  type: http
+  seq: 21
+}
+
+post {
+  url: {{host}}/api/chat/{{sessionId}}/generate/stream
+  body: json
+  auth: inherit
+}
+
+headers {
+  Authorization: {{token}}
+  Accept: text/event-stream
+}
+
+body:json {
+  {
+    "content": "Write a short greeting.",
+    "model": "qwen3.5:9B",
+    "temperature": 0.7,
+    "topP": 1,
+    "maxTokens": 2048,
+    "stopSequences": []
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -1,0 +1,31 @@
+meta {
+  name: Chat Generate
+  type: http
+  seq: 20
+}
+
+post {
+  url: {{host}}/api/chat/{{sessionId}}/generate
+  body: json
+  auth: inherit
+}
+
+headers {
+  Authorization: {{token}}
+}
+
+body:json {
+  {
+    "content": "Write a short greeting.",
+    "model": "qwen3.5:9B",
+    "temperature": 0.7,
+    "topP": 1,
+    "maxTokens": 2048,
+    "stopSequences": []
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
