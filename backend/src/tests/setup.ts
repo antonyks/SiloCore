@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { jest } from '@jest/globals';
 import { SelectedUser } from '../modules/user/user.model';
 import { SelectedChatSession, SelectedChatMessage } from '../modules/chat/chat.model';
+import { SelectedLlmProviderConfig } from '../modules/llm/llmProviderConfig.model';
 
 type UserCreateResult = Awaited<ReturnType<PrismaClient['user']['create']>>;
 type chatSessionResult = Awaited<ReturnType<PrismaClient['chatSession']['create']>>;
@@ -27,6 +28,13 @@ const mockPrisma = {
     findMany: jest.fn<() => Promise<SelectedChatMessage[]>>(),
     update: jest.fn<() => Promise<SelectedChatMessage>>(),
     delete: jest.fn<() => Promise<SelectedChatMessage>>(),
+  },
+  llmProviderConfig: {
+    create: jest.fn<() => Promise<SelectedLlmProviderConfig>>(),
+    findUnique: jest.fn<() => Promise<SelectedLlmProviderConfig | null>>(),
+    findMany: jest.fn<() => Promise<SelectedLlmProviderConfig[]>>(),
+    update: jest.fn<() => Promise<SelectedLlmProviderConfig>>(),
+    count: jest.fn<() => Promise<number>>(),
   },
 };
 
@@ -67,6 +75,10 @@ jest.mock('@prisma/client', () => ({
     ASSISTANT: 'ASSISTANT',
     SYSTEM: 'SYSTEM',
   },
+  LlmProviderConfigType: {
+    OLLAMA: 'OLLAMA',
+    OPENAI_COMPATIBLE: 'OPENAI_COMPATIBLE',
+  },
   Prisma: {
     PrismaClientKnownRequestError: MockPrismaClientKnownRequestError,
   },
@@ -86,6 +98,7 @@ jest.mock('uuid', () => ({
 
 jest.mock('jsonwebtoken', () => ({
   sign: jest.fn().mockReturnValue('test-jwt-token'),
+  verify: jest.fn(),
 }));
 
 beforeEach(() => {
@@ -93,6 +106,11 @@ beforeEach(() => {
     mockPrisma.user.findUnique.mockClear();
     mockPrisma.user.findMany.mockClear();
     mockPrisma.user.update.mockClear();
+    mockPrisma.llmProviderConfig.create.mockClear();
+    mockPrisma.llmProviderConfig.findUnique.mockClear();
+    mockPrisma.llmProviderConfig.findMany.mockClear();
+    mockPrisma.llmProviderConfig.update.mockClear();
+    mockPrisma.llmProviderConfig.count.mockClear();
 });
 
 export { mockPrisma };

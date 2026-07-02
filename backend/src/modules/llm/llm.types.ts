@@ -122,8 +122,14 @@ export interface LlmProviderConfig {
   extraHeaders?: Record<string, string>;
 }
 
+/** Runtime source of truth for provider type values exposed by the API/adapters. */
+export const SUPPORTED_LLM_PROVIDER_TYPES = ['ollama', 'openai-compatible'] as const;
+
 /** Discriminated union of supported provider types. */
-export type LlmProviderType = 'ollama' | 'openai-compatible';
+export type LlmProviderType = (typeof SUPPORTED_LLM_PROVIDER_TYPES)[number];
+
+/** DB enum values used by Prisma for persisted provider configs. */
+export type LlmProviderConfigTypeValue = 'OLLAMA' | 'OPENAI_COMPATIBLE';
 
 // ---------------------------------------------------------------------------
 // Provider Capability Flags
@@ -162,6 +168,14 @@ export interface LlmProviderModelListResult {
 export interface LlmModelListResult {
   models: LlmListedModel[];
   providers: LlmProviderModelListResult[];
+}
+
+export interface LlmProviderOperationResult {
+  providerId: string;
+  providerName: string;
+  providerType: LlmProviderType;
+  status: LlmProviderModelListStatus;
+  errorMessage?: string;
 }
 
 // ---------------------------------------------------------------------------

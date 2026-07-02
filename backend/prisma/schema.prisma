@@ -45,6 +45,30 @@ model ChatMessage {
   @@map("chat_messages")
 }
 
+model LlmProviderConfig {
+  id           Int      @id @default(autoincrement())
+  name         String
+  type         LlmProviderConfigType
+  baseUrl      String
+  enabled      Boolean  @default(true)
+  defaultModel String
+  timeoutMs    Int?
+  extraHeaders Json?    @default("{}")
+  apiKey       String?
+  deletedAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([enabled])
+  @@index([deletedAt])
+  @@map("llm_provider_configs")
+}
+
+enum LlmProviderConfigType {
+  OLLAMA
+  OPENAI_COMPATIBLE
+}
+
 enum MessageAuthor {
   USER
   ASSISTANT
