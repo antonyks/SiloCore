@@ -15,6 +15,8 @@ import { mockPrisma } from '../setup';
 
 jest.mock('node-fetch', () => jest.fn());
 
+const TEST_MODEL_ID = process.env.OLLAMA_MODEL as string;
+
 function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): SelectedLlmProviderConfig {
   return {
     id: 1,
@@ -22,7 +24,7 @@ function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): Sel
     type: 'OLLAMA',
     baseUrl: 'http://localhost:11434',
     enabled: true,
-    defaultModel: 'llama2',
+    defaultModel: TEST_MODEL_ID,
     timeoutMs: 5000,
     extraHeaders: {},
     apiKey: null,
@@ -46,9 +48,17 @@ describe('LLM route authorization boundary', () => {
     expect(() => authenticate(req, res, next)).toThrow(AuthenticationError);
   });
 
+  it('blocks unauthenticated requests from provider-specific model listing', () => {
+    const req = createAuthenticatedMockRequest({ headers: {} });
+    const res = createMockResponse();
+    const next = createMockNext();
+
+    expect(() => authenticate(req, res, next)).toThrow(AuthenticationError);
+  });
+
   it('allows authenticated USER requests to common model listing', async () => {
     jest.spyOn(OllamaProvider.prototype, 'listModels')
-      .mockResolvedValue(['llama2']);
+      .mockResolvedValue([TEST_MODEL_ID]);
     (jwt.verify as jest.Mock).mockReturnValue({
       id: 1,
       email: 'user@example.com',
@@ -71,7 +81,38 @@ describe('LLM route authorization boundary', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        models: [expect.objectContaining({ modelId: 'llama2' })],
+        models: [expect.objectContaining({ modelId: TEST_MODEL_ID })],
+      }),
+    });
+  });
+
+  it('allows authenticated USER requests to provider-specific model listing', async () => {
+    jest.spyOn(OllamaProvider.prototype, 'listModels')
+      .mockResolvedValue([TEST_MODEL_ID]);
+    (jwt.verify as jest.Mock).mockReturnValue({
+      id: 1,
+      email: 'user@example.com',
+      name: 'User',
+      role: UserRole.USER,
+      status: UserStatus.ACTIVE,
+      createdAt: new Date(),
+    });
+    mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider());
+    const req = createAuthenticatedMockRequest({
+      headers: { authorization: 'Bearer valid-user-token' },
+      params: { id: '1' },
+    });
+    const res = createMockResponse();
+    const next = createMockNext();
+
+    authenticate(req, res, next);
+    await LlmController.listProviderModels(req, res);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        models: [expect.objectContaining({ providerId: '1', modelId: TEST_MODEL_ID })],
       }),
     });
   });
