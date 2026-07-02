@@ -1,0 +1,20 @@
+meta {
+  name: LLM Provider List
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{host}}/api/admin/llm/providers
+  body: none
+  auth: inherit
+}
+
+headers {
+  Authorization: {{token}}
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

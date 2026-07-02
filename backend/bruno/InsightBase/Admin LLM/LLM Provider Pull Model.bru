@@ -1,0 +1,30 @@
+meta {
+  name: LLM Provider Pull Model
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{host}}/api/admin/llm/providers/:llmProviderId/models/pull
+  body: json
+  auth: inherit
+}
+
+params:path {
+  llmProviderId: 1
+}
+
+headers {
+  Authorization: {{token}}
+}
+
+body:json {
+  {
+    "model": "llama2"
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

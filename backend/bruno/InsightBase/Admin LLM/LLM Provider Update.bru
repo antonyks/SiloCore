@@ -1,0 +1,35 @@
+meta {
+  name: LLM Provider Update
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{host}}/api/admin/llm/providers/:llmProviderId
+  body: json
+  auth: inherit
+}
+
+params:path {
+  llmProviderId: 1
+}
+
+headers {
+  Authorization: {{token}}
+}
+
+body:json {
+  {
+    "name": "Local Ollama",
+    "enabled": true,
+    "defaultModel": "qwen3.5:9b",
+    "timeoutMs": 120000,
+    "extraHeaders": {},
+    "apiKey": null
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

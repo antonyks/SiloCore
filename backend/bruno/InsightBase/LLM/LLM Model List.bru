@@ -1,0 +1,20 @@
+meta {
+  name: LLM Model List
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{host}}/api/llm/models
+  body: none
+  auth: inherit
+}
+
+headers {
+  Authorization: {{token}}
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

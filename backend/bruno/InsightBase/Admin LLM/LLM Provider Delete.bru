@@ -1,0 +1,24 @@
+meta {
+  name: LLM Provider Delete
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{host}}/api/admin/llm/providers/:llmProviderId
+  body: none
+  auth: inherit
+}
+
+params:path {
+  llmProviderId: 2
+}
+
+headers {
+  Authorization: {{token}}
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
