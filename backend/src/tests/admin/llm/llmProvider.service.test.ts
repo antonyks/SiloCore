@@ -8,6 +8,9 @@ import { mockPrisma } from '../../setup';
 
 jest.mock('node-fetch', () => jest.fn());
 
+const TEST_MODEL_ID = process.env.OLLAMA_MODEL as string;
+const SECOND_TEST_MODEL_ID = `${TEST_MODEL_ID}-secondary`;
+
 function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): SelectedLlmProviderConfig {
   return {
     id: 1,
@@ -15,7 +18,7 @@ function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): Sel
     type: 'OLLAMA',
     baseUrl: 'http://localhost:11434',
     enabled: true,
-    defaultModel: 'llama2',
+    defaultModel: TEST_MODEL_ID,
     timeoutMs: 5000,
     extraHeaders: {},
     apiKey: 'secret-key',
@@ -47,7 +50,7 @@ describe('LlmProviderService', () => {
           type: 'OLLAMA',
           baseUrl: expect.any(String),
           enabled: true,
-          defaultModel: 'llama2',
+          defaultModel: TEST_MODEL_ID,
           timeoutMs: null,
           extraHeaders: undefined,
           apiKey: null,
@@ -146,7 +149,7 @@ describe('LlmProviderService', () => {
 
     it('lists models for Ollama providers without leaking secrets', async () => {
       const listModels = jest.spyOn(OllamaProvider.prototype, 'listModels')
-        .mockResolvedValue(['llama2', 'mistral']);
+        .mockResolvedValue([TEST_MODEL_ID, SECOND_TEST_MODEL_ID]);
       const provider = createProvider();
 
       mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(provider);
@@ -155,8 +158,8 @@ describe('LlmProviderService', () => {
 
       expect(listModels).toHaveBeenCalledTimes(1);
       expect(result.models).toEqual([
-        expect.objectContaining({ providerId: '1', modelId: 'llama2' }),
-        expect.objectContaining({ providerId: '1', modelId: 'mistral' }),
+        expect.objectContaining({ providerId: '1', modelId: TEST_MODEL_ID }),
+        expect.objectContaining({ providerId: '1', modelId: SECOND_TEST_MODEL_ID }),
       ]);
       expect(result.providers).toEqual([
         expect.objectContaining({
@@ -174,9 +177,9 @@ describe('LlmProviderService', () => {
 
       mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(provider);
 
-      const result = await LlmProviderService.pullProviderModel(provider.id, 'llama2');
+      const result = await LlmProviderService.pullProviderModel(provider.id, TEST_MODEL_ID);
 
-      expect(pullModel).toHaveBeenCalledWith('llama2');
+      expect(pullModel).toHaveBeenCalledWith(TEST_MODEL_ID);
       expect(result).toEqual(expect.objectContaining({
         providerId: String(provider.id),
         status: 'success',

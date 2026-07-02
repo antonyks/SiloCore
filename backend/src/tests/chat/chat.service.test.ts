@@ -8,6 +8,9 @@ import { OllamaProvider } from '../../modules/llm/providers/ollama.provider';
 
 jest.mock('node-fetch', () => jest.fn());
 
+const TEST_MODEL_ID = process.env.OLLAMA_MODEL as string;
+const EXPLICIT_TEST_MODEL_ID = `${TEST_MODEL_ID}-explicit`;
+
 function createSession(overrides: Partial<ChatSessionWithMessages> = {}): ChatSessionWithMessages {
   return {
     id: 1,
@@ -27,7 +30,7 @@ function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): Sel
     type: 'OLLAMA',
     baseUrl: 'http://localhost:11434',
     enabled: true,
-    defaultModel: 'llama2',
+    defaultModel: TEST_MODEL_ID,
     timeoutMs: 5000,
     extraHeaders: {},
     apiKey: null,
@@ -333,7 +336,7 @@ describe('ChatService', () => {
         content: 'Hello, AI!',
         author: 'USER' as const,
         sessionId: 1,
-        metadata: { model: 'gpt-4', tokens: { prompt: 10, completion: 20, total: 30 } },
+        metadata: { model: TEST_MODEL_ID, tokens: { prompt: 10, completion: 20, total: 30 } },
       };
 
       const mockResult: SelectedChatMessage = {
@@ -429,7 +432,7 @@ describe('ChatService', () => {
           providerId: '1',
           providerName: 'Local Ollama',
           providerType: 'ollama',
-          model: 'llama2',
+          model: TEST_MODEL_ID,
           usage: { promptTokens: 3, completionTokens: 4, totalTokens: 7 },
           latencyMs: 12,
           params: { temperature: 0.2 },
@@ -453,7 +456,7 @@ describe('ChatService', () => {
         .mockResolvedValueOnce(assistantMessage);
       const complete = jest.spyOn(OllamaProvider.prototype, 'complete').mockResolvedValue({
         content: 'Hi there',
-        model: 'llama2',
+        model: TEST_MODEL_ID,
         usage: { promptTokens: 3, completionTokens: 4, totalTokens: 7 },
         latencyMs: 12,
       });
@@ -467,7 +470,7 @@ describe('ChatService', () => {
 
       expect(result).toEqual({ userMessage, assistantMessage });
       expect(complete).toHaveBeenCalledWith(expect.objectContaining({
-        model: 'llama2',
+        model: TEST_MODEL_ID,
         temperature: 0.2,
         messages: [
           { role: 'user', content: 'Previous' },
@@ -483,7 +486,7 @@ describe('ChatService', () => {
             providerId: '1',
             providerName: 'Local Ollama',
             providerType: 'ollama',
-            model: 'llama2',
+            model: TEST_MODEL_ID,
           }),
         }),
         select: SelectedChatMessageFields,
@@ -492,7 +495,7 @@ describe('ChatService', () => {
 
     it('should resolve an explicit provider and model', async () => {
       mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
-      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider({ id: 2, defaultModel: 'default' }));
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider({ id: 2, defaultModel: TEST_MODEL_ID }));
       mockPrisma.chatMessage.create
         .mockResolvedValueOnce({
           id: 1,
@@ -512,7 +515,7 @@ describe('ChatService', () => {
         });
       const complete = jest.spyOn(OllamaProvider.prototype, 'complete').mockResolvedValue({
         content: 'Done',
-        model: 'custom-model',
+        model: EXPLICIT_TEST_MODEL_ID,
       });
 
       await ChatService.generateAssistantResponse({
@@ -520,14 +523,14 @@ describe('ChatService', () => {
         userId: 1,
         content: 'Hello',
         providerId: 2,
-        model: 'custom-model',
+        model: EXPLICIT_TEST_MODEL_ID,
       });
 
       expect(mockPrisma.llmProviderConfig.findUnique).toHaveBeenCalledWith({
         where: { id: 2 },
         select: expect.any(Object),
       });
-      expect(complete).toHaveBeenCalledWith(expect.objectContaining({ model: 'custom-model' }));
+      expect(complete).toHaveBeenCalledWith(expect.objectContaining({ model: EXPLICIT_TEST_MODEL_ID }));
     });
 
     it('should not persist the user message when provider resolution fails', async () => {

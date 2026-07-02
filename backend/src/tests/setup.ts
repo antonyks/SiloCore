@@ -4,6 +4,8 @@ import { SelectedUser } from '../modules/user/user.model';
 import { SelectedChatSession, SelectedChatMessage } from '../modules/chat/chat.model';
 import { SelectedLlmProviderConfig } from '../modules/llm/llmProviderConfig.model';
 
+process.env.OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? `test-${Date.now()}`;
+
 type UserCreateResult = Awaited<ReturnType<PrismaClient['user']['create']>>;
 type chatSessionResult = Awaited<ReturnType<PrismaClient['chatSession']['create']>>;
 type chatMessageResult = Awaited<ReturnType<PrismaClient['chatMessage']['create']>>;

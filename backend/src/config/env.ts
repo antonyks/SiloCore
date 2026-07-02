@@ -14,5 +14,5 @@ export const ENV = {
   JWT_SECRET: ensureEnvVar('JWT_SECRET'),
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
   OLLAMA_HOST: process.env.OLLAMA_HOST || 'http://host.docker.internal:11434',
-  OLLAMA_MODEL: process.env.OLLAMA_MODEL || 'llama2'
+  OLLAMA_MODEL: ensureEnvVar('OLLAMA_MODEL')
 };

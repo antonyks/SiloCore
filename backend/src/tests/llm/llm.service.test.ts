@@ -15,6 +15,10 @@ const DEFAULT_CAPABILITIES: LlmProviderCapabilities = {
   supportsToolCalls: false,
   supportsVision: false,
 };
+const TEST_MODEL_ID = process.env.OLLAMA_MODEL as string;
+const SECOND_TEST_MODEL_ID = `${TEST_MODEL_ID}-secondary`;
+const CLOUD_TEST_MODEL_ID = `${TEST_MODEL_ID}-cloud`;
+const DISABLED_TEST_MODEL_ID = `${TEST_MODEL_ID}-disabled`;
 
 function createProvider(
   config: Partial<LlmProviderConfig> & Pick<LlmProviderConfig, 'id' | 'name' | 'type'>,
@@ -23,7 +27,7 @@ function createProvider(
   const fullConfig: LlmProviderConfig = {
     enabled: true,
     baseUrl: `http://${config.id}.local`,
-    defaultModel: 'default-model',
+    defaultModel: TEST_MODEL_ID,
     ...config,
   };
 
@@ -43,8 +47,8 @@ function createProvider(
 
 describe('LlmRegistryService', () => {
   it('aggregates provider-qualified models from multiple enabled providers', async () => {
-    const ollamaListModels = jest.fn<() => Promise<string[]>>().mockResolvedValue(['llama2', 'mistral']);
-    const cloudListModels = jest.fn<() => Promise<string[]>>().mockResolvedValue(['gpt-local']);
+    const ollamaListModels = jest.fn<() => Promise<string[]>>().mockResolvedValue([TEST_MODEL_ID, SECOND_TEST_MODEL_ID]);
+    const cloudListModels = jest.fn<() => Promise<string[]>>().mockResolvedValue([CLOUD_TEST_MODEL_ID]);
     const service = new LlmRegistryService([
       createProvider({ id: 'ollama', name: 'Local Ollama', type: 'ollama' }, ollamaListModels),
       createProvider({ id: 'cloud', name: 'Cloud Provider', type: 'openai-compatible' }, cloudListModels),
@@ -57,22 +61,22 @@ describe('LlmRegistryService', () => {
         providerId: 'ollama',
         providerName: 'Local Ollama',
         providerType: 'ollama',
-        modelId: 'llama2',
-        modelName: 'llama2',
+        modelId: TEST_MODEL_ID,
+        modelName: TEST_MODEL_ID,
       },
       {
         providerId: 'ollama',
         providerName: 'Local Ollama',
         providerType: 'ollama',
-        modelId: 'mistral',
-        modelName: 'mistral',
+        modelId: SECOND_TEST_MODEL_ID,
+        modelName: SECOND_TEST_MODEL_ID,
       },
       {
         providerId: 'cloud',
         providerName: 'Cloud Provider',
         providerType: 'openai-compatible',
-        modelId: 'gpt-local',
-        modelName: 'gpt-local',
+        modelId: CLOUD_TEST_MODEL_ID,
+        modelName: CLOUD_TEST_MODEL_ID,
       },
     ]);
     expect(result.providers).toEqual([
@@ -94,7 +98,7 @@ describe('LlmRegistryService', () => {
   });
 
   it('skips disabled providers without calling listModels', async () => {
-    const disabledListModels = jest.fn<() => Promise<string[]>>().mockResolvedValue(['disabled-model']);
+    const disabledListModels = jest.fn<() => Promise<string[]>>().mockResolvedValue([DISABLED_TEST_MODEL_ID]);
     const service = new LlmRegistryService([
       createProvider(
         { id: 'disabled', name: 'Disabled Provider', type: 'ollama', enabled: false },
@@ -120,7 +124,7 @@ describe('LlmRegistryService', () => {
   });
 
   it('returns partial model results when one provider fails', async () => {
-    const successfulListModels = jest.fn<() => Promise<string[]>>().mockResolvedValue(['llama2']);
+    const successfulListModels = jest.fn<() => Promise<string[]>>().mockResolvedValue([TEST_MODEL_ID]);
     const failingListModels = jest.fn<() => Promise<string[]>>().mockRejectedValue(new Error('provider offline'));
     const service = new LlmRegistryService([
       createProvider({ id: 'ollama', name: 'Local Ollama', type: 'ollama' }, successfulListModels),
@@ -134,8 +138,8 @@ describe('LlmRegistryService', () => {
         providerId: 'ollama',
         providerName: 'Local Ollama',
         providerType: 'ollama',
-        modelId: 'llama2',
-        modelName: 'llama2',
+        modelId: TEST_MODEL_ID,
+        modelName: TEST_MODEL_ID,
       },
     ]);
     expect(result.providers).toEqual([

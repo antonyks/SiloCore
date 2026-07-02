@@ -7,6 +7,7 @@ jest.mock('node-fetch', () => jest.fn());
 
 const mockedFetch = fetch as jest.MockedFunction<typeof fetch>;
 const TEST_BASE_URL = 'http://localhost:11434';
+const TEST_MODEL_ID = process.env.OLLAMA_MODEL as string;
 
 function createProvider(config?: Partial<LlmProviderConfig>): OllamaProvider {
   return new OllamaProvider({
@@ -15,7 +16,7 @@ function createProvider(config?: Partial<LlmProviderConfig>): OllamaProvider {
     type: 'ollama',
     enabled: true,
     baseUrl: TEST_BASE_URL,
-    defaultModel: 'llama2',
+    defaultModel: TEST_MODEL_ID,
     timeoutMs: 30000,
     ...config,
   });
@@ -71,13 +72,13 @@ describe('OllamaProvider timeouts', () => {
   it('passes configured timeout signal to complete requests', async () => {
     mockedFetch.mockResolvedValue(mockResponse({
       json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
-        model: 'llama2',
+        model: TEST_MODEL_ID,
         message: { content: 'Hello' },
       }),
     }));
 
     await createProvider().complete({
-      model: 'llama2',
+      model: TEST_MODEL_ID,
       messages: [{ role: 'user', content: 'Hi' }],
     });
 
@@ -92,7 +93,7 @@ describe('OllamaProvider timeouts', () => {
     mockedFetch.mockResolvedValue(mockResponse());
 
     const chunks = createProvider().streamComplete({
-      model: 'llama2',
+      model: TEST_MODEL_ID,
       messages: [{ role: 'user', content: 'Hi' }],
     });
 
@@ -120,7 +121,7 @@ describe('OllamaProvider timeouts', () => {
   it('passes configured timeout signal when pulling models', async () => {
     mockedFetch.mockResolvedValue(mockResponse());
 
-    await createProvider().pullModel('llama2');
+    await createProvider().pullModel(TEST_MODEL_ID);
 
     expect(timeoutSpy).toHaveBeenCalledWith(30000);
     expect(mockedFetch).toHaveBeenCalledWith(
@@ -152,7 +153,7 @@ describe('OllamaProvider headers', () => {
   it('passes api key, extra headers, and content type to complete requests', async () => {
     mockedFetch.mockResolvedValue(mockResponse({
       json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
-        model: 'llama2',
+        model: TEST_MODEL_ID,
         message: { content: 'Hello' },
       }),
     }));
@@ -161,7 +162,7 @@ describe('OllamaProvider headers', () => {
       apiKey: 'secret-token',
       extraHeaders: { 'X-Provider': 'ollama' },
     }).complete({
-      model: 'llama2',
+      model: TEST_MODEL_ID,
       messages: [{ role: 'user', content: 'Hi' }],
     });
 
@@ -179,7 +180,7 @@ describe('OllamaProvider headers', () => {
       apiKey: 'secret-token',
       extraHeaders: { 'X-Provider': 'ollama' },
     }).streamComplete({
-      model: 'llama2',
+      model: TEST_MODEL_ID,
       messages: [{ role: 'user', content: 'Hi' }],
     });
 
@@ -212,7 +213,7 @@ describe('OllamaProvider headers', () => {
     await createProvider({
       apiKey: 'secret-token',
       extraHeaders: { 'X-Provider': 'ollama' },
-    }).pullModel('llama2');
+    }).pullModel(TEST_MODEL_ID);
 
     expect(getFetchOptions().headers).toEqual({
       'Content-Type': 'application/json',
@@ -248,7 +249,7 @@ describe('OllamaProvider streaming errors', () => {
     }));
 
     const chunks = createProvider().streamComplete({
-      model: 'llama2',
+      model: TEST_MODEL_ID,
       messages: [{ role: 'user', content: 'Hi' }],
     });
     const nextChunk = chunks[Symbol.asyncIterator]().next();

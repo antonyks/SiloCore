@@ -4,6 +4,9 @@ import { SelectedChatSession, ChatSessionWithMessages, SelectedChatMessage, Mess
 import { Prisma } from '@prisma/client';
 import { IChatMetadata } from '../../modules/chat/chat.types'
 
+const TEST_MODEL_ID = process.env.OLLAMA_MODEL as string;
+const SECOND_TEST_MODEL_ID = `${TEST_MODEL_ID}-secondary`;
+
 describe('ChatRepository', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -248,14 +251,14 @@ describe('ChatRepository', () => {
         content: 'Hello, AI!',
         author: MessageAuthor.USER,
         sessionId: 1,
-        metadata: { model: 'gpt-4', tokens: { prompt: 10, completion: 5 } },
+        metadata: { model: TEST_MODEL_ID, tokens: { prompt: 10, completion: 5 } },
       };
 
       const mockMessage: SelectedChatMessage = {
         id: 1,
         content: 'Hello, AI!',
         author: MessageAuthor.USER,
-        metadata: { model: 'gpt-4', tokens: { prompt: 10, completion: 5 } },
+        metadata: { model: TEST_MODEL_ID, tokens: { prompt: 10, completion: 5 } },
         sessionId: 1,
         createdAt: new Date(),
       };
@@ -381,7 +384,7 @@ describe('ChatRepository', () => {
           content: 'Complex response',
           author: MessageAuthor.ASSISTANT,
           metadata: {
-            model: 'gpt-4-turbo',
+            model: SECOND_TEST_MODEL_ID,
             latency: 250,
             tokens: {
               prompt: 45,

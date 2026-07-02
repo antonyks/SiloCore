@@ -7,6 +7,8 @@ import { mockPrisma } from '../../setup';
 
 jest.mock('node-fetch', () => jest.fn());
 
+const TEST_MODEL_ID = process.env.OLLAMA_MODEL as string;
+
 function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): SelectedLlmProviderConfig {
   return {
     id: 1,
@@ -14,7 +16,7 @@ function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): Sel
     type: 'OLLAMA',
     baseUrl: 'http://localhost:11434',
     enabled: true,
-    defaultModel: 'llama2',
+    defaultModel: TEST_MODEL_ID,
     timeoutMs: 5000,
     extraHeaders: {},
     apiKey: 'secret-key',
