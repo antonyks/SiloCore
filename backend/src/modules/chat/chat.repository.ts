@@ -59,7 +59,7 @@ export const ChatRepository = {
     });
   },
 
-  async createMessage(data: IChatMessageCreateInput): Promise<SelectedChatMessage | null> {
+  async createMessage(data: IChatMessageCreateInput): Promise<SelectedChatMessage> {
     return ChatMessageModel.create({
       data:data,
       select:SelectedChatMessageFields

@@ -3,8 +3,47 @@ import { ChatService } from '../../modules/chat/chat.service';
 import { mockPrisma } from '../setup';
 import { NotFoundError, AuthenticationError } from '../../errors';
 import { SelectedChatSession, ChatSessionWithMessages, SelectedChatMessage, SelectedChatSessionFields, ChatSessionWithMessagesFields, SelectedChatMessageFields } from '../../modules/chat/chat.model';
+import { SelectedLlmProviderConfig } from '../../modules/llm/llmProviderConfig.model';
+import { OllamaProvider } from '../../modules/llm/providers/ollama.provider';
+
+jest.mock('node-fetch', () => jest.fn());
+
+function createSession(overrides: Partial<ChatSessionWithMessages> = {}): ChatSessionWithMessages {
+  return {
+    id: 1,
+    title: 'Test Session',
+    userId: 1,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    messages: [],
+    ...overrides,
+  };
+}
+
+function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): SelectedLlmProviderConfig {
+  return {
+    id: 1,
+    name: 'Local Ollama',
+    type: 'OLLAMA',
+    baseUrl: 'http://localhost:11434',
+    enabled: true,
+    defaultModel: 'llama2',
+    timeoutMs: 5000,
+    extraHeaders: {},
+    apiKey: null,
+    deletedAt: null,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
 
 describe('ChatService', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
+
   describe('createSession', () => {
     it('should create a new chat session successfully', async () => {
       const inputData = {
@@ -306,11 +345,16 @@ describe('ChatService', () => {
         createdAt: new Date(),
       };
 
+      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
       mockPrisma.chatMessage.create.mockResolvedValue(mockResult);
 
-      const result = await ChatService.createMessage(inputData);
+      const result = await ChatService.createMessage(inputData, 1);
 
       expect(result).toEqual(mockResult);
+      expect(mockPrisma.chatSession.findUnique).toHaveBeenCalledWith({
+        where: { id: inputData.sessionId },
+        select: ChatSessionWithMessagesFields,
+      });
       expect(mockPrisma.chatMessage.create).toHaveBeenCalledWith({
         data: inputData,
         select: SelectedChatMessageFields,
@@ -333,11 +377,280 @@ describe('ChatService', () => {
         createdAt: new Date(),
       };
 
+      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
       mockPrisma.chatMessage.create.mockResolvedValue(mockResult);
 
-      const result = await ChatService.createMessage(inputData);
+      const result = await ChatService.createMessage(inputData, 1);
 
       expect(result).toEqual(mockResult);
+    });
+
+    it('should not create a message when the session does not exist', async () => {
+      mockPrisma.chatSession.findUnique.mockResolvedValue(null);
+
+      await expect(ChatService.createMessage({
+        content: 'Hello',
+        author: 'USER',
+        sessionId: 999,
+      }, 1)).rejects.toThrow(new NotFoundError('Session not found'));
+
+      expect(mockPrisma.chatMessage.create).not.toHaveBeenCalled();
+    });
+
+    it('should not create a message when the user does not own the session', async () => {
+      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession({ userId: 2 }));
+
+      await expect(ChatService.createMessage({
+        content: 'Hello',
+        author: 'USER',
+        sessionId: 1,
+      }, 1)).rejects.toThrow(new AuthenticationError('Access denied to this session'));
+
+      expect(mockPrisma.chatMessage.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('generateAssistantResponse', () => {
+    it('should persist user and assistant messages with provider metadata', async () => {
+      const userMessage: SelectedChatMessage = {
+        id: 1,
+        content: 'Hello',
+        author: 'USER',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      };
+      const assistantMessage: SelectedChatMessage = {
+        id: 2,
+        content: 'Hi there',
+        author: 'ASSISTANT',
+        sessionId: 1,
+        metadata: {
+          providerId: '1',
+          providerName: 'Local Ollama',
+          providerType: 'ollama',
+          model: 'llama2',
+          usage: { promptTokens: 3, completionTokens: 4, totalTokens: 7 },
+          latencyMs: 12,
+          params: { temperature: 0.2 },
+        },
+        createdAt: new Date(),
+      };
+
+      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession({
+        messages: [
+          {
+            id: 10,
+            content: 'Previous',
+            author: 'USER',
+            createdAt: new Date(),
+          },
+        ],
+      }));
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
+      mockPrisma.chatMessage.create
+        .mockResolvedValueOnce(userMessage)
+        .mockResolvedValueOnce(assistantMessage);
+      const complete = jest.spyOn(OllamaProvider.prototype, 'complete').mockResolvedValue({
+        content: 'Hi there',
+        model: 'llama2',
+        usage: { promptTokens: 3, completionTokens: 4, totalTokens: 7 },
+        latencyMs: 12,
+      });
+
+      const result = await ChatService.generateAssistantResponse({
+        sessionId: 1,
+        userId: 1,
+        content: 'Hello',
+        temperature: 0.2,
+      });
+
+      expect(result).toEqual({ userMessage, assistantMessage });
+      expect(complete).toHaveBeenCalledWith(expect.objectContaining({
+        model: 'llama2',
+        temperature: 0.2,
+        messages: [
+          { role: 'user', content: 'Previous' },
+          { role: 'user', content: 'Hello' },
+        ],
+      }));
+      expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, {
+        data: expect.objectContaining({
+          content: 'Hi there',
+          author: 'ASSISTANT',
+          sessionId: 1,
+          metadata: expect.objectContaining({
+            providerId: '1',
+            providerName: 'Local Ollama',
+            providerType: 'ollama',
+            model: 'llama2',
+          }),
+        }),
+        select: SelectedChatMessageFields,
+      });
+    });
+
+    it('should resolve an explicit provider and model', async () => {
+      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider({ id: 2, defaultModel: 'default' }));
+      mockPrisma.chatMessage.create
+        .mockResolvedValueOnce({
+          id: 1,
+          content: 'Hello',
+          author: 'USER',
+          sessionId: 1,
+          metadata: null,
+          createdAt: new Date(),
+        })
+        .mockResolvedValueOnce({
+          id: 2,
+          content: 'Done',
+          author: 'ASSISTANT',
+          sessionId: 1,
+          metadata: null,
+          createdAt: new Date(),
+        });
+      const complete = jest.spyOn(OllamaProvider.prototype, 'complete').mockResolvedValue({
+        content: 'Done',
+        model: 'custom-model',
+      });
+
+      await ChatService.generateAssistantResponse({
+        sessionId: 1,
+        userId: 1,
+        content: 'Hello',
+        providerId: 2,
+        model: 'custom-model',
+      });
+
+      expect(mockPrisma.llmProviderConfig.findUnique).toHaveBeenCalledWith({
+        where: { id: 2 },
+        select: expect.any(Object),
+      });
+      expect(complete).toHaveBeenCalledWith(expect.objectContaining({ model: 'custom-model' }));
+    });
+
+    it('should not persist the user message when provider resolution fails', async () => {
+      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([]);
+
+      await expect(ChatService.generateAssistantResponse({
+        sessionId: 1,
+        userId: 1,
+        content: 'Hello',
+      })).rejects.toThrow('LLM provider config not found');
+
+      expect(mockPrisma.chatMessage.create).not.toHaveBeenCalled();
+    });
+
+    it('should reject disabled explicit providers before persisting the user message', async () => {
+      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider({ enabled: false }));
+
+      await expect(ChatService.generateAssistantResponse({
+        sessionId: 1,
+        userId: 1,
+        content: 'Hello',
+        providerId: 1,
+      })).rejects.toThrow('LLM provider is disabled');
+
+      expect(mockPrisma.chatMessage.create).not.toHaveBeenCalled();
+    });
+
+    it('should reject deleted explicit providers before persisting the user message', async () => {
+      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider({ deletedAt: new Date() }));
+
+      await expect(ChatService.generateAssistantResponse({
+        sessionId: 1,
+        userId: 1,
+        content: 'Hello',
+        providerId: 1,
+      })).rejects.toThrow('LLM provider config not found');
+
+      expect(mockPrisma.chatMessage.create).not.toHaveBeenCalled();
+    });
+
+    it('should not persist an assistant message when the provider fails', async () => {
+      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
+      mockPrisma.chatMessage.create.mockResolvedValueOnce({
+        id: 1,
+        content: 'Hello',
+        author: 'USER',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      });
+      jest.spyOn(OllamaProvider.prototype, 'complete').mockRejectedValue(new Error('provider offline'));
+
+      await expect(ChatService.generateAssistantResponse({
+        sessionId: 1,
+        userId: 1,
+        content: 'Hello',
+      })).rejects.toThrow('provider offline');
+
+      expect(mockPrisma.chatMessage.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('streamAssistantResponse', () => {
+    async function* streamChunks() {
+      yield { content: 'Hi' };
+      yield { content: ' there', usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 } };
+    }
+
+    it('should emit streaming events and persist the final assistant message', async () => {
+      const userMessage: SelectedChatMessage = {
+        id: 1,
+        content: 'Hello',
+        author: 'USER',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      };
+      const assistantMessage: SelectedChatMessage = {
+        id: 2,
+        content: 'Hi there',
+        author: 'ASSISTANT',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      };
+
+      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
+      mockPrisma.chatMessage.create
+        .mockResolvedValueOnce(userMessage)
+        .mockResolvedValueOnce(assistantMessage);
+      jest.spyOn(OllamaProvider.prototype, 'streamComplete').mockReturnValue(streamChunks());
+
+      const events = [];
+      for await (const event of ChatService.streamAssistantResponse({
+        sessionId: 1,
+        userId: 1,
+        content: 'Hello',
+      })) {
+        events.push(event);
+      }
+
+      expect(events).toEqual([
+        { event: 'user_message', data: userMessage },
+        { event: 'delta', data: { content: 'Hi' } },
+        { event: 'delta', data: { content: ' there' } },
+        { event: 'assistant_message', data: assistantMessage },
+        { event: 'done', data: { done: true } },
+      ]);
+      expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, {
+        data: expect.objectContaining({
+          content: 'Hi there',
+          author: 'ASSISTANT',
+          metadata: expect.objectContaining({
+            usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 },
+          }),
+        }),
+        select: SelectedChatMessageFields,
+      });
     });
   });
 

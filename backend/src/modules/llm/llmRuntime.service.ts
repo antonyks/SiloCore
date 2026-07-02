@@ -1,5 +1,5 @@
 import { ENV } from '../../config/env';
-import { NotFoundError } from '../../errors';
+import { InvalidInputError, NotFoundError } from '../../errors';
 import { ILlmProvider } from './llm.interface';
 import { LlmProviderConfigRepository } from './llmProviderConfig.repository';
 import { fromDbProviderType } from './llmProviderConfig.types';
@@ -9,6 +9,7 @@ import {
   LlmModelListResult,
   LlmProviderConfig,
   LlmProviderOperationResult,
+  LlmStreamChunk,
   LlmProviderType,
 } from './llm.types';
 import { OllamaProvider } from './providers/ollama.provider';
@@ -73,6 +74,16 @@ function toProviderModelListResult(result: LlmProviderOperationResult) {
   };
 }
 
+function createFailingStream(error: Error): AsyncIterable<LlmStreamChunk> {
+  const iterator: AsyncIterator<LlmStreamChunk> = {
+    next: async () => Promise.reject(error),
+  };
+
+  return {
+    [Symbol.asyncIterator]: () => iterator,
+  };
+}
+
 export const LlmRuntimeService = {
   normalizeExtraHeaders,
 
@@ -127,9 +138,9 @@ export const LlmRuntimeService = {
         complete: async () => {
           throw new Error(`No adapter is available for provider type ${config.type}`);
         },
-        streamComplete: async function* () {
-          throw new Error(`No adapter is available for provider type ${config.type}`);
-        },
+        streamComplete: () => createFailingStream(
+          new Error(`No adapter is available for provider type ${config.type}`),
+        ),
         listModels: async () => {
           throw new Error(`No adapter is available for provider type ${config.type}`);
         },
@@ -219,6 +230,35 @@ export const LlmRuntimeService = {
         errorMessage: getErrorMessage(error),
       };
     }
+  },
+
+  async resolveGenerationProvider(params: { providerId?: number; model?: string }): Promise<{
+    providerConfig: SelectedLlmProviderConfig;
+    provider: ILlmProvider;
+    model: string;
+  }> {
+    const providerConfig = params.providerId === undefined
+      ? (await LlmProviderConfigRepository.findActive())[0]
+      : await LlmProviderConfigRepository.findById(params.providerId);
+
+    if (!providerConfig || providerConfig.deletedAt) {
+      throw new NotFoundError('LLM provider config not found');
+    }
+
+    if (!providerConfig.enabled) {
+      throw new InvalidInputError('LLM provider is disabled');
+    }
+
+    const provider = this.createProvider(providerConfig);
+    if (!provider) {
+      throw new InvalidInputError(`No adapter is available for provider type ${fromDbProviderType(providerConfig.type)}`);
+    }
+
+    return {
+      providerConfig,
+      provider,
+      model: params.model ?? providerConfig.defaultModel,
+    };
   },
 };
 

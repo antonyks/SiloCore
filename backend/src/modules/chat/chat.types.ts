@@ -48,6 +48,35 @@ export interface IChatMessageCreateInput {
   metadata?: Prisma.InputJsonObject;
 }
 
+export interface IChatGenerationParams {
+  temperature?: number;
+  topP?: number;
+  maxTokens?: number;
+  stopSequences?: string[];
+}
+
+export interface IChatGenerationInput extends IChatGenerationParams {
+  content: string;
+  providerId?: number;
+  model?: string;
+}
+
+export interface IChatGenerationServiceInput extends IChatGenerationInput {
+  sessionId: number;
+  userId: number;
+}
+
+export interface IChatGenerationResult {
+  userMessage: import('./chat.model').SelectedChatMessage;
+  assistantMessage: import('./chat.model').SelectedChatMessage;
+}
+
+export type ChatGenerationStreamEvent =
+  | { event: 'user_message'; data: import('./chat.model').SelectedChatMessage }
+  | { event: 'delta'; data: { content: string } }
+  | { event: 'assistant_message'; data: import('./chat.model').SelectedChatMessage }
+  | { event: 'done'; data: { done: true } };
+
 export interface IChatSessionListParams {
   userId: number;
   skip?: number;

@@ -2,8 +2,40 @@ import { Response } from 'express';
 import { AuthenticatedRequest } from '../../types/authenticatedRequest';
 import { ChatService } from './chat.service';
 import { InvalidInputError } from '../../errors';
-import { IChatSessionCreateInput, IChatSessionUpdateInput, IChatMessageCreateInput, IChatSessionListParams } from './chat.types';
+import {
+  ChatGenerationStreamEvent,
+  IChatGenerationInput,
+  IChatSessionCreateInput,
+  IChatSessionUpdateInput,
+  IChatMessageCreateInput,
+  IChatSessionListParams,
+} from './chat.types';
 import { MessageAuthor } from './chat.model';
+
+function parseSessionId(value: string): number {
+  const id = parseInt(value, 10);
+  if (isNaN(id)) {
+    throw new InvalidInputError(`The ID parameter '${value}' is not a valid number.`);
+  }
+  return id;
+}
+
+function writeSseEvent(res: Response, event: string, data: unknown): void {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+function toGenerationInput(body: IChatGenerationInput): IChatGenerationInput {
+  return {
+    content: body.content,
+    providerId: body.providerId === undefined ? undefined : Number(body.providerId),
+    model: body.model,
+    temperature: body.temperature === undefined ? undefined : Number(body.temperature),
+    topP: body.topP === undefined ? undefined : Number(body.topP),
+    maxTokens: body.maxTokens === undefined ? undefined : Number(body.maxTokens),
+    stopSequences: body.stopSequences,
+  };
+}
 
 export const ChatController = {
   async createSession(req: AuthenticatedRequest, res: Response): Promise<void> {
@@ -53,11 +85,7 @@ export const ChatController = {
   async getSessionById(req: AuthenticatedRequest, res: Response): Promise<void> {
     const userId = req.user?.id;
     const idString: string = req.params.id;
-    const id: number = parseInt(idString, 10);
-    
-    if (isNaN(id)) {
-      throw new InvalidInputError(`The ID parameter '${idString}' is not a valid number.`);
-    }
+    const id: number = parseSessionId(idString);
     
     if (!userId) {
       throw new InvalidInputError('User ID is required');
@@ -70,11 +98,7 @@ export const ChatController = {
   async updateSession(req: AuthenticatedRequest, res: Response): Promise<void> {
     const userId = req.user?.id;
     const idString: string = req.params.id;
-    const id: number = parseInt(idString, 10);
-    
-    if (isNaN(id)) {
-      throw new InvalidInputError(`The ID parameter '${idString}' is not a valid number.`);
-    }
+    const id: number = parseSessionId(idString);
     
     if (!userId) {
       throw new InvalidInputError('User ID is required');
@@ -88,11 +112,7 @@ export const ChatController = {
   async deleteSession(req: AuthenticatedRequest, res: Response): Promise<void> {
     const userId = req.user?.id;
     const idString: string = req.params.id;
-    const id: number = parseInt(idString, 10);
-    
-    if (isNaN(id)) {
-      throw new InvalidInputError(`The ID parameter '${idString}' is not a valid number.`);
-    }
+    const id: number = parseSessionId(idString);
     
     if (!userId) {
       throw new InvalidInputError('User ID is required');
@@ -118,18 +138,14 @@ export const ChatController = {
       metadata 
     };
     
-    const message = await ChatService.createMessage(data);
+    const message = await ChatService.createMessage(data, userId);
     res.status(201).json({ data: message });
   },
 
   async getMessagesBySessionId(req: AuthenticatedRequest, res: Response): Promise<void> {
     const userId = req.user?.id;
     const idString: string = req.params.id;
-    const id: number = parseInt(idString, 10);
-    
-    if (isNaN(id)) {
-      throw new InvalidInputError(`The ID parameter '${idString}' is not a valid number.`);
-    }
+    const id: number = parseSessionId(idString);
     
     if (!userId) {
       throw new InvalidInputError('User ID is required');
@@ -137,5 +153,62 @@ export const ChatController = {
     
     const messages = await ChatService.getMessagesBySessionId(id, userId);
     res.status(200).json({ data: messages });
+  },
+
+  async generateAssistantResponse(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const userId = req.user?.id;
+    const sessionId = parseSessionId(req.params.id);
+
+    if (!userId) {
+      throw new InvalidInputError('User ID is required');
+    }
+
+    const result = await ChatService.generateAssistantResponse({
+      ...toGenerationInput(req.body),
+      sessionId,
+      userId,
+    });
+
+    res.status(201).json({ data: result });
+  },
+
+  async streamAssistantResponse(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const userId = req.user?.id;
+    const sessionId = parseSessionId(req.params.id);
+
+    if (!userId) {
+      throw new InvalidInputError('User ID is required');
+    }
+
+    const events = ChatService.streamAssistantResponse({
+      ...toGenerationInput(req.body),
+      sessionId,
+      userId,
+    })[Symbol.asyncIterator]();
+    const firstEvent = await events.next();
+
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    try {
+      if (!firstEvent.done) {
+        writeSseEvent(res, firstEvent.value.event, firstEvent.value.data);
+      }
+
+      while (true) {
+        const nextEvent = await events.next();
+        if (nextEvent.done) break;
+        const event: ChatGenerationStreamEvent = nextEvent.value;
+        writeSseEvent(res, event.event, event.data);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Streaming failed';
+      writeSseEvent(res, 'error', { message });
+    } finally {
+      res.end();
+    }
   }
 };

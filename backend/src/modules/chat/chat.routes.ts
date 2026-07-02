@@ -2,7 +2,14 @@
 import { Router } from 'express';
 import { ChatController } from './chat.controller';
 import { authenticate } from '../../middleware';
-import { handleValidationErrors, validateChatSessionCreate, validateChatSessionUpdate, validateChatMessageCreate, validateSessionId } from './chat.validation';
+import {
+  handleValidationErrors,
+  validateChatGeneration,
+  validateChatSessionCreate,
+  validateChatSessionUpdate,
+  validateChatMessageCreate,
+  validateSessionId,
+} from './chat.validation';
 
 const router = Router();
 
@@ -39,6 +46,22 @@ router.delete('/:id',
   validateSessionId,
   handleValidationErrors,
   ChatController.deleteSession
+);
+
+router.post('/:id/generate',
+  authenticate,
+  validateSessionId,
+  validateChatGeneration,
+  handleValidationErrors,
+  ChatController.generateAssistantResponse
+);
+
+router.post('/:id/generate/stream',
+  authenticate,
+  validateSessionId,
+  validateChatGeneration,
+  handleValidationErrors,
+  ChatController.streamAssistantResponse
 );
 
 // Message routes
