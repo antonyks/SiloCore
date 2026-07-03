@@ -2,6 +2,7 @@ import axios, { AxiosError, type AxiosInstance } from "axios";
 import { API_BASE_URL } from "../config/constants";
 import { logger } from './logger';
 import { logoutAndRedirect } from "./navigation";
+import { storage } from "./storage";
 
 const axiosClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
@@ -13,7 +14,7 @@ const axiosClient: AxiosInstance = axios.create({
 
 axiosClient.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("token");
+    const token = storage.getToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
