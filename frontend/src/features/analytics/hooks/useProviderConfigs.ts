@@ -4,6 +4,7 @@ import type { LlmProviderConfigInput } from "../types";
 
 export const providerConfigQueryKeys = {
   providers: ["admin-dashboard", "providers"] as const,
+  models: ["admin-dashboard", "models"] as const,
 };
 
 export const useProviderConfigs = () => {
@@ -43,6 +44,29 @@ export const useDeleteProviderConfig = () => {
     mutationFn: (id: number) => providerConfigService.deleteProvider(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: providerConfigQueryKeys.providers });
+    },
+  });
+};
+
+export const useTestProviderConfig = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: number) => providerConfigService.testProvider(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: providerConfigQueryKeys.models });
+    },
+  });
+};
+
+export const usePullProviderModel = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, model }: { id: number; model: string }) =>
+      providerConfigService.pullProviderModel(id, model),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: providerConfigQueryKeys.models });
     },
   });
 };

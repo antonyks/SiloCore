@@ -47,6 +47,14 @@ export interface LlmProviderModelListResult {
   errorMessage?: string;
 }
 
+export interface LlmProviderOperationResult {
+  providerId: string;
+  providerName: string;
+  providerType: LlmProviderType;
+  status: LlmProviderModelListStatus;
+  errorMessage?: string;
+}
+
 export interface LlmModelListResult {
   models: LlmListedModel[];
   providers: LlmProviderModelListResult[];

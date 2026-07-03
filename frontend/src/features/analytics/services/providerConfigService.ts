@@ -1,6 +1,10 @@
 import axiosClient from "../../../lib/axiosClient";
 import type { ApiResponse } from "../../../types/api";
-import type { LlmProviderConfigInput, SanitizedLlmProviderConfig } from "../types";
+import type {
+  LlmProviderConfigInput,
+  LlmProviderOperationResult,
+  SanitizedLlmProviderConfig,
+} from "../types";
 
 export const providerConfigService = {
   async getProviders(): Promise<SanitizedLlmProviderConfig[]> {
@@ -35,6 +39,23 @@ export const providerConfigService = {
   async deleteProvider(id: number): Promise<SanitizedLlmProviderConfig> {
     const { data } = await axiosClient.delete<ApiResponse<SanitizedLlmProviderConfig>>(
       `/admin/llm/providers/${id}`,
+    );
+
+    return data.data;
+  },
+
+  async testProvider(id: number): Promise<LlmProviderOperationResult> {
+    const { data } = await axiosClient.post<ApiResponse<LlmProviderOperationResult>>(
+      `/admin/llm/providers/${id}/test`,
+    );
+
+    return data.data;
+  },
+
+  async pullProviderModel(id: number, model: string): Promise<LlmProviderOperationResult> {
+    const { data } = await axiosClient.post<ApiResponse<LlmProviderOperationResult>>(
+      `/admin/llm/providers/${id}/models/pull`,
+      { model },
     );
 
     return data.data;
