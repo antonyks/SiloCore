@@ -7,6 +7,7 @@ import Dashboard from '../features/analytics/pages/Dashboard';
 import Home from '../features/chat/pages/Home';
 import { UserRole } from '../types';
 import { RootRedirect } from './RootRedirect';
+import AdminLayout from '../components/layout/AdminLayout';
 
 const AppRoutes: React.FC = () => {
 
@@ -16,7 +17,9 @@ const AppRoutes: React.FC = () => {
       <Route path="/login" element={<Login />} />
 
       <Route element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}/>}>
-        <Route path="/analytics/dashboard" element={<Dashboard/>}/>
+        <Route element={<AdminLayout />}>
+          <Route path="/analytics/dashboard" element={<Dashboard/>}/>
+        </Route>
       </Route>
       <Route element={<ProtectedRoute allowedRoles={[UserRole.USER]}/>}>
         <Route path="/chat/home" element={<Home/>}/>
