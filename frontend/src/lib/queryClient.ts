@@ -3,14 +3,14 @@ import {ErrorHandler} from './errorHandler';
 
 export const queryClient = new QueryClient({
   queryCache: new QueryCache({
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       
       ErrorHandler.handleApiError(error);
       
     },
   }),
   mutationCache: new MutationCache({
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       ErrorHandler.handleApiError(error);
     },
   }),

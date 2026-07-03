@@ -1,5 +1,10 @@
 import axiosClient from "../../lib/axiosClient";
 
+interface UpdateProfileInput {
+  name?: string;
+  email?: string;
+}
+
 export const userService = {
   getProfile: async () => {
     const response = await axiosClient.get("/users/profile");
@@ -11,7 +16,7 @@ export const userService = {
     return response.data;
   },
 
-  updateProfile: async (userData: any) => {
+  updateProfile: async (userData: UpdateProfileInput) => {
     const response = await axiosClient.put("/users/profile", userData);
     return response.data;
   },

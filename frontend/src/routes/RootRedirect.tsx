@@ -5,7 +5,7 @@ import { UserRole } from '../types/user';
 export const RootRedirect = () => {
   const { isAuthenticated, user } = useAuth();
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated || !user) {
     return <Navigate to="/login" replace />;
   }
 

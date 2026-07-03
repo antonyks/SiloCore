@@ -1,5 +1,5 @@
 export class Logger {
-  error(message: string, error?: any): void {
+  error(message: string, error?: unknown): void {
     console.error(`[ERROR] ${new Date().toISOString()} - ${message}`, error);
   }
 

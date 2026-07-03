@@ -1,4 +1,5 @@
 import { TOKEN_KEY, USER_KEY } from "../config/constants";
+import type { User } from "../types/user";
 
 export const storage = {
   getToken: (): string | null => {
@@ -13,7 +14,7 @@ export const storage = {
     localStorage.removeItem(TOKEN_KEY);
   },
 
-  getUser: (): any => {
+  getUser: (): User | null => {
     const user = localStorage.getItem(USER_KEY);
 
     if (!user || user === "undefined") {
@@ -21,14 +22,14 @@ export const storage = {
   }
 
   try {
-    return JSON.parse(user);
-  } catch (e) {
+    return JSON.parse(user) as User;
+  } catch {
     console.error("Corrupted storage found for user key");
     return null;
   }
   },
 
-  setUser: (user: any): void => {
+  setUser: (user: User): void => {
     localStorage.setItem(USER_KEY, JSON.stringify(user));
   },
 
