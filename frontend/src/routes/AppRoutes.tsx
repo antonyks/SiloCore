@@ -5,6 +5,7 @@ import NotFound from '../pages/NotFound';
 import ProtectedRoute from './ProtectedRoute';
 import Dashboard from '../features/analytics/pages/Dashboard';
 import AdminPlaceholderPage from '../features/analytics/pages/AdminPlaceholderPage';
+import ProviderConfigsPage from '../features/analytics/pages/ProviderConfigsPage';
 import Home from '../features/chat/pages/Home';
 import { UserRole } from '../types';
 import { RootRedirect } from './RootRedirect';
@@ -22,12 +23,7 @@ const AppRoutes: React.FC = () => {
           <Route path="/analytics/dashboard" element={<Dashboard/>}/>
           <Route
             path="/admin/llm/providers"
-            element={
-              <AdminPlaceholderPage
-                title="Provider Configs"
-                description="Provider configuration management will be implemented in the next admin task. The overview dashboard already shows the current read-only provider status."
-              />
-            }
+            element={<ProviderConfigsPage />}
           />
           <Route
             path="/admin/llm/models"
@@ -52,7 +48,7 @@ const AppRoutes: React.FC = () => {
             element={
               <AdminPlaceholderPage
                 title="Access & Bans"
-                description="Ban, reactivate, and soft-delete controls are intentionally deferred to the access control task."
+                description="Ban, reactivate, and delete controls are intentionally deferred to the access control task."
               />
             }
           />

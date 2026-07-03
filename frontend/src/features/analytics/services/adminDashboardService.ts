@@ -3,19 +3,13 @@ import type { ApiResponse } from "../../../types/api";
 import type {
   AdminUserPreview,
   LlmModelListResult,
-  SanitizedLlmProviderConfig,
 } from "../types";
+import { providerConfigService } from "./providerConfigService";
 
 const USER_PREVIEW_LIMIT = 8;
 
 export const adminDashboardService = {
-  async getProviders(): Promise<SanitizedLlmProviderConfig[]> {
-    const { data } = await axiosClient.get<ApiResponse<SanitizedLlmProviderConfig[]>>(
-      "/admin/llm/providers",
-    );
-
-    return data.data;
-  },
+  getProviders: providerConfigService.getProviders,
 
   async getModelRegistry(): Promise<LlmModelListResult> {
     const { data } = await axiosClient.get<ApiResponse<LlmModelListResult>>("/llm/models");

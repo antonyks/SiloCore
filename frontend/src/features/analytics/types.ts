@@ -19,6 +19,17 @@ export interface SanitizedLlmProviderConfig {
   updatedAt: string;
 }
 
+export interface LlmProviderConfigInput {
+  name: string;
+  type: LlmProviderType;
+  baseUrl: string;
+  enabled?: boolean;
+  defaultModel: string;
+  timeoutMs?: number | null;
+  extraHeaders?: Record<string, string>;
+  apiKey?: string | null;
+}
+
 export interface LlmListedModel {
   providerId: string;
   providerName: string;
