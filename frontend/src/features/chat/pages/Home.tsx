@@ -6,6 +6,7 @@ import {
   Edit3,
   Loader2,
   MessageSquare,
+  MoreHorizontal,
   Plus,
   RefreshCw,
   Search,
@@ -368,6 +369,7 @@ const Home: React.FC = () => {
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [openSessionMenuId, setOpenSessionMenuId] = useState<number | null>(null);
   const [confirmingDeleteSession, setConfirmingDeleteSession] = useState<ChatSession | null>(null);
   const [promptDraft, setPromptDraft] = useState("");
   const [promptValidationError, setPromptValidationError] = useState<string | null>(null);
@@ -472,6 +474,7 @@ const Home: React.FC = () => {
       const session = await createSession.mutateAsync({ title: "New Chat" });
       setSelectedSessionId(session.id);
       setEditingSessionId(null);
+      setOpenSessionMenuId(null);
       setSearchTerm("");
     } catch {
       // React Query exposes the error state rendered near the button.
@@ -481,6 +484,7 @@ const Home: React.FC = () => {
   const startEditing = (session: ChatSession) => {
     setEditingSessionId(session.id);
     setEditingTitle(session.title);
+    setOpenSessionMenuId(null);
   };
 
   const cancelEditing = () => {
@@ -507,6 +511,7 @@ const Home: React.FC = () => {
 
   const openDeleteConfirmation = (session: ChatSession) => {
     setConfirmingDeleteSession(session);
+    setOpenSessionMenuId(null);
   };
 
   const closeDeleteConfirmation = () => {
@@ -537,6 +542,11 @@ const Home: React.FC = () => {
     const selection = parseModelSelectionValue(value);
     setSelectedModel(selection);
     storeModelSelection(selection);
+  };
+
+  const selectSession = (sessionId: number) => {
+    setSelectedSessionId(sessionId);
+    setOpenSessionMenuId(null);
   };
 
   const handleMessageScroll = () => {
@@ -814,6 +824,7 @@ const Home: React.FC = () => {
   const renderSessionRow = (session: ChatSession) => {
     const isSelected = selectedSessionId === session.id;
     const isEditing = editingSessionId === session.id;
+    const isMenuOpen = openSessionMenuId === session.id;
     const isUpdating = updateSession.isPending && updateSession.variables?.id === session.id;
     const isDeleting = deleteSession.isPending && deleteSession.variables === session.id;
     const rowError =
@@ -824,11 +835,11 @@ const Home: React.FC = () => {
     return (
       <div
         key={session.id}
-        className={`rounded-md border bg-white p-2 transition ${
+        className={`relative rounded-md border bg-white p-2 transition ${
           isSelected
             ? "border-cyan-300 shadow-sm ring-1 ring-cyan-100"
             : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
-        }`}
+        } ${isEditing ? "" : "cursor-pointer"}`}
       >
         {isEditing ? (
           <form onSubmit={(event) => void handleRenameSubmit(event, session)} className="space-y-2">
@@ -865,39 +876,60 @@ const Home: React.FC = () => {
           <>
             <button
               type="button"
-              onClick={() => setSelectedSessionId(session.id)}
-              className="block w-full text-left"
-            >
+              onClick={() => selectSession(session.id)}
+              className="absolute inset-0 cursor-pointer rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-100"
+              aria-label={`Open ${session.title}`}
+            />
+            <div className="pointer-events-none relative z-10 pr-8">
               <span className="block truncate text-sm font-medium text-slate-900">
                 {session.title}
               </span>
               <span className="mt-1 block text-xs text-slate-500">
                 Updated {formatSessionDate(session.updatedAt)}
               </span>
-            </button>
-            <div className="mt-2 flex justify-end gap-1">
-              <button
-                type="button"
-                onClick={() => startEditing(session)}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-                aria-label={`Rename ${session.title}`}
-              >
-                <Edit3 className="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                onClick={() => openDeleteConfirmation(session)}
-                disabled={isDeleting}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-red-100 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                aria-label={`Delete ${session.title}`}
-              >
-                {isDeleting ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                ) : (
-                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                )}
-              </button>
             </div>
+            <button
+              type="button"
+              onClick={() =>
+                setOpenSessionMenuId((current) => (current === session.id ? null : session.id))
+              }
+              className="absolute right-2 top-2 z-20 inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              aria-label={`Session actions for ${session.title}`}
+              aria-expanded={isMenuOpen}
+              aria-haspopup="menu"
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+            {isMenuOpen && (
+              <div
+                role="menu"
+                className="absolute right-2 top-10 z-30 w-32 rounded-md border border-slate-200 bg-white py-1 text-sm shadow-lg"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => startEditing(session)}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 hover:bg-slate-50"
+                >
+                  <Edit3 className="h-3.5 w-3.5" aria-hidden="true" />
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => openDeleteConfirmation(session)}
+                  disabled={isDeleting}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isDeleting ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  Delete
+                </button>
+              </div>
+            )}
           </>
         )}
         {rowError && <div className="mt-2 text-xs text-red-700">{rowError}</div>}
@@ -1112,7 +1144,7 @@ const Home: React.FC = () => {
           )}
 
           {selectedSession && !selectedSessionQuery.isLoading && !selectedSessionQuery.isError && (
-            <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col overflow-hidden">
+            <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
               <div className="max-h-[45vh] shrink-0 overflow-y-auto border-b border-slate-200 px-4 py-4 sm:px-5 lg:max-h-none lg:overflow-visible">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0">
