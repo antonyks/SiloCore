@@ -1,6 +1,8 @@
 import axiosClient from "../../../lib/axiosClient";
 import type { ApiResponse } from "../../../types/api";
 import type {
+  AdminAnalyticsSummary,
+  AdminSystemStatus,
   AdminUserPreview,
   LlmModelListResult,
 } from "../types";
@@ -21,6 +23,22 @@ export const adminDashboardService = {
     const { data } = await axiosClient.get<ApiResponse<AdminUserPreview[]>>("/users", {
       params: { take: USER_PREVIEW_LIMIT },
     });
+
+    return data.data;
+  },
+
+  async getAnalyticsSummary(): Promise<AdminAnalyticsSummary> {
+    const { data } = await axiosClient.get<ApiResponse<AdminAnalyticsSummary>>(
+      "/admin/analytics/summary",
+    );
+
+    return data.data;
+  },
+
+  async getSystemStatus(): Promise<AdminSystemStatus> {
+    const { data } = await axiosClient.get<ApiResponse<AdminSystemStatus>>(
+      "/admin/system/status",
+    );
 
     return data.data;
   },

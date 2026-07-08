@@ -16,6 +16,7 @@ import {
   Users,
 } from "lucide-react";
 import { useAuth } from "../../features/auth/hooks/useAuth";
+import { useAdminSystemStatus } from "../../features/analytics/hooks/useAdminDashboard";
 import UserProfileDropdown from "../ui/UserProfileDropdown";
 
 const navGroups = [
@@ -68,8 +69,14 @@ const mobileNavItems = navGroups.flatMap((item) => item.children || [item]);
 const AdminLayout: React.FC = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const { user } = useAuth();
+  const systemStatusQuery = useAdminSystemStatus();
   const location = useLocation();
   const activeRoute = getRouteLabel(location.pathname);
+  const systemStatus = systemStatusQuery.data;
+  const databaseIsOnline = systemStatus?.database.status === "online";
+  const inferenceStatus = systemStatus?.inference.status;
+  const inferenceIsOnline = inferenceStatus === "online";
+  const inferenceNeedsReview = inferenceStatus === "review";
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
@@ -210,16 +217,35 @@ const AdminLayout: React.FC = () => {
           <footer className="sticky bottom-0 z-10 border-t border-slate-200 bg-white px-4 py-2 text-xs text-slate-600">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
               <span className="inline-flex items-center gap-1.5">
-                <Database className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
-                Database placeholder: Connected
+                <Database
+                  className={`h-3.5 w-3.5 ${databaseIsOnline ? "text-emerald-600" : "text-red-600"}`}
+                  aria-hidden="true"
+                />
+                Database: {systemStatusQuery.isLoading ? "Checking" : databaseIsOnline ? "Connected" : "Review"}
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <Server className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
-                Backend placeholder: Online
+                Backend: {systemStatus?.backend.status === "online" ? "Online" : "Checking"}
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <Activity className="h-3.5 w-3.5 text-amber-600" aria-hidden="true" />
-                Local inference placeholder: Watching
+                <Activity
+                  className={`h-3.5 w-3.5 ${
+                    inferenceIsOnline
+                      ? "text-emerald-600"
+                      : inferenceNeedsReview
+                        ? "text-amber-600"
+                        : "text-red-600"
+                  }`}
+                  aria-hidden="true"
+                />
+                Inference:{" "}
+                {systemStatusQuery.isLoading
+                  ? "Checking"
+                  : inferenceIsOnline
+                    ? "Online"
+                    : inferenceNeedsReview
+                      ? "Review"
+                      : "Offline"}
               </span>
             </div>
           </footer>

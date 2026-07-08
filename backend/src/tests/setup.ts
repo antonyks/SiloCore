@@ -11,11 +11,13 @@ type chatSessionResult = Awaited<ReturnType<PrismaClient['chatSession']['create'
 type chatMessageResult = Awaited<ReturnType<PrismaClient['chatMessage']['create']>>;
 
 const mockPrisma = {
+  $queryRaw: jest.fn<() => Promise<unknown>>(),
   user: {
     create: jest.fn<() => Promise<UserCreateResult>>(),
     findUnique: jest.fn<() => Promise<SelectedUser | null>>(),
     findMany: jest.fn<() => Promise<SelectedUser[]>>(),
     update: jest.fn<() => Promise<SelectedUser>>(),
+    count: jest.fn<() => Promise<number>>(),
   },
   chatSession: {
     create: jest.fn<() => Promise<chatSessionResult>>(),
@@ -104,10 +106,12 @@ jest.mock('jsonwebtoken', () => ({
 }));
 
 beforeEach(() => {
+    mockPrisma.$queryRaw.mockClear();
     mockPrisma.user.create.mockClear();
     mockPrisma.user.findUnique.mockClear();
     mockPrisma.user.findMany.mockClear();
     mockPrisma.user.update.mockClear();
+    mockPrisma.user.count.mockClear();
     mockPrisma.llmProviderConfig.create.mockClear();
     mockPrisma.llmProviderConfig.findUnique.mockClear();
     mockPrisma.llmProviderConfig.findMany.mockClear();

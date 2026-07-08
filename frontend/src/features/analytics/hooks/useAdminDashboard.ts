@@ -5,6 +5,8 @@ export const adminDashboardQueryKeys = {
   providers: ["admin-dashboard", "providers"] as const,
   models: ["admin-dashboard", "models"] as const,
   users: ["admin-dashboard", "users"] as const,
+  summary: ["admin-dashboard", "summary"] as const,
+  systemStatus: ["admin-dashboard", "system-status"] as const,
 };
 
 export const useAdminDashboard = () => {
@@ -23,9 +25,28 @@ export const useAdminDashboard = () => {
     queryFn: adminDashboardService.getUserPreview,
   });
 
+  const summaryQuery = useQuery({
+    queryKey: adminDashboardQueryKeys.summary,
+    queryFn: adminDashboardService.getAnalyticsSummary,
+  });
+
+  const systemStatusQuery = useQuery({
+    queryKey: adminDashboardQueryKeys.systemStatus,
+    queryFn: adminDashboardService.getSystemStatus,
+  });
+
   return {
     providersQuery,
     modelsQuery,
     usersQuery,
+    summaryQuery,
+    systemStatusQuery,
   };
+};
+
+export const useAdminSystemStatus = () => {
+  return useQuery({
+    queryKey: adminDashboardQueryKeys.systemStatus,
+    queryFn: adminDashboardService.getSystemStatus,
+  });
 };
