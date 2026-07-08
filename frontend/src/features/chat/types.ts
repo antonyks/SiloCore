@@ -1,6 +1,8 @@
 export type ChatMessageAuthor = "USER" | "ASSISTANT" | "SYSTEM";
 export type ChatSessionOrderBy = "createdAt" | "updatedAt";
 export type ChatSessionOrderDirection = "asc" | "desc";
+export type LlmProviderType = "ollama" | "openai-compatible";
+export type LlmProviderModelListStatus = "success" | "error" | "skipped";
 
 export interface ChatSession {
   id: number;
@@ -58,11 +60,42 @@ export interface ChatMessageMetadata {
   params?: Record<string, unknown>;
 }
 
-export interface ChatGenerationInput {
-  content: string;
-}
-
 export interface ChatGenerationResponse {
   userMessage: ChatSessionMessage;
   assistantMessage: ChatSessionMessage;
+}
+
+export interface ChatGenerationParams {
+  providerId?: number;
+  model?: string;
+  temperature?: number;
+  topP?: number;
+  maxTokens?: number;
+  stopSequences?: string[];
+}
+
+export interface ChatGenerationInput extends ChatGenerationParams {
+  content: string;
+}
+
+export interface LlmListedModel {
+  providerId: string;
+  providerName: string;
+  providerType: LlmProviderType;
+  modelId: string;
+  modelName: string;
+}
+
+export interface LlmProviderModelListResult {
+  providerId: string;
+  providerName: string;
+  providerType: LlmProviderType;
+  status: LlmProviderModelListStatus;
+  modelCount: number;
+  errorMessage?: string;
+}
+
+export interface LlmModelListResult {
+  models: LlmListedModel[];
+  providers: LlmProviderModelListResult[];
 }

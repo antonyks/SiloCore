@@ -10,7 +10,9 @@ import {
   RefreshCw,
   Search,
   SendHorizontal,
+  Settings2,
   ShieldAlert,
+  SlidersHorizontal,
   Trash2,
   User,
   X,
@@ -27,14 +29,36 @@ import {
   useGenerateChatMessage,
   useUpdateChatSession,
 } from "../hooks/useChatSessions";
-import type { ChatSession, ChatSessionMessage } from "../types";
+import { useLlmModels } from "../hooks/useLlmModels";
+import type {
+  ChatGenerationParams,
+  ChatSession,
+  ChatSessionMessage,
+  LlmListedModel,
+  LlmProviderModelListResult,
+  LlmProviderModelListStatus,
+} from "../types";
 
 const SESSION_LIST_LIMIT = 50;
+const MODEL_SELECTION_STORAGE_KEY = "InsightBaseChatModelSelection";
+const DEFAULT_GENERATION_SETTINGS = {
+  temperature: "",
+  topP: "",
+  maxTokens: "",
+  stopSequences: "",
+};
 
 type SessionGroup = {
   label: string;
   sessions: ChatSession[];
 };
+
+type ModelSelection = {
+  providerId: string;
+  modelId: string;
+};
+
+type GenerationSettings = typeof DEFAULT_GENERATION_SETTINGS;
 
 const getErrorMessage = (error: unknown, fallback: string) => {
   if (axios.isAxiosError<{ message?: string }>(error)) {
@@ -46,6 +70,97 @@ const getErrorMessage = (error: unknown, fallback: string) => {
   }
 
   return fallback;
+};
+
+const getStoredModelSelection = (): ModelSelection | null => {
+  try {
+    const stored = localStorage.getItem(MODEL_SELECTION_STORAGE_KEY);
+
+    if (!stored) {
+      return null;
+    }
+
+    const parsed = JSON.parse(stored) as Partial<ModelSelection>;
+
+    if (typeof parsed.providerId === "string" && typeof parsed.modelId === "string") {
+      return {
+        providerId: parsed.providerId,
+        modelId: parsed.modelId,
+      };
+    }
+  } catch {
+    localStorage.removeItem(MODEL_SELECTION_STORAGE_KEY);
+  }
+
+  return null;
+};
+
+const storeModelSelection = (selection: ModelSelection | null) => {
+  if (!selection) {
+    localStorage.removeItem(MODEL_SELECTION_STORAGE_KEY);
+    return;
+  }
+
+  localStorage.setItem(MODEL_SELECTION_STORAGE_KEY, JSON.stringify(selection));
+};
+
+const buildModelSelectionValue = (model: LlmListedModel) =>
+  `${model.providerId}::${model.modelId}`;
+
+const parseModelSelectionValue = (value: string): ModelSelection | null => {
+  const [providerId, ...modelParts] = value.split("::");
+  const modelId = modelParts.join("::");
+
+  if (!providerId || !modelId) {
+    return null;
+  }
+
+  return { providerId, modelId };
+};
+
+const getProviderStatusClasses = (status: LlmProviderModelListStatus) => {
+  if (status === "success") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+
+  if (status === "error") {
+    return "border-red-200 bg-red-50 text-red-700";
+  }
+
+  return "border-slate-200 bg-slate-100 text-slate-600";
+};
+
+const formatProviderStatus = (provider: LlmProviderModelListResult) => {
+  if (provider.status === "success") {
+    return `${provider.providerName}: ${provider.modelCount} model${
+      provider.modelCount === 1 ? "" : "s"
+    }`;
+  }
+
+  if (provider.status === "error") {
+    return `${provider.providerName}: ${provider.errorMessage || "Model listing failed"}`;
+  }
+
+  return `${provider.providerName}: skipped`;
+};
+
+const parseNumberField = (value: string) => {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return Number(trimmed);
+};
+
+const buildStopSequences = (value: string) => {
+  const sequences = value
+    .split("\n")
+    .map((sequence) => sequence.trim())
+    .filter(Boolean);
+
+  return sequences.length > 0 ? sequences : undefined;
 };
 
 const isSameDate = (first: Date, second: Date) =>
@@ -235,6 +350,12 @@ const Home: React.FC = () => {
   const [confirmingDeleteSession, setConfirmingDeleteSession] = useState<ChatSession | null>(null);
   const [promptDraft, setPromptDraft] = useState("");
   const [promptValidationError, setPromptValidationError] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<ModelSelection | null>(getStoredModelSelection);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [generationSettings, setGenerationSettings] = useState<GenerationSettings>(
+    DEFAULT_GENERATION_SETTINGS,
+  );
+  const [settingsValidationError, setSettingsValidationError] = useState<string | null>(null);
 
   const listParams = useMemo(
     () => ({
@@ -248,6 +369,7 @@ const Home: React.FC = () => {
   const sessionsQuery = useChatSessions(listParams);
   const selectedSessionQuery = useChatSession(selectedSessionId);
   const selectedMessagesQuery = useChatSessionMessages(selectedSessionId);
+  const modelsQuery = useLlmModels();
   const createSession = useCreateChatSession();
   const updateSession = useUpdateChatSession();
   const deleteSession = useDeleteChatSession();
@@ -267,6 +389,17 @@ const Home: React.FC = () => {
   const groupedSessions = useMemo(() => groupSessions(filteredSessions), [filteredSessions]);
   const selectedSession = selectedSessionQuery.data;
   const selectedMessages = selectedMessagesQuery.data || selectedSession?.messages || [];
+  const availableModels = modelsQuery.data?.models || [];
+  const providerStatuses = modelsQuery.data?.providers || [];
+  const selectedModelValue = selectedModel
+    ? `${selectedModel.providerId}::${selectedModel.modelId}`
+    : "";
+  const selectedModelDetails = selectedModel
+    ? availableModels.find(
+        (model) =>
+          model.providerId === selectedModel.providerId && model.modelId === selectedModel.modelId,
+      )
+    : undefined;
   const generationError =
     generateMessage.isError && generateMessage.variables?.id === selectedSessionId
       ? getErrorMessage(generateMessage.error, "Message generation failed.")
@@ -338,6 +471,59 @@ const Home: React.FC = () => {
     }
   };
 
+  const handleModelSelectionChange = (value: string) => {
+    const selection = parseModelSelectionValue(value);
+    setSelectedModel(selection);
+    storeModelSelection(selection);
+  };
+
+  const updateGenerationSetting = (key: keyof GenerationSettings, value: string) => {
+    setGenerationSettings((current) => ({
+      ...current,
+      [key]: value,
+    }));
+
+    if (settingsValidationError) {
+      setSettingsValidationError(null);
+    }
+  };
+
+  const buildGenerationParams = (): ChatGenerationParams | null => {
+    const temperature = parseNumberField(generationSettings.temperature);
+    const topP = parseNumberField(generationSettings.topP);
+    const maxTokens = parseNumberField(generationSettings.maxTokens);
+    const stopSequences = buildStopSequences(generationSettings.stopSequences);
+
+    if (temperature !== undefined && (!Number.isFinite(temperature) || temperature < 0)) {
+      setSettingsValidationError("Temperature must be a non-negative number.");
+      return null;
+    }
+
+    if (topP !== undefined && (!Number.isFinite(topP) || topP < 0 || topP > 1)) {
+      setSettingsValidationError("Top P must be between 0 and 1.");
+      return null;
+    }
+
+    if (
+      maxTokens !== undefined &&
+      (!Number.isInteger(maxTokens) || maxTokens < 1)
+    ) {
+      setSettingsValidationError("Max tokens must be a positive whole number.");
+      return null;
+    }
+
+    setSettingsValidationError(null);
+
+    return {
+      providerId: selectedModelDetails ? Number(selectedModelDetails.providerId) : undefined,
+      model: selectedModelDetails?.modelId,
+      temperature,
+      topP,
+      maxTokens,
+      stopSequences,
+    };
+  };
+
   const submitPrompt = async () => {
     if (!selectedSessionId || generateMessage.isPending) {
       return;
@@ -350,9 +536,20 @@ const Home: React.FC = () => {
     }
 
     setPromptValidationError(null);
+    const generationParams = buildGenerationParams();
+
+    if (!generationParams) {
+      return;
+    }
 
     try {
-      await generateMessage.mutateAsync({ id: selectedSessionId, input: { content } });
+      await generateMessage.mutateAsync({
+        id: selectedSessionId,
+        input: {
+          content,
+          ...generationParams,
+        },
+      });
       setPromptDraft("");
     } catch {
       // React Query exposes the error rendered near the composer.
@@ -667,13 +864,148 @@ const Home: React.FC = () => {
           {selectedSession && !selectedSessionQuery.isLoading && !selectedSessionQuery.isError && (
             <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col">
               <div className="border-b border-slate-200 px-5 py-4">
-                <h2 className="truncate text-base font-semibold text-slate-950">
-                  {selectedSession.title}
-                </h2>
-                <p className="mt-1 text-xs text-slate-500">
-                  {selectedMessages.length} message
-                  {selectedMessages.length === 1 ? "" : "s"}
-                </p>
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <h2 className="truncate text-base font-semibold text-slate-950">
+                      {selectedSession.title}
+                    </h2>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {selectedMessages.length} message
+                      {selectedMessages.length === 1 ? "" : "s"}
+                    </p>
+                  </div>
+
+                  <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center lg:w-auto lg:justify-end">
+                    <label className="sr-only" htmlFor="chat-model">
+                      Model
+                    </label>
+                    <select
+                      id="chat-model"
+                      value={selectedModelValue}
+                      onChange={(event) => handleModelSelectionChange(event.target.value)}
+                      disabled={modelsQuery.isLoading || availableModels.length === 0}
+                      className="h-9 min-w-0 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 sm:min-w-64"
+                    >
+                      <option value="">
+                        {modelsQuery.isLoading
+                          ? "Loading models..."
+                          : availableModels.length > 0
+                            ? "Use default model"
+                            : "No models available"}
+                      </option>
+                      {selectedModel && !selectedModelDetails && (
+                        <option value={selectedModelValue} disabled>
+                          Previous model unavailable
+                        </option>
+                      )}
+                      {availableModels.map((model) => (
+                        <option key={buildModelSelectionValue(model)} value={buildModelSelectionValue(model)}>
+                          {model.modelName} - {model.providerName}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setIsSettingsOpen((current) => !current)}
+                      className={`inline-flex h-9 items-center justify-center gap-1.5 rounded-md border px-2.5 text-sm font-medium ${
+                        isSettingsOpen
+                          ? "border-cyan-200 bg-cyan-50 text-cyan-800"
+                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
+                      aria-expanded={isSettingsOpen}
+                    >
+                      <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+                      <span className="hidden sm:inline">Settings</span>
+                    </button>
+                  </div>
+                </div>
+
+                {(modelsQuery.isError || providerStatuses.length > 0 || selectedModelDetails) && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {selectedModelDetails && (
+                      <span className="inline-flex items-center gap-1.5 rounded-md border border-cyan-100 bg-cyan-50 px-2 py-1 text-xs text-cyan-800">
+                        <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
+                        {selectedModelDetails.providerName} / {selectedModelDetails.modelName}
+                      </span>
+                    )}
+                    {modelsQuery.isError && (
+                      <span className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
+                        {getErrorMessage(modelsQuery.error, "Could not load models.")}
+                      </span>
+                    )}
+                    {providerStatuses.map((provider) => (
+                      <span
+                        key={provider.providerId}
+                        className={`rounded-md border px-2 py-1 text-xs ${getProviderStatusClasses(
+                          provider.status,
+                        )}`}
+                        title={provider.errorMessage}
+                      >
+                        {formatProviderStatus(provider)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {isSettingsOpen && (
+                  <div className="mt-4 border-t border-slate-200 pt-4">
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <label className="block text-xs font-medium text-slate-600">
+                        Temperature
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          value={generationSettings.temperature}
+                          onChange={(event) =>
+                            updateGenerationSetting("temperature", event.target.value)
+                          }
+                          className="mt-1 h-9 w-full rounded-md border border-slate-300 px-2 text-sm text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
+                          placeholder="Default"
+                        />
+                      </label>
+                      <label className="block text-xs font-medium text-slate-600">
+                        Top P
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value={generationSettings.topP}
+                          onChange={(event) => updateGenerationSetting("topP", event.target.value)}
+                          className="mt-1 h-9 w-full rounded-md border border-slate-300 px-2 text-sm text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
+                          placeholder="Default"
+                        />
+                      </label>
+                      <label className="block text-xs font-medium text-slate-600">
+                        Max tokens
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={generationSettings.maxTokens}
+                          onChange={(event) =>
+                            updateGenerationSetting("maxTokens", event.target.value)
+                          }
+                          className="mt-1 h-9 w-full rounded-md border border-slate-300 px-2 text-sm text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
+                          placeholder="Default"
+                        />
+                      </label>
+                    </div>
+                    <label className="mt-3 block text-xs font-medium text-slate-600">
+                      Stop sequences
+                      <textarea
+                        value={generationSettings.stopSequences}
+                        onChange={(event) =>
+                          updateGenerationSetting("stopSequences", event.target.value)
+                        }
+                        rows={2}
+                        className="mt-1 max-h-24 min-h-16 w-full resize-y rounded-md border border-slate-300 px-2 py-2 text-sm text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
+                        placeholder="One sequence per line"
+                      />
+                    </label>
+                  </div>
+                )}
               </div>
 
               {selectedMessagesQuery.isError && (
@@ -741,10 +1073,10 @@ const Home: React.FC = () => {
                 onSubmit={(event) => void handlePromptSubmit(event)}
                 className="border-t border-slate-200 bg-slate-50 px-5 py-4"
               >
-                {(promptValidationError || generationError) && (
+                {(promptValidationError || settingsValidationError || generationError) && (
                   <div className="mb-3 flex gap-2 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-800">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                    <span>{promptValidationError || generationError}</span>
+                    <span>{promptValidationError || settingsValidationError || generationError}</span>
                   </div>
                 )}
                 <div className="flex items-end gap-2">
