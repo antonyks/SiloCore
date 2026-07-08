@@ -6,6 +6,7 @@ import ProtectedRoute from './ProtectedRoute';
 import Dashboard from '../features/analytics/pages/Dashboard';
 import AdminPlaceholderPage from '../features/analytics/pages/AdminPlaceholderPage';
 import ProviderConfigsPage from '../features/analytics/pages/ProviderConfigsPage';
+import ModelRegistryPage from '../features/analytics/pages/ModelRegistryPage';
 import Home from '../features/chat/pages/Home';
 import { UserRole } from '../types';
 import { RootRedirect } from './RootRedirect';
@@ -27,12 +28,7 @@ const AppRoutes: React.FC = () => {
           />
           <Route
             path="/admin/llm/models"
-            element={
-              <AdminPlaceholderPage
-                title="Model Registry"
-                description="The dedicated model registry view will expand the current read-only dashboard inventory in a later task."
-              />
-            }
+            element={<ModelRegistryPage />}
           />
           <Route
             path="/admin/users"
