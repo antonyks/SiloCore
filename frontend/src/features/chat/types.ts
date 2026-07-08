@@ -78,6 +78,13 @@ export interface ChatGenerationInput extends ChatGenerationParams {
   content: string;
 }
 
+export type ChatGenerationStreamEvent =
+  | { event: "user_message"; data: ChatSessionMessage }
+  | { event: "delta"; data: { content: string } }
+  | { event: "assistant_message"; data: ChatSessionMessage }
+  | { event: "done"; data: { done: true } }
+  | { event: "error"; data: { message?: string } };
+
 export interface LlmListedModel {
   providerId: string;
   providerName: string;

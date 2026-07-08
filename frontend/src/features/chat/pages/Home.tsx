@@ -13,26 +13,30 @@ import {
   Settings2,
   ShieldAlert,
   SlidersHorizontal,
+  Square,
   Trash2,
   User,
   X,
 } from "lucide-react";
-import { useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import UserProfileDropdown from "../../../components/ui/UserProfileDropdown";
 import { useAuth } from "../../auth/hooks/useAuth";
 import {
+  chatSessionQueryKeys,
   useChatSession,
   useChatSessionMessages,
   useChatSessions,
   useCreateChatSession,
   useDeleteChatSession,
-  useGenerateChatMessage,
   useUpdateChatSession,
 } from "../hooks/useChatSessions";
 import { useLlmModels } from "../hooks/useLlmModels";
+import { chatService } from "../services/chatService";
 import type {
   ChatGenerationParams,
   ChatSession,
+  ChatSessionDetail,
   ChatSessionMessage,
   LlmListedModel,
   LlmProviderModelListResult,
@@ -343,6 +347,9 @@ const SessionLoadingRows = () => (
 
 const Home: React.FC = () => {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const streamingAssistantIdRef = useRef<number | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
@@ -356,6 +363,8 @@ const Home: React.FC = () => {
     DEFAULT_GENERATION_SETTINGS,
   );
   const [settingsValidationError, setSettingsValidationError] = useState<string | null>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
 
   const listParams = useMemo(
     () => ({
@@ -373,7 +382,6 @@ const Home: React.FC = () => {
   const createSession = useCreateChatSession();
   const updateSession = useUpdateChatSession();
   const deleteSession = useDeleteChatSession();
-  const generateMessage = useGenerateChatMessage();
 
   const sessions = useMemo(() => sessionsQuery.data || [], [sessionsQuery.data]);
   const filteredSessions = useMemo(() => {
@@ -400,10 +408,6 @@ const Home: React.FC = () => {
           model.providerId === selectedModel.providerId && model.modelId === selectedModel.modelId,
       )
     : undefined;
-  const generationError =
-    generateMessage.isError && generateMessage.variables?.id === selectedSessionId
-      ? getErrorMessage(generateMessage.error, "Message generation failed.")
-      : null;
 
   const handleCreateSession = async () => {
     try {
@@ -524,8 +528,113 @@ const Home: React.FC = () => {
     };
   };
 
+  const updateCachedMessages = (
+    sessionId: number,
+    updater: (messages: ChatSessionMessage[]) => ChatSessionMessage[],
+  ) => {
+    queryClient.setQueryData<ChatSessionMessage[]>(
+      chatSessionQueryKeys.messages(sessionId),
+      (current) => updater(current || []),
+    );
+    queryClient.setQueryData<ChatSessionDetail>(
+      chatSessionQueryKeys.detail(sessionId),
+      (current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          messages: updater(current.messages),
+        };
+      },
+    );
+  };
+
+  const appendCachedMessage = (sessionId: number, message: ChatSessionMessage) => {
+    updateCachedMessages(sessionId, (messages) => {
+      if (messages.some((existing) => existing.id === message.id)) {
+        return messages;
+      }
+
+      return [...messages, message];
+    });
+  };
+
+  const removeStreamingAssistant = (sessionId: number) => {
+    const streamingAssistantId = streamingAssistantIdRef.current;
+
+    if (streamingAssistantId === null) {
+      return;
+    }
+
+    updateCachedMessages(sessionId, (messages) =>
+      messages.filter((message) => message.id !== streamingAssistantId),
+    );
+    streamingAssistantIdRef.current = null;
+  };
+
+  const appendAssistantDelta = (sessionId: number, content: string) => {
+    if (!content) {
+      return;
+    }
+
+    const streamingAssistantId = streamingAssistantIdRef.current ?? -Date.now();
+    streamingAssistantIdRef.current = streamingAssistantId;
+
+    updateCachedMessages(sessionId, (messages) => {
+      const existing = messages.find((message) => message.id === streamingAssistantId);
+
+      if (!existing) {
+        return [
+          ...messages,
+          {
+            id: streamingAssistantId,
+            author: "ASSISTANT",
+            content,
+            sessionId,
+            createdAt: new Date().toISOString(),
+          },
+        ];
+      }
+
+      return messages.map((message) =>
+        message.id === streamingAssistantId
+          ? {
+              ...message,
+              content: `${message.content}${content}`,
+            }
+          : message,
+      );
+    });
+  };
+
+  const reconcileAssistantMessage = (sessionId: number, assistantMessage: ChatSessionMessage) => {
+    const streamingAssistantId = streamingAssistantIdRef.current;
+
+    updateCachedMessages(sessionId, (messages) => {
+      if (messages.some((message) => message.id === assistantMessage.id)) {
+        return messages.filter((message) => message.id !== streamingAssistantId);
+      }
+
+      if (streamingAssistantId === null) {
+        return [...messages, assistantMessage];
+      }
+
+      return messages.map((message) =>
+        message.id === streamingAssistantId ? assistantMessage : message,
+      );
+    });
+
+    streamingAssistantIdRef.current = null;
+  };
+
+  const stopStreaming = () => {
+    abortControllerRef.current?.abort();
+  };
+
   const submitPrompt = async () => {
-    if (!selectedSessionId || generateMessage.isPending) {
+    if (!selectedSessionId || isStreaming) {
       return;
     }
 
@@ -542,17 +651,58 @@ const Home: React.FC = () => {
       return;
     }
 
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    streamingAssistantIdRef.current = null;
+    setIsStreaming(true);
+    setStreamError(null);
+
     try {
-      await generateMessage.mutateAsync({
-        id: selectedSessionId,
-        input: {
+      await chatService.streamGenerateMessage(
+        selectedSessionId,
+        {
           content,
           ...generationParams,
         },
-      });
-      setPromptDraft("");
-    } catch {
-      // React Query exposes the error rendered near the composer.
+        {
+          signal: abortController.signal,
+          onEvent: (event) => {
+            if (event.event === "user_message") {
+              appendCachedMessage(selectedSessionId, event.data);
+              setPromptDraft("");
+              void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.lists() });
+              return;
+            }
+
+            if (event.event === "delta") {
+              appendAssistantDelta(selectedSessionId, event.data.content);
+              return;
+            }
+
+            if (event.event === "assistant_message") {
+              reconcileAssistantMessage(selectedSessionId, event.data);
+              void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.lists() });
+              return;
+            }
+
+            if (event.event === "error") {
+              throw new Error(event.data.message || "Streaming failed.");
+            }
+          },
+        },
+      );
+    } catch (error) {
+      removeStreamingAssistant(selectedSessionId);
+
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        setStreamError(getErrorMessage(error, "Streaming failed."));
+      }
+    } finally {
+      setIsStreaming(false);
+      abortControllerRef.current = null;
+      streamingAssistantIdRef.current = null;
+      void queryClient.refetchQueries({ queryKey: chatSessionQueryKeys.messages(selectedSessionId) });
+      void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.lists() });
     }
   };
 
@@ -1073,10 +1223,10 @@ const Home: React.FC = () => {
                 onSubmit={(event) => void handlePromptSubmit(event)}
                 className="border-t border-slate-200 bg-slate-50 px-5 py-4"
               >
-                {(promptValidationError || settingsValidationError || generationError) && (
+                {(promptValidationError || settingsValidationError || streamError) && (
                   <div className="mb-3 flex gap-2 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-800">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                    <span>{promptValidationError || settingsValidationError || generationError}</span>
+                    <span>{promptValidationError || settingsValidationError || streamError}</span>
                   </div>
                 )}
                 <div className="flex items-end gap-2">
@@ -1091,28 +1241,39 @@ const Home: React.FC = () => {
                       if (promptValidationError) {
                         setPromptValidationError(null);
                       }
+                      if (streamError) {
+                        setStreamError(null);
+                      }
                     }}
                     onKeyDown={handlePromptKeyDown}
                     rows={3}
-                    disabled={generateMessage.isPending}
+                    disabled={isStreaming}
                     className="max-h-40 min-h-20 flex-1 resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-6 text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:bg-slate-100"
                     placeholder="Send a message"
                   />
                   <button
-                    type="submit"
-                    disabled={generateMessage.isPending}
-                    className="inline-flex h-10 items-center gap-1.5 rounded-md bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    type={isStreaming ? "button" : "submit"}
+                    onClick={isStreaming ? stopStreaming : undefined}
+                    className={`inline-flex h-10 items-center gap-1.5 rounded-md px-3 text-sm font-semibold text-white ${
+                      isStreaming ? "bg-red-700 hover:bg-red-800" : "bg-slate-950 hover:bg-slate-800"
+                    }`}
                   >
-                    {generateMessage.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    {isStreaming ? (
+                      <Square className="h-4 w-4" aria-hidden="true" />
                     ) : (
                       <SendHorizontal className="h-4 w-4" aria-hidden="true" />
                     )}
                     <span className="hidden sm:inline">
-                      {generateMessage.isPending ? "Sending..." : "Send"}
+                      {isStreaming ? "Stop" : "Send"}
                     </span>
                   </button>
                 </div>
+                {isStreaming && (
+                  <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-500">
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    Assistant response is streaming.
+                  </div>
+                )}
               </form>
             </div>
           )}
