@@ -7,6 +7,7 @@ import Dashboard from '../features/analytics/pages/Dashboard';
 import AdminPlaceholderPage from '../features/analytics/pages/AdminPlaceholderPage';
 import ProviderConfigsPage from '../features/analytics/pages/ProviderConfigsPage';
 import ModelRegistryPage from '../features/analytics/pages/ModelRegistryPage';
+import UserDirectoryPage from '../features/analytics/pages/UserDirectoryPage';
 import Home from '../features/chat/pages/Home';
 import { UserRole } from '../types';
 import { RootRedirect } from './RootRedirect';
@@ -32,12 +33,7 @@ const AppRoutes: React.FC = () => {
           />
           <Route
             path="/admin/users"
-            element={
-              <AdminPlaceholderPage
-                title="User Directory"
-                description="The dedicated user directory will add search, pagination, create, and edit workflows in a later task without exposing chat contents."
-              />
-            }
+            element={<UserDirectoryPage />}
           />
           <Route
             path="/admin/users/access"

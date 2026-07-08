@@ -68,3 +68,22 @@ export interface AdminUserPreview {
   status: UserStatus;
   createdAt: string;
 }
+
+export type AdminUser = AdminUserPreview;
+
+export interface AdminUserListParams {
+  name?: string;
+  skip?: number;
+  take?: number;
+}
+
+export interface AdminUserCreateInput {
+  name: string;
+  email: string;
+  password: string;
+}
+
+export interface AdminUserUpdateInput {
+  name: string;
+  email: string;
+}
