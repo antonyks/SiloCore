@@ -33,4 +33,22 @@ export const adminUserService = {
 
     return data.data;
   },
+
+  async banUser(id: number): Promise<AdminUser> {
+    const { data } = await axiosClient.post<ApiResponse<AdminUser>>(`/users/ban/${id}`);
+
+    return data.data;
+  },
+
+  async activateUser(id: number): Promise<AdminUser> {
+    const { data } = await axiosClient.post<ApiResponse<AdminUser>>(`/users/activate/${id}`);
+
+    return data.data;
+  },
+
+  async deleteUser(id: number): Promise<AdminUser> {
+    const { data } = await axiosClient.delete<ApiResponse<AdminUser>>(`/users/${id}`);
+
+    return data.data;
+  },
 };

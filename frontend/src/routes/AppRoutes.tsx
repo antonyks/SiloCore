@@ -4,10 +4,10 @@ import Login from '../features/auth/pages/Login';
 import NotFound from '../pages/NotFound';
 import ProtectedRoute from './ProtectedRoute';
 import Dashboard from '../features/analytics/pages/Dashboard';
-import AdminPlaceholderPage from '../features/analytics/pages/AdminPlaceholderPage';
 import ProviderConfigsPage from '../features/analytics/pages/ProviderConfigsPage';
 import ModelRegistryPage from '../features/analytics/pages/ModelRegistryPage';
 import UserDirectoryPage from '../features/analytics/pages/UserDirectoryPage';
+import UserAccessPage from '../features/analytics/pages/UserAccessPage';
 import Home from '../features/chat/pages/Home';
 import { UserRole } from '../types';
 import { RootRedirect } from './RootRedirect';
@@ -37,12 +37,7 @@ const AppRoutes: React.FC = () => {
           />
           <Route
             path="/admin/users/access"
-            element={
-              <AdminPlaceholderPage
-                title="Access & Bans"
-                description="Ban, reactivate, and delete controls are intentionally deferred to the access control task."
-              />
-            }
+            element={<UserAccessPage />}
           />
         </Route>
       </Route>

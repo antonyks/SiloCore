@@ -55,3 +55,28 @@ export const useUpdateAdminUser = () => {
     },
   });
 };
+
+const useUserStatusMutation = (mutationFn: (id: number) => Promise<unknown>) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn,
+    onSuccess: (_result, id) => {
+      void queryClient.invalidateQueries({ queryKey: adminUserQueryKeys.lists() });
+      void queryClient.invalidateQueries({ queryKey: adminUserQueryKeys.detail(id) });
+      void queryClient.invalidateQueries({ queryKey: adminDashboardQueryKeys.users });
+    },
+  });
+};
+
+export const useBanAdminUser = () => {
+  return useUserStatusMutation((id) => adminUserService.banUser(id));
+};
+
+export const useActivateAdminUser = () => {
+  return useUserStatusMutation((id) => adminUserService.activateUser(id));
+};
+
+export const useDeleteAdminUser = () => {
+  return useUserStatusMutation((id) => adminUserService.deleteUser(id));
+};
