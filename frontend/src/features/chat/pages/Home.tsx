@@ -18,7 +18,14 @@ import {
   User,
   X,
 } from "lucide-react";
-import { useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import UserProfileDropdown from "../../../components/ui/UserProfileDropdown";
 import { useAuth } from "../../auth/hooks/useAuth";
@@ -51,6 +58,7 @@ const DEFAULT_GENERATION_SETTINGS = {
   maxTokens: "",
   stopSequences: "",
 };
+const MESSAGE_SCROLL_BOTTOM_THRESHOLD = 96;
 
 type SessionGroup = {
   label: string;
@@ -321,12 +329,15 @@ const AssistantMetadata: React.FC<{ message: ChatSessionMessage }> = ({ message 
   return (
     <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
       {items.map((item) => (
-        <span key={item} className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+        <span
+          key={item}
+          className="max-w-full break-words rounded-md border border-slate-200 bg-slate-50 px-2 py-1"
+        >
           {item}
         </span>
       ))}
       {usage && (usage.prompt !== undefined || usage.completion !== undefined) && (
-        <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+        <span className="max-w-full break-words rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
           {usage.prompt ?? 0} in / {usage.completion ?? 0} out
         </span>
       )}
@@ -350,6 +361,9 @@ const Home: React.FC = () => {
   const queryClient = useQueryClient();
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingAssistantIdRef = useRef<number | null>(null);
+  const messageListRef = useRef<HTMLDivElement | null>(null);
+  const shouldStickToBottomRef = useRef(true);
+  const promptDraftsBySessionRef = useRef<Record<number, string>>({});
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
@@ -396,7 +410,10 @@ const Home: React.FC = () => {
 
   const groupedSessions = useMemo(() => groupSessions(filteredSessions), [filteredSessions]);
   const selectedSession = selectedSessionQuery.data;
-  const selectedMessages = selectedMessagesQuery.data || selectedSession?.messages || [];
+  const selectedMessages = useMemo(
+    () => selectedMessagesQuery.data || selectedSession?.messages || [],
+    [selectedMessagesQuery.data, selectedSession?.messages],
+  );
   const availableModels = modelsQuery.data?.models || [];
   const providerStatuses = modelsQuery.data?.providers || [];
   const selectedModelValue = selectedModel
@@ -408,6 +425,47 @@ const Home: React.FC = () => {
           model.providerId === selectedModel.providerId && model.modelId === selectedModel.modelId,
       )
     : undefined;
+  const messageScrollKey = useMemo(
+    () => selectedMessages.map((message) => `${message.id}:${message.content.length}`).join("|"),
+    [selectedMessages],
+  );
+
+  const scrollMessagesToBottom = (behavior: ScrollBehavior = "smooth") => {
+    const element = messageListRef.current;
+
+    if (!element) {
+      return;
+    }
+
+    element.scrollTo({
+      top: element.scrollHeight,
+      behavior,
+    });
+  };
+
+  useEffect(() => {
+    if (!selectedSessionId) {
+      setPromptDraft("");
+      return;
+    }
+
+    setPromptDraft(promptDraftsBySessionRef.current[selectedSessionId] || "");
+    setPromptValidationError(null);
+    setStreamError(null);
+    shouldStickToBottomRef.current = true;
+  }, [selectedSessionId]);
+
+  useEffect(() => {
+    if (!selectedSessionId || selectedMessagesQuery.isLoading) {
+      return;
+    }
+
+    if (!shouldStickToBottomRef.current) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => scrollMessagesToBottom("smooth"));
+  }, [messageScrollKey, selectedSessionId, selectedMessagesQuery.isLoading]);
 
   const handleCreateSession = async () => {
     try {
@@ -479,6 +537,33 @@ const Home: React.FC = () => {
     const selection = parseModelSelectionValue(value);
     setSelectedModel(selection);
     storeModelSelection(selection);
+  };
+
+  const handleMessageScroll = () => {
+    const element = messageListRef.current;
+
+    if (!element) {
+      return;
+    }
+
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom <= MESSAGE_SCROLL_BOTTOM_THRESHOLD;
+  };
+
+  const updatePromptDraft = (value: string) => {
+    setPromptDraft(value);
+
+    if (selectedSessionId) {
+      promptDraftsBySessionRef.current[selectedSessionId] = value;
+    }
+
+    if (promptValidationError) {
+      setPromptValidationError(null);
+    }
+
+    if (streamError) {
+      setStreamError(null);
+    }
   };
 
   const updateGenerationSetting = (key: keyof GenerationSettings, value: string) => {
@@ -654,6 +739,7 @@ const Home: React.FC = () => {
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     streamingAssistantIdRef.current = null;
+    shouldStickToBottomRef.current = true;
     setIsStreaming(true);
     setStreamError(null);
 
@@ -670,6 +756,7 @@ const Home: React.FC = () => {
             if (event.event === "user_message") {
               appendCachedMessage(selectedSessionId, event.data);
               setPromptDraft("");
+              promptDraftsBySessionRef.current[selectedSessionId] = "";
               void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.lists() });
               return;
             }
@@ -819,7 +906,7 @@ const Home: React.FC = () => {
   };
 
   return (
-    <div className="flex min-h-screen w-full flex-col bg-slate-100 text-slate-950">
+    <div className="flex h-screen w-full flex-col overflow-hidden bg-slate-100 text-slate-950">
       <header className="flex h-14 shrink-0 items-center border-b border-slate-200 bg-white px-4 shadow-sm">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-950 text-white">
@@ -847,14 +934,14 @@ const Home: React.FC = () => {
       </header>
 
       {createSession.isError && (
-        <div className="border-b border-red-100 bg-red-50 px-4 py-2 text-sm text-red-800">
+        <div className="shrink-0 border-b border-red-100 bg-red-50 px-4 py-2 text-sm text-red-800">
           {getErrorMessage(createSession.error, "Could not create a new chat.")}
         </div>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[20rem_minmax(0,1fr)]">
-        <aside className="flex min-h-[18rem] flex-col border-b border-slate-200 bg-slate-50 lg:min-h-0 lg:border-b-0 lg:border-r">
-          <div className="border-b border-slate-200 p-3">
+      <div className="grid min-h-0 flex-1 overflow-hidden grid-rows-[minmax(16rem,34vh)_minmax(0,1fr)] lg:grid-cols-[20rem_minmax(0,1fr)] lg:grid-rows-none">
+        <aside className="flex min-h-0 flex-col overflow-hidden border-b border-slate-200 bg-slate-50 lg:border-b-0 lg:border-r">
+          <div className="shrink-0 border-b border-slate-200 p-3">
             <label className="relative block">
               <Search
                 className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
@@ -870,7 +957,7 @@ const Home: React.FC = () => {
           </div>
 
           {confirmingDeleteSession && (
-            <div className="border-b border-amber-100 bg-amber-50 p-3 text-sm text-amber-900">
+            <div className="shrink-0 border-b border-amber-100 bg-amber-50 p-3 text-sm text-amber-900">
               <div className="flex gap-2">
                 <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                 <span>
@@ -938,6 +1025,19 @@ const Home: React.FC = () => {
                 <MessageSquare className="mx-auto h-8 w-8 text-slate-300" aria-hidden="true" />
                 <div className="mt-3 text-sm font-medium text-slate-800">No chat sessions</div>
                 <div className="mt-1 text-xs text-slate-500">Create a new chat to begin.</div>
+                <button
+                  type="button"
+                  onClick={() => void handleCreateSession()}
+                  disabled={createSession.isPending}
+                  className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-950 px-2.5 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {createSession.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  New Chat
+                </button>
               </div>
             )}
 
@@ -1012,8 +1112,8 @@ const Home: React.FC = () => {
           )}
 
           {selectedSession && !selectedSessionQuery.isLoading && !selectedSessionQuery.isError && (
-            <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col">
-              <div className="border-b border-slate-200 px-5 py-4">
+            <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col overflow-hidden">
+              <div className="max-h-[45vh] shrink-0 overflow-y-auto border-b border-slate-200 px-4 py-4 sm:px-5 lg:max-h-none lg:overflow-visible">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0">
                     <h2 className="truncate text-base font-semibold text-slate-950">
@@ -1049,7 +1149,10 @@ const Home: React.FC = () => {
                         </option>
                       )}
                       {availableModels.map((model) => (
-                        <option key={buildModelSelectionValue(model)} value={buildModelSelectionValue(model)}>
+                        <option
+                          key={buildModelSelectionValue(model)}
+                          value={buildModelSelectionValue(model)}
+                        >
                           {model.modelName} - {model.providerName}
                         </option>
                       ))}
@@ -1070,23 +1173,42 @@ const Home: React.FC = () => {
                   </div>
                 </div>
 
-                {(modelsQuery.isError || providerStatuses.length > 0 || selectedModelDetails) && (
+                {(modelsQuery.isError ||
+                  providerStatuses.length > 0 ||
+                  selectedModelDetails ||
+                  (!modelsQuery.isLoading && availableModels.length === 0)) && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {selectedModelDetails && (
-                      <span className="inline-flex items-center gap-1.5 rounded-md border border-cyan-100 bg-cyan-50 px-2 py-1 text-xs text-cyan-800">
+                      <span className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-cyan-100 bg-cyan-50 px-2 py-1 text-xs text-cyan-800">
                         <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
-                        {selectedModelDetails.providerName} / {selectedModelDetails.modelName}
+                        <span className="min-w-0 break-words">
+                          {selectedModelDetails.providerName} / {selectedModelDetails.modelName}
+                        </span>
                       </span>
                     )}
                     {modelsQuery.isError && (
-                      <span className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
-                        {getErrorMessage(modelsQuery.error, "Could not load models.")}
+                      <span className="inline-flex max-w-full items-center gap-2 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
+                        <span className="min-w-0 break-words">
+                          {getErrorMessage(modelsQuery.error, "Could not load models.")}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void modelsQuery.refetch()}
+                          className="shrink-0 font-semibold underline-offset-2 hover:underline"
+                        >
+                          Retry
+                        </button>
+                      </span>
+                    )}
+                    {!modelsQuery.isLoading && availableModels.length === 0 && !modelsQuery.isError && (
+                      <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                        No available models. The default provider may still respond if configured.
                       </span>
                     )}
                     {providerStatuses.map((provider) => (
                       <span
                         key={provider.providerId}
-                        className={`rounded-md border px-2 py-1 text-xs ${getProviderStatusClasses(
+                        className={`max-w-full break-words rounded-md border px-2 py-1 text-xs ${getProviderStatusClasses(
                           provider.status,
                         )}`}
                         title={provider.errorMessage}
@@ -1159,7 +1281,7 @@ const Home: React.FC = () => {
               </div>
 
               {selectedMessagesQuery.isError && (
-                <div className="m-5 rounded-md border border-red-100 bg-red-50 p-3 text-sm text-red-800">
+                <div className="m-5 shrink-0 rounded-md border border-red-100 bg-red-50 p-3 text-sm text-red-800">
                   <div className="flex gap-2">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                     <span>
@@ -1190,14 +1312,23 @@ const Home: React.FC = () => {
                     <p className="mt-1 text-xs text-slate-500">
                       Send a prompt to start the conversation.
                     </p>
+                    {!modelsQuery.isLoading && availableModels.length === 0 && (
+                      <p className="mt-2 text-xs text-amber-700">
+                        No models are listed right now; sending can still use the backend default.
+                      </p>
+                    )}
                   </div>
                 </div>
               ) : (
-                <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
+                <div
+                  ref={messageListRef}
+                  onScroll={handleMessageScroll}
+                  className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-5 sm:px-5"
+                >
                   {selectedMessages.map((message) => (
                     <article
                       key={message.id}
-                      className={`rounded-md border p-4 ${getMessageStyles(message.author)}`}
+                      className={`max-w-full rounded-md border p-4 ${getMessageStyles(message.author)}`}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -1221,12 +1352,23 @@ const Home: React.FC = () => {
 
               <form
                 onSubmit={(event) => void handlePromptSubmit(event)}
-                className="border-t border-slate-200 bg-slate-50 px-5 py-4"
+                className="shrink-0 border-t border-slate-200 bg-slate-50 px-4 py-4 sm:px-5"
               >
                 {(promptValidationError || settingsValidationError || streamError) && (
                   <div className="mb-3 flex gap-2 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-800">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                    <span>{promptValidationError || settingsValidationError || streamError}</span>
+                    <span className="min-w-0 break-words">
+                      {promptValidationError || settingsValidationError || streamError}
+                    </span>
+                    {streamError && promptDraft.trim() && !isStreaming && (
+                      <button
+                        type="button"
+                        onClick={() => void submitPrompt()}
+                        className="ml-auto shrink-0 text-xs font-semibold underline-offset-2 hover:underline"
+                      >
+                        Retry
+                      </button>
+                    )}
                   </div>
                 )}
                 <div className="flex items-end gap-2">
@@ -1236,15 +1378,7 @@ const Home: React.FC = () => {
                   <textarea
                     id="chat-prompt"
                     value={promptDraft}
-                    onChange={(event) => {
-                      setPromptDraft(event.target.value);
-                      if (promptValidationError) {
-                        setPromptValidationError(null);
-                      }
-                      if (streamError) {
-                        setStreamError(null);
-                      }
-                    }}
+                    onChange={(event) => updatePromptDraft(event.target.value)}
                     onKeyDown={handlePromptKeyDown}
                     rows={3}
                     disabled={isStreaming}
