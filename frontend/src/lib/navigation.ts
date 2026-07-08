@@ -1,6 +1,7 @@
+import { storage } from "./storage";
+
 export const logoutAndRedirect = () => {
-  localStorage.removeItem("token");
-  localStorage.removeItem("user");
+  storage.clear();
 
   window.dispatchEvent(new Event("unauthorized-access"));
 };
