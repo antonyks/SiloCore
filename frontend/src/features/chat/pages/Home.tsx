@@ -9,19 +9,22 @@ import {
   Plus,
   RefreshCw,
   Search,
+  SendHorizontal,
   ShieldAlert,
   Trash2,
   User,
   X,
 } from "lucide-react";
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import UserProfileDropdown from "../../../components/ui/UserProfileDropdown";
 import { useAuth } from "../../auth/hooks/useAuth";
 import {
   useChatSession,
+  useChatSessionMessages,
   useChatSessions,
   useCreateChatSession,
   useDeleteChatSession,
+  useGenerateChatMessage,
   useUpdateChatSession,
 } from "../hooks/useChatSessions";
 import type { ChatSession, ChatSessionMessage } from "../types";
@@ -117,6 +120,45 @@ const formatMessageTime = (value: string) => {
   }).format(date);
 };
 
+const formatLatency = (latencyMs: number) => {
+  if (latencyMs >= 1000) {
+    return `${(latencyMs / 1000).toFixed(1)}s`;
+  }
+
+  return `${Math.round(latencyMs)}ms`;
+};
+
+const getUsageTotal = (message: ChatSessionMessage) => {
+  const usage = message.metadata?.usage;
+  return usage?.totalTokens ?? usage?.total;
+};
+
+const getUsageParts = (message: ChatSessionMessage) => {
+  const usage = message.metadata?.usage;
+
+  if (!usage) {
+    return null;
+  }
+
+  const prompt = usage.promptTokens ?? usage.prompt;
+  const completion = usage.completionTokens ?? usage.completion;
+  const total = usage.totalTokens ?? usage.total;
+
+  return { prompt, completion, total };
+};
+
+const getMessageStyles = (author: ChatSessionMessage["author"]) => {
+  if (author === "USER") {
+    return "border-cyan-100 bg-cyan-50/70";
+  }
+
+  if (author === "SYSTEM") {
+    return "border-amber-100 bg-amber-50/80";
+  }
+
+  return "border-slate-200 bg-white";
+};
+
 const MessageAuthorIcon: React.FC<{ author: ChatSessionMessage["author"] }> = ({ author }) => {
   if (author === "ASSISTANT") {
     return <Bot className="h-4 w-4" aria-hidden="true" />;
@@ -127,6 +169,50 @@ const MessageAuthorIcon: React.FC<{ author: ChatSessionMessage["author"] }> = ({
   }
 
   return <User className="h-4 w-4" aria-hidden="true" />;
+};
+
+const AssistantMetadata: React.FC<{ message: ChatSessionMessage }> = ({ message }) => {
+  const metadata = message.metadata;
+
+  if (!metadata) {
+    return null;
+  }
+
+  const usage = getUsageParts(message);
+  const latency = metadata.latencyMs ?? metadata.latency;
+  const providerLabel = metadata.providerName
+    ? metadata.providerId
+      ? `${metadata.providerName} (${metadata.providerId})`
+      : metadata.providerName
+    : metadata.providerId
+      ? `Provider ${metadata.providerId}`
+      : null;
+  const totalUsage = getUsageTotal(message);
+  const items = [
+    providerLabel,
+    metadata.model ? `Model ${metadata.model}` : null,
+    typeof latency === "number" ? `Latency ${formatLatency(latency)}` : null,
+    typeof totalUsage === "number" ? `Tokens ${totalUsage}` : null,
+  ].filter(Boolean);
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
+      {items.map((item) => (
+        <span key={item} className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+          {item}
+        </span>
+      ))}
+      {usage && (usage.prompt !== undefined || usage.completion !== undefined) && (
+        <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">
+          {usage.prompt ?? 0} in / {usage.completion ?? 0} out
+        </span>
+      )}
+    </div>
+  );
 };
 
 const SessionLoadingRows = () => (
@@ -147,6 +233,8 @@ const Home: React.FC = () => {
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [confirmingDeleteSession, setConfirmingDeleteSession] = useState<ChatSession | null>(null);
+  const [promptDraft, setPromptDraft] = useState("");
+  const [promptValidationError, setPromptValidationError] = useState<string | null>(null);
 
   const listParams = useMemo(
     () => ({
@@ -159,9 +247,11 @@ const Home: React.FC = () => {
 
   const sessionsQuery = useChatSessions(listParams);
   const selectedSessionQuery = useChatSession(selectedSessionId);
+  const selectedMessagesQuery = useChatSessionMessages(selectedSessionId);
   const createSession = useCreateChatSession();
   const updateSession = useUpdateChatSession();
   const deleteSession = useDeleteChatSession();
+  const generateMessage = useGenerateChatMessage();
 
   const sessions = useMemo(() => sessionsQuery.data || [], [sessionsQuery.data]);
   const filteredSessions = useMemo(() => {
@@ -176,6 +266,11 @@ const Home: React.FC = () => {
 
   const groupedSessions = useMemo(() => groupSessions(filteredSessions), [filteredSessions]);
   const selectedSession = selectedSessionQuery.data;
+  const selectedMessages = selectedMessagesQuery.data || selectedSession?.messages || [];
+  const generationError =
+    generateMessage.isError && generateMessage.variables?.id === selectedSessionId
+      ? getErrorMessage(generateMessage.error, "Message generation failed.")
+      : null;
 
   const handleCreateSession = async () => {
     try {
@@ -241,6 +336,45 @@ const Home: React.FC = () => {
     } catch {
       // React Query exposes the mutation error rendered in the confirmation panel.
     }
+  };
+
+  const submitPrompt = async () => {
+    if (!selectedSessionId || generateMessage.isPending) {
+      return;
+    }
+
+    const content = promptDraft.trim();
+    if (!content) {
+      setPromptValidationError("Enter a prompt before sending.");
+      return;
+    }
+
+    setPromptValidationError(null);
+
+    try {
+      await generateMessage.mutateAsync({ id: selectedSessionId, input: { content } });
+      setPromptDraft("");
+    } catch {
+      // React Query exposes the error rendered near the composer.
+    }
+  };
+
+  const handlePromptSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await submitPrompt();
+  };
+
+  const handlePromptKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing) {
+      return;
+    }
+
+    if (event.key !== "Enter" || event.shiftKey) {
+      return;
+    }
+
+    event.preventDefault();
+    void submitPrompt();
   };
 
   const renderSessionRow = (session: ChatSession) => {
@@ -484,7 +618,7 @@ const Home: React.FC = () => {
           </div>
         </aside>
 
-        <main className="min-h-0 overflow-y-auto bg-white">
+        <main className="min-h-0 overflow-hidden bg-white">
           {!selectedSessionId && (
             <div className="flex min-h-full items-center justify-center px-6 py-12">
               <div className="max-w-md text-center">
@@ -531,19 +665,38 @@ const Home: React.FC = () => {
           )}
 
           {selectedSession && !selectedSessionQuery.isLoading && !selectedSessionQuery.isError && (
-            <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col">
+            <div className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col">
               <div className="border-b border-slate-200 px-5 py-4">
                 <h2 className="truncate text-base font-semibold text-slate-950">
                   {selectedSession.title}
                 </h2>
                 <p className="mt-1 text-xs text-slate-500">
-                  {selectedSession.messages.length} message
-                  {selectedSession.messages.length === 1 ? "" : "s"}
+                  {selectedMessages.length} message
+                  {selectedMessages.length === 1 ? "" : "s"}
                 </p>
               </div>
 
-              {selectedSession.messages.length === 0 ? (
-                <div className="flex flex-1 items-center justify-center px-6 py-12 text-center">
+              {selectedMessagesQuery.isError && (
+                <div className="m-5 rounded-md border border-red-100 bg-red-50 p-3 text-sm text-red-800">
+                  <div className="flex gap-2">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                    <span>
+                      {getErrorMessage(selectedMessagesQuery.error, "Could not load messages.")}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void selectedMessagesQuery.refetch()}
+                    className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 bg-white px-2.5 text-xs font-medium text-red-700 hover:bg-red-100"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                    Retry
+                  </button>
+                </div>
+              )}
+
+              {selectedMessages.length === 0 ? (
+                <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-12 text-center">
                   <div>
                     <MessageSquare
                       className="mx-auto h-8 w-8 text-slate-300"
@@ -553,16 +706,16 @@ const Home: React.FC = () => {
                       This chat has no messages yet
                     </h3>
                     <p className="mt-1 text-xs text-slate-500">
-                      Prompt sending will be added in a later task.
+                      Send a prompt to start the conversation.
                     </p>
                   </div>
                 </div>
               ) : (
-                <div className="flex-1 space-y-4 px-5 py-5">
-                  {selectedSession.messages.map((message) => (
+                <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
+                  {selectedMessages.map((message) => (
                     <article
                       key={message.id}
-                      className="rounded-md border border-slate-200 bg-white p-4"
+                      className={`rounded-md border p-4 ${getMessageStyles(message.author)}`}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -578,10 +731,57 @@ const Home: React.FC = () => {
                       <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">
                         {message.content}
                       </p>
+                      {message.author === "ASSISTANT" && <AssistantMetadata message={message} />}
                     </article>
                   ))}
                 </div>
               )}
+
+              <form
+                onSubmit={(event) => void handlePromptSubmit(event)}
+                className="border-t border-slate-200 bg-slate-50 px-5 py-4"
+              >
+                {(promptValidationError || generationError) && (
+                  <div className="mb-3 flex gap-2 rounded-md border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-800">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                    <span>{promptValidationError || generationError}</span>
+                  </div>
+                )}
+                <div className="flex items-end gap-2">
+                  <label className="sr-only" htmlFor="chat-prompt">
+                    Message
+                  </label>
+                  <textarea
+                    id="chat-prompt"
+                    value={promptDraft}
+                    onChange={(event) => {
+                      setPromptDraft(event.target.value);
+                      if (promptValidationError) {
+                        setPromptValidationError(null);
+                      }
+                    }}
+                    onKeyDown={handlePromptKeyDown}
+                    rows={3}
+                    disabled={generateMessage.isPending}
+                    className="max-h-40 min-h-20 flex-1 resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-6 text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                    placeholder="Send a message"
+                  />
+                  <button
+                    type="submit"
+                    disabled={generateMessage.isPending}
+                    className="inline-flex h-10 items-center gap-1.5 rounded-md bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {generateMessage.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <SendHorizontal className="h-4 w-4" aria-hidden="true" />
+                    )}
+                    <span className="hidden sm:inline">
+                      {generateMessage.isPending ? "Sending..." : "Send"}
+                    </span>
+                  </button>
+                </div>
+              </form>
             </div>
           )}
         </main>

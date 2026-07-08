@@ -14,6 +14,8 @@ export interface ChatSessionMessage {
   id: number;
   content: string;
   author: ChatMessageAuthor;
+  metadata?: ChatMessageMetadata | null;
+  sessionId?: number;
   createdAt: string;
 }
 
@@ -34,4 +36,33 @@ export interface ChatSessionCreateInput {
 
 export interface ChatSessionUpdateInput {
   title: string;
+}
+
+export interface ChatTokenUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  prompt?: number;
+  completion?: number;
+  total?: number;
+}
+
+export interface ChatMessageMetadata {
+  providerId?: string | number;
+  providerName?: string;
+  providerType?: string;
+  model?: string;
+  usage?: ChatTokenUsage;
+  latencyMs?: number;
+  latency?: number;
+  params?: Record<string, unknown>;
+}
+
+export interface ChatGenerationInput {
+  content: string;
+}
+
+export interface ChatGenerationResponse {
+  userMessage: ChatSessionMessage;
+  assistantMessage: ChatSessionMessage;
 }
