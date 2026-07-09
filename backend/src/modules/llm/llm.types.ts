@@ -61,6 +61,13 @@ export interface TokenUsage {
   totalTokens: number;
 }
 
+export interface LlmGenerationDefaults {
+  temperature?: number;
+  topP?: number;
+  maxTokens?: number;
+  stopSequences?: string[];
+}
+
 /** A single chunk received during streaming. */
 export interface LlmStreamChunk {
   /** Partial text content of this chunk. */
@@ -130,6 +137,9 @@ export interface LlmProviderConfig {
   /** Request timeout in milliseconds. */
   timeoutMs?: number;
 
+  /** Default generation parameters used when a chat request omits overrides. */
+  generationDefaults?: LlmGenerationDefaults;
+
   /** Optional headers to include with every request. */
   extraHeaders?: Record<string, string>;
 }
@@ -172,6 +182,7 @@ export interface LlmProviderModelListResult {
   providerId: string;
   providerName: string;
   providerType: LlmProviderType;
+  generationDefaults?: LlmGenerationDefaults;
   status: LlmProviderModelListStatus;
   modelCount: number;
   errorMessage?: string;

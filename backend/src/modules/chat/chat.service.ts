@@ -51,6 +51,18 @@ function removeUndefinedValues<T extends Record<string, unknown>>(data: T): Reco
   }, {});
 }
 
+function applyGenerationDefaults(
+  defaults: IChatGenerationParams,
+  input: IChatGenerationServiceInput,
+): IChatGenerationParams {
+  return {
+    temperature: input.temperature ?? defaults.temperature,
+    topP: input.topP ?? defaults.topP,
+    maxTokens: input.maxTokens ?? defaults.maxTokens,
+    stopSequences: input.stopSequences ?? defaults.stopSequences,
+  };
+}
+
 function createAssistantMetadata(data: {
   providerId: string;
   providerName: string;
@@ -291,12 +303,7 @@ export const ChatService = {
       sessionId: input.sessionId,
     });
 
-    const params: IChatGenerationParams = {
-      temperature: input.temperature,
-      topP: input.topP,
-      maxTokens: input.maxTokens,
-      stopSequences: input.stopSequences,
-    };
+    const params = applyGenerationDefaults(resolved.generationDefaults, input);
 
     return {
       provider: resolved.provider,
@@ -308,10 +315,10 @@ export const ChatService = {
       request: {
         model: resolved.model,
         messages: toLlmMessages([...session.messages, userMessage]),
-        temperature: input.temperature,
-        topP: input.topP,
-        maxTokens: input.maxTokens,
-        stopSequences: input.stopSequences,
+        temperature: params.temperature,
+        topP: params.topP,
+        maxTokens: params.maxTokens,
+        stopSequences: params.stopSequences,
       },
       userMessage,
       startedAt: Date.now(),

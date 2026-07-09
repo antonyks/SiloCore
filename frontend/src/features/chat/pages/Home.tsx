@@ -49,6 +49,7 @@ import type {
   ChatSession,
   ChatSessionDetail,
   ChatSessionMessage,
+  GenerationDefaults,
   LlmListedModel,
   LlmProviderModelListResult,
   LlmProviderModelListStatus,
@@ -178,6 +179,14 @@ const buildStopSequences = (value: string) => {
 
   return sequences.length > 0 ? sequences : undefined;
 };
+
+const formatDefaultPlaceholder = (value: number | undefined) =>
+  value === undefined ? "Provider default" : `Default ${value}`;
+
+const formatStopSequencePlaceholder = (defaults: GenerationDefaults | undefined) =>
+  defaults?.stopSequences && defaults.stopSequences.length > 0
+    ? defaults.stopSequences.join("\n")
+    : "One sequence per line";
 
 const isSameDate = (first: Date, second: Date) =>
   first.getFullYear() === second.getFullYear() &&
@@ -491,6 +500,10 @@ const Home: React.FC = () => {
           model.providerId === selectedModel.providerId && model.modelId === selectedModel.modelId,
       )
     : undefined;
+  const selectedProviderStatus = selectedModelDetails
+    ? providerStatuses.find((provider) => provider.providerId === selectedModelDetails.providerId)
+    : providerStatuses[0];
+  const selectedGenerationDefaults = selectedProviderStatus?.generationDefaults;
   const messageScrollKey = useMemo(
     () => selectedMessages.map((message) => `${message.id}:${message.content.length}`).join("|"),
     [selectedMessages],
@@ -1339,7 +1352,9 @@ const Home: React.FC = () => {
                             updateGenerationSetting("temperature", event.target.value)
                           }
                           className="mt-1 h-9 w-full rounded-md border border-slate-300 px-2 text-sm text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
-                          placeholder="Default"
+                          placeholder={formatDefaultPlaceholder(
+                            selectedGenerationDefaults?.temperature,
+                          )}
                         />
                       </label>
                       <label className="block text-xs font-medium text-slate-600">
@@ -1352,7 +1367,7 @@ const Home: React.FC = () => {
                           value={generationSettings.topP}
                           onChange={(event) => updateGenerationSetting("topP", event.target.value)}
                           className="mt-1 h-9 w-full rounded-md border border-slate-300 px-2 text-sm text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
-                          placeholder="Default"
+                          placeholder={formatDefaultPlaceholder(selectedGenerationDefaults?.topP)}
                         />
                       </label>
                       <label className="block text-xs font-medium text-slate-600">
@@ -1366,7 +1381,9 @@ const Home: React.FC = () => {
                             updateGenerationSetting("maxTokens", event.target.value)
                           }
                           className="mt-1 h-9 w-full rounded-md border border-slate-300 px-2 text-sm text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
-                          placeholder="Default"
+                          placeholder={formatDefaultPlaceholder(
+                            selectedGenerationDefaults?.maxTokens,
+                          )}
                         />
                       </label>
                     </div>
@@ -1379,7 +1396,7 @@ const Home: React.FC = () => {
                         }
                         rows={2}
                         className="mt-1 max-h-24 min-h-16 w-full resize-y rounded-md border border-slate-300 px-2 py-2 text-sm text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
-                        placeholder="One sequence per line"
+                        placeholder={formatStopSequencePlaceholder(selectedGenerationDefaults)}
                       />
                     </label>
                   </div>

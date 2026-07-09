@@ -1,4 +1,4 @@
-import { LlmProviderType } from '../../llm/llm.types';
+import { LlmGenerationDefaults, LlmProviderType } from '../../llm/llm.types';
 import {
   LlmProviderConfigCreateInput,
   LlmProviderConfigUpdateInput,
@@ -15,6 +15,7 @@ export interface SanitizedLlmProviderConfig {
   enabled: boolean;
   defaultModel: string;
   timeoutMs: number | null;
+  generationDefaults: LlmGenerationDefaults;
   extraHeaders: Record<string, string>;
   hasApiKey: boolean;
   deletedAt: Date | null;

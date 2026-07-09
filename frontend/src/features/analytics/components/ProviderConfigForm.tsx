@@ -24,6 +24,44 @@ const isPositiveIntegerOrBlank = (value: string) => {
   return Number.isInteger(numericValue) && numericValue > 0;
 };
 
+const isNonNegativeNumberOrBlank = (value: string) => {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return true;
+  }
+
+  const numericValue = Number(trimmed);
+
+  return Number.isFinite(numericValue) && numericValue >= 0;
+};
+
+const isTopPOrBlank = (value: string) => {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return true;
+  }
+
+  const numericValue = Number(trimmed);
+
+  return Number.isFinite(numericValue) && numericValue >= 0 && numericValue <= 1;
+};
+
+const parseOptionalNumber = (value: string) => {
+  const trimmed = value.trim();
+  return trimmed ? Number(trimmed) : undefined;
+};
+
+const parseStopSequences = (value: string) => {
+  const sequences = value
+    .split("\n")
+    .map((sequence) => sequence.trim())
+    .filter(Boolean);
+
+  return sequences.length > 0 ? sequences : undefined;
+};
+
 const parseHeaders = (value: string): Record<string, string> | null => {
   const trimmed = value.trim();
 
@@ -56,6 +94,14 @@ const providerFormSchema = z
     enabled: z.boolean(),
     defaultModel: z.string().trim().min(1, "Default model is required"),
     timeoutMs: z.string().refine(isPositiveIntegerOrBlank, "Timeout must be a positive integer"),
+    defaultTemperature: z
+      .string()
+      .refine(isNonNegativeNumberOrBlank, "Temperature must be a non-negative number"),
+    defaultTopP: z.string().refine(isTopPOrBlank, "Top P must be between 0 and 1"),
+    defaultMaxTokens: z
+      .string()
+      .refine(isPositiveIntegerOrBlank, "Max tokens must be a positive whole number"),
+    defaultStopSequences: z.string(),
     extraHeaders: z
       .string()
       .refine(
@@ -97,6 +143,17 @@ const buildDefaultValues = (
   enabled: provider?.enabled ?? true,
   defaultModel: provider?.defaultModel ?? "",
   timeoutMs: provider?.timeoutMs ? String(provider.timeoutMs) : "",
+  defaultTemperature:
+    provider?.generationDefaults.temperature !== undefined
+      ? String(provider.generationDefaults.temperature)
+      : "",
+  defaultTopP:
+    provider?.generationDefaults.topP !== undefined ? String(provider.generationDefaults.topP) : "",
+  defaultMaxTokens:
+    provider?.generationDefaults.maxTokens !== undefined
+      ? String(provider.generationDefaults.maxTokens)
+      : "",
+  defaultStopSequences: provider?.generationDefaults.stopSequences?.join("\n") ?? "",
   extraHeaders: provider ? toPrettyHeaders(provider.extraHeaders) : "",
   apiKeyMode: "unchanged",
   apiKey: "",
@@ -108,6 +165,12 @@ const toProviderConfigInput = (
 ): LlmProviderConfigInput => {
   const headers = parseHeaders(values.extraHeaders) || {};
   const timeoutMs = values.timeoutMs.trim() ? Number(values.timeoutMs.trim()) : null;
+  const generationDefaults = {
+    temperature: parseOptionalNumber(values.defaultTemperature),
+    topP: parseOptionalNumber(values.defaultTopP),
+    maxTokens: parseOptionalNumber(values.defaultMaxTokens),
+    stopSequences: parseStopSequences(values.defaultStopSequences),
+  };
   const input: LlmProviderConfigInput = {
     name: values.name.trim(),
     type: values.type as LlmProviderType,
@@ -115,6 +178,9 @@ const toProviderConfigInput = (
     enabled: values.enabled,
     defaultModel: values.defaultModel.trim(),
     timeoutMs,
+    generationDefaults: Object.fromEntries(
+      Object.entries(generationDefaults).filter(([, value]) => value !== undefined),
+    ),
     extraHeaders: headers,
   };
 
@@ -261,6 +327,62 @@ const ProviderConfigForm: React.FC<ProviderConfigFormProps> = ({
           <label htmlFor="provider-enabled" className="text-sm font-medium text-slate-800">
             Enabled
           </label>
+        </div>
+
+        <div className="lg:col-span-2">
+          <div className="mb-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Generation Defaults
+            </h3>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-3">
+            <label className="block">
+              <span className="text-xs font-medium text-slate-700">Temperature</span>
+              <input
+                className={inputClassName}
+                inputMode="decimal"
+                placeholder="0.7"
+                {...register("defaultTemperature")}
+                disabled={isSubmitting}
+              />
+              <div className={errorClassName}>{errors.defaultTemperature?.message}</div>
+            </label>
+
+            <label className="block">
+              <span className="text-xs font-medium text-slate-700">Top P</span>
+              <input
+                className={inputClassName}
+                inputMode="decimal"
+                placeholder="0.9"
+                {...register("defaultTopP")}
+                disabled={isSubmitting}
+              />
+              <div className={errorClassName}>{errors.defaultTopP?.message}</div>
+            </label>
+
+            <label className="block">
+              <span className="text-xs font-medium text-slate-700">Max Tokens</span>
+              <input
+                className={inputClassName}
+                inputMode="numeric"
+                placeholder="4096"
+                {...register("defaultMaxTokens")}
+                disabled={isSubmitting}
+              />
+              <div className={errorClassName}>{errors.defaultMaxTokens?.message}</div>
+            </label>
+
+            <label className="block lg:col-span-3">
+              <span className="text-xs font-medium text-slate-700">Stop Sequences</span>
+              <textarea
+                className="min-h-20 w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100 disabled:bg-slate-100"
+                placeholder={"One sequence per line"}
+                {...register("defaultStopSequences")}
+                disabled={isSubmitting}
+              />
+              <div className={errorClassName}>{errors.defaultStopSequences?.message}</div>
+            </label>
+          </div>
         </div>
 
         <label className="block lg:col-span-2">

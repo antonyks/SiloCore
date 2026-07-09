@@ -10,6 +10,31 @@ function isStringRecord(value: unknown): boolean {
   return Object.values(value).every((headerValue) => typeof headerValue === 'string');
 }
 
+function isGenerationDefaults(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const allowedKeys = new Set(['temperature', 'topP', 'maxTokens', 'stopSequences']);
+  return Object.entries(value).every(([key, fieldValue]) => {
+    if (!allowedKeys.has(key)) return false;
+
+    if (key === 'temperature') {
+      return typeof fieldValue === 'number' && Number.isFinite(fieldValue) && fieldValue >= 0;
+    }
+
+    if (key === 'topP') {
+      return typeof fieldValue === 'number' && Number.isFinite(fieldValue) && fieldValue >= 0 && fieldValue <= 1;
+    }
+
+    if (key === 'maxTokens') {
+      return Number.isInteger(fieldValue) && Number(fieldValue) > 0;
+    }
+
+    return Array.isArray(fieldValue) && fieldValue.every((sequence) => typeof sequence === 'string');
+  });
+}
+
 export const validateProviderId = [
   param('id')
     .isInt({ min: 1 })
@@ -40,6 +65,10 @@ export const validateProviderCreate = [
     .optional({ nullable: true })
     .isInt({ min: 1 })
     .withMessage('Timeout must be a positive integer'),
+  body('generationDefaults')
+    .optional({ nullable: true })
+    .custom(isGenerationDefaults)
+    .withMessage('Generation defaults must include only valid temperature, topP, maxTokens, and stopSequences values'),
   body('extraHeaders')
     .optional()
     .custom(isStringRecord)
@@ -78,6 +107,10 @@ export const validateProviderUpdate = [
     .optional({ nullable: true })
     .isInt({ min: 1 })
     .withMessage('Timeout must be a positive integer'),
+  body('generationDefaults')
+    .optional({ nullable: true })
+    .custom(isGenerationDefaults)
+    .withMessage('Generation defaults must include only valid temperature, topP, maxTokens, and stopSequences values'),
   body('extraHeaders')
     .optional()
     .custom(isStringRecord)

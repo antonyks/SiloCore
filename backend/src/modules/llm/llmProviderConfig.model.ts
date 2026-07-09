@@ -11,6 +11,7 @@ const llmProviderConfigSelection = {
   enabled: true,
   defaultModel: true,
   timeoutMs: true,
+  generationDefaults: true,
   extraHeaders: true,
   apiKey: true,
   deletedAt: true,

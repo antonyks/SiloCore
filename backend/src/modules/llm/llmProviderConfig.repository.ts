@@ -10,7 +10,14 @@ import {
   toDbProviderType,
 } from './llmProviderConfig.types';
 
-function toJsonObject(value: Record<string, string> | undefined): Prisma.InputJsonObject | undefined {
+function toJsonObject(value: unknown): Prisma.InputJsonObject | undefined {
+  if (value === null) return {};
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || Array.isArray(value)) return {};
+  return value as Prisma.InputJsonObject;
+}
+
+function toHeaderJsonObject(value: Record<string, string> | undefined): Prisma.InputJsonObject | undefined {
   return value === undefined ? undefined : value;
 }
 
@@ -24,7 +31,8 @@ export const LlmProviderConfigRepository = {
         enabled: data.enabled ?? true,
         defaultModel: data.defaultModel,
         timeoutMs: data.timeoutMs ?? null,
-        extraHeaders: toJsonObject(data.extraHeaders),
+        generationDefaults: toJsonObject(data.generationDefaults ?? {}),
+        extraHeaders: toHeaderJsonObject(data.extraHeaders),
         apiKey: data.apiKey ?? null,
       },
       select: SelectedLlmProviderConfigFields,
@@ -73,7 +81,8 @@ export const LlmProviderConfigRepository = {
       enabled: data.enabled,
       defaultModel: data.defaultModel,
       timeoutMs: data.timeoutMs,
-      extraHeaders: toJsonObject(data.extraHeaders),
+      generationDefaults: toJsonObject(data.generationDefaults),
+      extraHeaders: toHeaderJsonObject(data.extraHeaders),
     };
 
     if (data.apiKey !== undefined) {

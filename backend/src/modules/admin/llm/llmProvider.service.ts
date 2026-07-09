@@ -17,6 +17,7 @@ function sanitizeProvider(provider: SelectedLlmProviderConfig): SanitizedLlmProv
     enabled: provider.enabled,
     defaultModel: provider.defaultModel,
     timeoutMs: provider.timeoutMs,
+    generationDefaults: LlmRuntimeService.normalizeGenerationDefaults(provider.generationDefaults),
     extraHeaders: LlmRuntimeService.normalizeExtraHeaders(provider.extraHeaders),
     hasApiKey: Boolean(provider.apiKey),
     deletedAt: provider.deletedAt,

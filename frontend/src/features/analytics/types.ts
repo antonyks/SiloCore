@@ -4,6 +4,13 @@ export type LlmProviderType = "ollama" | "openai-compatible";
 export type UserStatus = "ACTIVE" | "BANNED" | "DELETED";
 export type LlmProviderModelListStatus = "success" | "error" | "skipped";
 
+export interface GenerationDefaults {
+  temperature?: number;
+  topP?: number;
+  maxTokens?: number;
+  stopSequences?: string[];
+}
+
 export interface SanitizedLlmProviderConfig {
   id: number;
   name: string;
@@ -12,6 +19,7 @@ export interface SanitizedLlmProviderConfig {
   enabled: boolean;
   defaultModel: string;
   timeoutMs: number | null;
+  generationDefaults: GenerationDefaults;
   extraHeaders: Record<string, string>;
   hasApiKey: boolean;
   deletedAt: string | null;
@@ -26,6 +34,7 @@ export interface LlmProviderConfigInput {
   enabled?: boolean;
   defaultModel: string;
   timeoutMs?: number | null;
+  generationDefaults?: GenerationDefaults | null;
   extraHeaders?: Record<string, string>;
   apiKey?: string | null;
 }
@@ -42,6 +51,7 @@ export interface LlmProviderModelListResult {
   providerId: string;
   providerName: string;
   providerType: LlmProviderType;
+  generationDefaults?: GenerationDefaults;
   status: LlmProviderModelListStatus;
   modelCount: number;
   errorMessage?: string;

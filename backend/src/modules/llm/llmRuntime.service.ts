@@ -7,6 +7,7 @@ import { SelectedLlmProviderConfig } from './llmProviderConfig.model';
 import { LlmRegistryService } from './llm.service';
 import {
   LlmModelListResult,
+  LlmGenerationDefaults,
   LlmProviderConfig,
   LlmProviderOperationResult,
   LlmStreamChunk,
@@ -31,6 +32,42 @@ function normalizeExtraHeaders(value: unknown): Record<string, string> {
   }, {});
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function normalizeGenerationDefaults(value: unknown): LlmGenerationDefaults {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  const data = value as Record<string, unknown>;
+  const defaults: LlmGenerationDefaults = {};
+
+  if (isFiniteNumber(data.temperature) && data.temperature >= 0) {
+    defaults.temperature = data.temperature;
+  }
+
+  if (isFiniteNumber(data.topP) && data.topP >= 0 && data.topP <= 1) {
+    defaults.topP = data.topP;
+  }
+
+  if (Number.isInteger(data.maxTokens) && Number(data.maxTokens) > 0) {
+    defaults.maxTokens = Number(data.maxTokens);
+  }
+
+  if (Array.isArray(data.stopSequences)) {
+    const stopSequences = data.stopSequences.filter(
+      (sequence): sequence is string => typeof sequence === 'string',
+    );
+    if (stopSequences.length > 0) {
+      defaults.stopSequences = stopSequences;
+    }
+  }
+
+  return defaults;
+}
+
 function toProviderConfig(provider: SelectedLlmProviderConfig): LlmProviderConfig {
   return {
     id: String(provider.id),
@@ -41,6 +78,7 @@ function toProviderConfig(provider: SelectedLlmProviderConfig): LlmProviderConfi
     apiKey: provider.apiKey ?? undefined,
     defaultModel: provider.defaultModel,
     timeoutMs: provider.timeoutMs ?? undefined,
+    generationDefaults: normalizeGenerationDefaults(provider.generationDefaults),
     extraHeaders: normalizeExtraHeaders(provider.extraHeaders),
   };
 }
@@ -68,6 +106,7 @@ function toProviderModelListResult(result: LlmProviderOperationResult) {
     providerId: result.providerId,
     providerName: result.providerName,
     providerType: result.providerType,
+    generationDefaults: {},
     status: result.status,
     modelCount: 0,
     errorMessage: result.errorMessage,
@@ -86,6 +125,8 @@ function createFailingStream(error: Error): AsyncIterable<LlmStreamChunk> {
 
 export const LlmRuntimeService = {
   normalizeExtraHeaders,
+
+  normalizeGenerationDefaults,
 
   toProviderConfig,
 
@@ -236,6 +277,7 @@ export const LlmRuntimeService = {
     providerConfig: SelectedLlmProviderConfig;
     provider: ILlmProvider;
     model: string;
+    generationDefaults: LlmGenerationDefaults;
   }> {
     const providerConfig = params.providerId === undefined
       ? (await LlmProviderConfigRepository.findActive())[0]
@@ -258,6 +300,7 @@ export const LlmRuntimeService = {
       providerConfig,
       provider,
       model: params.model ?? providerConfig.defaultModel,
+      generationDefaults: normalizeGenerationDefaults(providerConfig.generationDefaults),
     };
   },
 };

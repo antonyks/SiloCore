@@ -32,6 +32,7 @@ function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): Sel
     enabled: true,
     defaultModel: TEST_MODEL_ID,
     timeoutMs: 5000,
+    generationDefaults: {},
     extraHeaders: {},
     apiKey: null,
     deletedAt: null,
@@ -535,6 +536,67 @@ describe('ChatService', () => {
         select: expect.any(Object),
       });
       expect(complete).toHaveBeenCalledWith(expect.objectContaining({ model: EXPLICIT_TEST_MODEL_ID }));
+    });
+
+    it('should apply provider generation defaults before user overrides', async () => {
+      const provider = createProvider({
+        generationDefaults: {
+          temperature: 0.4,
+          topP: 0.9,
+          maxTokens: 4096,
+          stopSequences: ['END'],
+        },
+      });
+      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([provider]);
+      mockPrisma.chatMessage.create
+        .mockResolvedValueOnce({
+          id: 1,
+          content: 'Hello',
+          author: 'USER',
+          sessionId: 1,
+          metadata: null,
+          createdAt: new Date(),
+        })
+        .mockResolvedValueOnce({
+          id: 2,
+          content: 'Done',
+          author: 'ASSISTANT',
+          sessionId: 1,
+          metadata: null,
+          createdAt: new Date(),
+        });
+      const complete = jest.spyOn(OllamaProvider.prototype, 'complete').mockResolvedValue({
+        content: 'Done',
+        model: TEST_MODEL_ID,
+      });
+
+      await ChatService.generateAssistantResponse({
+        sessionId: 1,
+        userId: 1,
+        content: 'Hello',
+        temperature: 0.2,
+      });
+
+      expect(complete).toHaveBeenCalledWith(expect.objectContaining({
+        temperature: 0.2,
+        topP: 0.9,
+        maxTokens: 4096,
+        stopSequences: ['END'],
+      }));
+      expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, {
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({
+            params: {
+              temperature: 0.2,
+              topP: 0.9,
+              maxTokens: 4096,
+              stopSequences: ['END'],
+            },
+          }),
+        }),
+        select: SelectedChatMessageFields,
+      });
     });
 
     it('should not persist the user message when provider resolution fails', async () => {

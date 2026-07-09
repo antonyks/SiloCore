@@ -27,10 +27,14 @@ export class LlmRegistryService {
     models: LlmListedModel[];
     provider: LlmProviderModelListResult;
   }> {
-    const baseProviderResult = {
+    const baseModelResult = {
       providerId: provider.id,
       providerName: provider.config.name,
       providerType: provider.config.type,
+    };
+    const baseProviderResult = {
+      ...baseModelResult,
+      generationDefaults: provider.config.generationDefaults ?? {},
     };
 
     if (!provider.isEnabled) {
@@ -47,7 +51,7 @@ export class LlmRegistryService {
     try {
       const modelNames = await provider.listModels();
       const models = modelNames.map((modelName) => ({
-        ...baseProviderResult,
+        ...baseModelResult,
         modelId: modelName,
         modelName,
       }));

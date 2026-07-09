@@ -4,6 +4,13 @@ export type ChatSessionOrderDirection = "asc" | "desc";
 export type LlmProviderType = "ollama" | "openai-compatible";
 export type LlmProviderModelListStatus = "success" | "error" | "skipped";
 
+export interface GenerationDefaults {
+  temperature?: number;
+  topP?: number;
+  maxTokens?: number;
+  stopSequences?: string[];
+}
+
 export interface ChatSession {
   id: number;
   title: string;
@@ -100,6 +107,7 @@ export interface LlmProviderModelListResult {
   providerId: string;
   providerName: string;
   providerType: LlmProviderType;
+  generationDefaults?: GenerationDefaults;
   status: LlmProviderModelListStatus;
   modelCount: number;
   errorMessage?: string;

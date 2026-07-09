@@ -1,4 +1,5 @@
 import {
+  LlmGenerationDefaults,
   LlmProviderConfigTypeValue,
   LlmProviderType,
 } from './llm.types';
@@ -10,6 +11,7 @@ export interface LlmProviderConfigCreateInput {
   enabled?: boolean;
   defaultModel: string;
   timeoutMs?: number | null;
+  generationDefaults?: LlmGenerationDefaults | null;
   extraHeaders?: Record<string, string>;
   apiKey?: string | null;
 }
@@ -21,6 +23,7 @@ export interface LlmProviderConfigUpdateInput {
   enabled?: boolean;
   defaultModel?: string;
   timeoutMs?: number | null;
+  generationDefaults?: LlmGenerationDefaults | null;
   extraHeaders?: Record<string, string>;
   apiKey?: string | null;
 }

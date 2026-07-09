@@ -26,6 +26,7 @@ function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): Sel
     enabled: true,
     defaultModel: TEST_MODEL_ID,
     timeoutMs: 5000,
+    generationDefaults: {},
     extraHeaders: {},
     apiKey: null,
     deletedAt: null,
