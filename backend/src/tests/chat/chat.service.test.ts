@@ -729,6 +729,72 @@ describe('ChatService', () => {
       });
     });
 
+    it('should persist partial assistant output when streaming fails after deltas', async () => {
+      async function* failingChunks() {
+        yield { content: 'Partial answer ' };
+        yield { reasoning: 'Partial reasoning.' };
+        throw new Error('provider timeout');
+      }
+      const userMessage: SelectedChatMessage = {
+        id: 1,
+        content: 'Hello',
+        author: 'USER',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      };
+      const assistantMessage: SelectedChatMessage = {
+        id: 2,
+        content: 'Partial answer ',
+        author: 'ASSISTANT',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      };
+
+      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
+      mockPrisma.chatMessage.create
+        .mockResolvedValueOnce(userMessage)
+        .mockResolvedValueOnce(assistantMessage);
+      jest.spyOn(OllamaProvider.prototype, 'streamComplete').mockReturnValue(failingChunks());
+
+      const events = [];
+      let caughtError: unknown;
+      try {
+        for await (const event of ChatService.streamAssistantResponse({
+          sessionId: 1,
+          userId: 1,
+          content: 'Hello',
+        })) {
+          events.push(event);
+        }
+      } catch (error) {
+        caughtError = error;
+      }
+
+      expect(caughtError).toEqual(new Error('provider timeout'));
+      expect(events).toEqual([
+        { event: 'user_message', data: userMessage },
+        { event: 'delta', data: { content: 'Partial answer ' } },
+        { event: 'delta', data: { reasoning: 'Partial reasoning.' } },
+        { event: 'assistant_message', data: assistantMessage },
+      ]);
+      expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, {
+        data: expect.objectContaining({
+          content: 'Partial answer ',
+          author: 'ASSISTANT',
+          metadata: expect.objectContaining({
+            reasoning: 'Partial reasoning.',
+            finishReason: 'error',
+            incomplete: true,
+            errorMessage: 'provider timeout',
+          }),
+        }),
+        select: SelectedChatMessageFields,
+      });
+    });
+
     it('should mark reasoning-only length finishes as incomplete', async () => {
       async function* reasoningOnlyChunks() {
         yield { reasoning: 'Long reasoning. ' };

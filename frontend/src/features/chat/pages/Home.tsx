@@ -414,7 +414,7 @@ const AssistantIncompleteNotice: React.FC<{ message: ChatSessionMessage }> = ({ 
 
   return (
     <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-      Generation ended before a final answer was produced. Try increasing Max Tokens.
+      Generation ended before a final answer was produced.
     </div>
   );
 };
@@ -435,6 +435,7 @@ const Home: React.FC = () => {
   const queryClient = useQueryClient();
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingAssistantIdRef = useRef<number | null>(null);
+  const streamingAssistantHasOutputRef = useRef(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const promptDraftsBySessionRef = useRef<Record<number, string>>({});
@@ -746,6 +747,33 @@ const Home: React.FC = () => {
     streamingAssistantIdRef.current = null;
   };
 
+  const markStreamingAssistantIncomplete = (
+    sessionId: number,
+    data: { finishReason: string; errorMessage?: string },
+  ) => {
+    const streamingAssistantId = streamingAssistantIdRef.current;
+
+    if (streamingAssistantId === null) {
+      return;
+    }
+
+    updateCachedMessages(sessionId, (messages) =>
+      messages.map((message) =>
+        message.id === streamingAssistantId
+          ? {
+              ...message,
+              metadata: {
+                ...(message.metadata || {}),
+                incomplete: true,
+                finishReason: data.finishReason,
+                ...(data.errorMessage ? { errorMessage: data.errorMessage } : {}),
+              },
+            }
+          : message,
+      ),
+    );
+  };
+
   const appendAssistantDelta = (
     sessionId: number,
     delta: { content?: string; reasoning?: string },
@@ -756,6 +784,7 @@ const Home: React.FC = () => {
 
     const streamingAssistantId = streamingAssistantIdRef.current ?? -Date.now();
     streamingAssistantIdRef.current = streamingAssistantId;
+    streamingAssistantHasOutputRef.current = true;
 
     updateCachedMessages(sessionId, (messages) => {
       const existing = messages.find((message) => message.id === streamingAssistantId);
@@ -836,6 +865,7 @@ const Home: React.FC = () => {
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     streamingAssistantIdRef.current = null;
+    streamingAssistantHasOutputRef.current = false;
     shouldStickToBottomRef.current = true;
     setIsStreaming(true);
     setStreamError(null);
@@ -876,16 +906,33 @@ const Home: React.FC = () => {
         },
       );
     } catch (error) {
-      removeStreamingAssistant(selectedSessionId);
+      const hasPartialAssistant = streamingAssistantHasOutputRef.current;
+      const isAbortError = error instanceof DOMException && error.name === "AbortError";
 
-      if (!(error instanceof DOMException && error.name === "AbortError")) {
+      if (hasPartialAssistant) {
+        markStreamingAssistantIncomplete(selectedSessionId, {
+          finishReason: isAbortError ? "aborted" : "error",
+          errorMessage: isAbortError
+            ? undefined
+            : getErrorMessage(error, "Streaming failed."),
+        });
+      } else {
+        removeStreamingAssistant(selectedSessionId);
+      }
+
+      if (!isAbortError) {
         setStreamError(getErrorMessage(error, "Streaming failed."));
       }
     } finally {
+      const shouldKeepTemporaryPartial =
+        streamingAssistantIdRef.current !== null && streamingAssistantHasOutputRef.current;
       setIsStreaming(false);
       abortControllerRef.current = null;
-      streamingAssistantIdRef.current = null;
-      void queryClient.refetchQueries({ queryKey: chatSessionQueryKeys.messages(selectedSessionId) });
+      if (!shouldKeepTemporaryPartial) {
+        streamingAssistantIdRef.current = null;
+        streamingAssistantHasOutputRef.current = false;
+        void queryClient.refetchQueries({ queryKey: chatSessionQueryKeys.messages(selectedSessionId) });
+      }
       void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.lists() });
     }
   };

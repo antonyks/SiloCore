@@ -64,6 +64,7 @@ export interface ChatMessageMetadata {
   reasoning?: string;
   finishReason?: string;
   incomplete?: boolean;
+  errorMessage?: string;
   usage?: ChatTokenUsage;
   latencyMs?: number;
   latency?: number;

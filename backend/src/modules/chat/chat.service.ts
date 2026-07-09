@@ -71,6 +71,7 @@ function createAssistantMetadata(data: {
   reasoning?: string;
   finishReason?: string;
   incomplete?: boolean;
+  errorMessage?: string;
   usage?: TokenUsage;
   latencyMs?: number;
   params: IChatGenerationParams;
@@ -83,6 +84,7 @@ function createAssistantMetadata(data: {
     reasoning: data.reasoning,
     finishReason: data.finishReason,
     incomplete: data.incomplete,
+    errorMessage: data.errorMessage,
     usage: data.usage,
     latencyMs: data.latencyMs,
     params: removeUndefinedValues(data.params as Record<string, unknown>),
@@ -235,59 +237,94 @@ export const ChatService = {
     let reasoning = '';
     let usage: TokenUsage | undefined;
     let finishReason: string | undefined;
+    let assistantMessagePersisted = false;
 
-    for await (const chunk of prepared.provider.streamComplete(prepared.request)) {
-      if (chunk.usage) {
-        usage = chunk.usage;
+    const persistAssistantMessage = async (options?: {
+      finishReason?: string;
+      incomplete?: boolean;
+      errorMessage?: string;
+    }): Promise<SelectedChatMessage | null> => {
+      if (assistantMessagePersisted || (!content && !reasoning)) {
+        return null;
       }
 
-      if (chunk.finishReason) {
-        finishReason = chunk.finishReason;
-      }
-
-      if (!chunk.content && !chunk.reasoning) {
-        continue;
-      }
-
-      if (chunk.content) {
-        content += chunk.content;
-      }
-
-      if (chunk.reasoning) {
-        reasoning += chunk.reasoning;
-      }
-
-      yield {
-        event: 'delta',
-        data: removeUndefinedValues({
-          content: chunk.content,
-          reasoning: chunk.reasoning,
-        }),
-      };
-    }
-
-    const assistantMessage = await ChatRepository.createMessage({
-      content,
-      author: MessageAuthor.ASSISTANT,
-      sessionId: input.sessionId,
-      metadata: createAssistantMetadata({
-        ...prepared.providerMetadata,
-        model: prepared.request.model,
-        reasoning: reasoning || undefined,
-        finishReason,
-        incomplete: isIncompleteGeneration({
-          content,
+      assistantMessagePersisted = true;
+      const resolvedFinishReason = options?.finishReason ?? finishReason;
+      return ChatRepository.createMessage({
+        content,
+        author: MessageAuthor.ASSISTANT,
+        sessionId: input.sessionId,
+        metadata: createAssistantMetadata({
+          ...prepared.providerMetadata,
+          model: prepared.request.model,
           reasoning: reasoning || undefined,
-          finishReason,
+          finishReason: resolvedFinishReason,
+          incomplete: options?.incomplete ?? isIncompleteGeneration({
+            content,
+            reasoning: reasoning || undefined,
+            finishReason: resolvedFinishReason,
+          }),
+          errorMessage: options?.errorMessage,
+          usage,
+          latencyMs: Date.now() - prepared.startedAt,
+          params: prepared.params,
         }),
-        usage,
-        latencyMs: Date.now() - prepared.startedAt,
-        params: prepared.params,
-      }),
-    });
+      });
+    };
 
-    yield { event: 'assistant_message', data: assistantMessage };
-    yield { event: 'done', data: { done: true } };
+    try {
+      for await (const chunk of prepared.provider.streamComplete(prepared.request)) {
+        if (chunk.usage) {
+          usage = chunk.usage;
+        }
+
+        if (chunk.finishReason) {
+          finishReason = chunk.finishReason;
+        }
+
+        if (!chunk.content && !chunk.reasoning) {
+          continue;
+        }
+
+        if (chunk.content) {
+          content += chunk.content;
+        }
+
+        if (chunk.reasoning) {
+          reasoning += chunk.reasoning;
+        }
+
+        yield {
+          event: 'delta',
+          data: removeUndefinedValues({
+            content: chunk.content,
+            reasoning: chunk.reasoning,
+          }),
+        };
+      }
+
+      const assistantMessage = await persistAssistantMessage();
+      if (assistantMessage) {
+        yield { event: 'assistant_message', data: assistantMessage };
+      }
+      yield { event: 'done', data: { done: true } };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Streaming failed';
+      const assistantMessage = await persistAssistantMessage({
+        finishReason: 'error',
+        incomplete: true,
+        errorMessage,
+      });
+      if (assistantMessage) {
+        yield { event: 'assistant_message', data: assistantMessage };
+      }
+      throw error;
+    } finally {
+      await persistAssistantMessage({
+        finishReason: 'aborted',
+        incomplete: true,
+      });
+    }
   },
 
   async prepareGeneration(input: IChatGenerationServiceInput): Promise<PreparedGeneration> {

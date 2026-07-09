@@ -180,5 +180,58 @@ describe('ChatController', () => {
       expect(res.write.mock.calls.map(([chunk]) => chunk)).toContain('data: {"message":"provider offline"}\n\n');
       expect(res.end).toHaveBeenCalledTimes(1);
     });
+
+    it('writes partial assistant message before an SSE error when streaming fails after partial output', async () => {
+      async function* events(): AsyncIterable<ChatGenerationStreamEvent> {
+        yield {
+          event: 'user_message' as const,
+          data: {
+            id: 1,
+            content: 'Hello',
+            author: 'USER' as const,
+            sessionId: 1,
+            metadata: null,
+            createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          },
+        };
+        yield { event: 'delta' as const, data: { content: 'Partial' } };
+        yield {
+          event: 'assistant_message' as const,
+          data: {
+            id: 2,
+            content: 'Partial',
+            author: 'ASSISTANT' as const,
+            sessionId: 1,
+            metadata: { incomplete: true, finishReason: 'error' },
+            createdAt: new Date('2026-01-01T00:00:01.000Z'),
+          },
+        };
+        throw new Error('provider timeout');
+      }
+
+      jest.spyOn(ChatService, 'streamAssistantResponse').mockReturnValue(events());
+      const req = createAuthenticatedMockRequest({
+        params: { id: '1' },
+        body: { content: 'Hello' },
+        user: {
+          id: 7,
+          email: 'user@example.com',
+          name: 'User',
+          role: UserRole.USER,
+          status: UserStatus.ACTIVE,
+          createdAt: new Date(),
+        },
+      });
+      const res = createSseResponse();
+
+      await ChatController.streamAssistantResponse(req, res as never);
+
+      const writtenChunks = res.write.mock.calls.map(([chunk]) => chunk);
+      expect(writtenChunks.indexOf('event: assistant_message\n')).toBeLessThan(
+        writtenChunks.indexOf('event: error\n'),
+      );
+      expect(writtenChunks).toContain('data: {"message":"provider timeout"}\n\n');
+      expect(res.end).toHaveBeenCalledTimes(1);
+    });
   });
 });
