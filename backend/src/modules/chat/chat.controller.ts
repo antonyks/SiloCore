@@ -12,6 +12,8 @@ import {
 } from './chat.types';
 import { MessageAuthor } from './chat.model';
 
+const SSE_HEARTBEAT_INTERVAL_MS = 15000;
+
 function parseSessionId(value: string): number {
   const id = parseInt(value, 10);
   if (isNaN(id)) {
@@ -23,6 +25,41 @@ function parseSessionId(value: string): number {
 function writeSseEvent(res: Response, event: string, data: unknown): void {
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+function writeSseHeartbeat(res: Response): void {
+  res.write(': keep-alive\n\n');
+}
+
+async function nextStreamEventWithHeartbeat(
+  events: AsyncIterator<ChatGenerationStreamEvent>,
+  res: Response,
+  shouldStop: () => boolean,
+): Promise<IteratorResult<ChatGenerationStreamEvent>> {
+  const nextEvent = events.next();
+
+  while (true) {
+    if (shouldStop()) {
+      await events.return?.();
+      return { done: true, value: undefined };
+    }
+
+    let timeout: NodeJS.Timeout | undefined;
+    const heartbeatDelay = new Promise<'heartbeat'>((resolve) => {
+      timeout = setTimeout(() => resolve('heartbeat'), SSE_HEARTBEAT_INTERVAL_MS);
+    });
+    const result = await Promise.race([nextEvent, heartbeatDelay]);
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+
+    if (result === 'heartbeat') {
+      writeSseHeartbeat(res);
+      continue;
+    }
+
+    return result;
+  }
 }
 
 function toGenerationInput(body: IChatGenerationInput): IChatGenerationInput {
@@ -185,12 +222,20 @@ export const ChatController = {
       sessionId,
       userId,
     })[Symbol.asyncIterator]();
+    let clientClosed = false;
+    req.on?.('aborted', () => {
+      clientClosed = true;
+    });
+    res.on?.('close', () => {
+      clientClosed = true;
+    });
     const firstEvent = await events.next();
 
     res.status(200);
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
 
     try {
@@ -199,7 +244,11 @@ export const ChatController = {
       }
 
       while (true) {
-        const nextEvent = await events.next();
+        const nextEvent = await nextStreamEventWithHeartbeat(
+          events,
+          res,
+          () => clientClosed || res.writableEnded,
+        );
         if (nextEvent.done) break;
         const event: ChatGenerationStreamEvent = nextEvent.value;
         writeSseEvent(res, event.event, event.data);
@@ -208,7 +257,9 @@ export const ChatController = {
       const message = error instanceof Error ? error.message : 'Streaming failed';
       writeSseEvent(res, 'error', { message });
     } finally {
-      res.end();
+      if (!res.writableEnded) {
+        res.end();
+      }
     }
   }
 };

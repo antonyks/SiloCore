@@ -9,7 +9,9 @@ const PORT = process.env.PORT || 5000;
 async function startServer() {
   try {
     await connectDatabase();
-    app.listen(PORT, () => logger.info(`🚀 Server running on port ${PORT}`));
+    const server = app.listen(PORT, () => logger.info(`🚀 Server running on port ${PORT}`));
+    server.timeout = 0;
+    server.requestTimeout = 0;
   } catch (error:unknown) {
     if(error instanceof Error)
     logger.error(`❌ Failed to start server: ${error.message}`);

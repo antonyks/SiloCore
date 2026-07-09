@@ -13,8 +13,11 @@ function createSseResponse() {
     write: jest.fn(),
     end: jest.fn(),
     flushHeaders: jest.fn(),
+    on: jest.fn(),
+    writableEnded: false,
   };
   response.status.mockReturnValue(response);
+  response.on.mockReturnValue(response);
   return response;
 }
 
@@ -82,9 +85,62 @@ describe('ChatController', () => {
       });
       expect(res.status).toHaveBeenCalledWith(200);
       expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'text/event-stream');
+      expect(res.setHeader).toHaveBeenCalledWith('X-Accel-Buffering', 'no');
       expect(res.write.mock.calls.map(([chunk]) => chunk)).toContain('event: delta\n');
       expect(res.write.mock.calls.map(([chunk]) => chunk)).toContain('data: {"done":true}\n\n');
       expect(res.end).toHaveBeenCalledTimes(1);
+    });
+
+    it('writes heartbeat comments while waiting for slow stream events', async () => {
+      jest.useFakeTimers();
+      let resolveDelay: (() => void) | undefined;
+      async function* events(): AsyncIterable<ChatGenerationStreamEvent> {
+        yield {
+          event: 'user_message' as const,
+          data: {
+            id: 1,
+            content: 'Hello',
+            author: 'USER' as const,
+            sessionId: 1,
+            metadata: null,
+            createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          },
+        };
+        await new Promise<void>((resolve) => {
+          resolveDelay = resolve;
+        });
+        yield { event: 'delta' as const, data: { content: 'Hi' } };
+        yield { event: 'done' as const, data: { done: true as const } };
+      }
+
+      jest.spyOn(ChatService, 'streamAssistantResponse').mockReturnValue(events());
+      const req = createAuthenticatedMockRequest({
+        params: { id: '1' },
+        body: { content: 'Hello' },
+        on: jest.fn(),
+        user: {
+          id: 7,
+          email: 'user@example.com',
+          name: 'User',
+          role: UserRole.USER,
+          status: UserStatus.ACTIVE,
+          createdAt: new Date(),
+        },
+      });
+      const res = createSseResponse();
+
+      const streamPromise = ChatController.streamAssistantResponse(req, res as never);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      await jest.advanceTimersByTimeAsync(15000);
+      expect(res.write.mock.calls.map(([chunk]) => chunk)).toContain(': keep-alive\n\n');
+
+      resolveDelay?.();
+      await streamPromise;
+      expect(res.write.mock.calls.map(([chunk]) => chunk)).toContain('event: delta\n');
+      expect(res.end).toHaveBeenCalledTimes(1);
+      jest.useRealTimers();
     });
 
     it('writes an SSE error event when streaming fails after the first event', async () => {
