@@ -56,6 +56,7 @@ function createAssistantMetadata(data: {
   providerName: string;
   providerType: string;
   model: string;
+  reasoning?: string;
   usage?: TokenUsage;
   latencyMs?: number;
   params: IChatGenerationParams;
@@ -65,6 +66,7 @@ function createAssistantMetadata(data: {
     providerName: data.providerName,
     providerType: data.providerType,
     model: data.model,
+    reasoning: data.reasoning,
     usage: data.usage,
     latencyMs: data.latencyMs,
     params: removeUndefinedValues(data.params as Record<string, unknown>),
@@ -169,6 +171,7 @@ export const ChatService = {
       metadata: createAssistantMetadata({
         ...prepared.providerMetadata,
         model: completion.model,
+        reasoning: completion.reasoning,
         usage: completion.usage,
         latencyMs: completion.latencyMs,
         params: prepared.params,
@@ -186,6 +189,7 @@ export const ChatService = {
     yield { event: 'user_message', data: prepared.userMessage };
 
     let content = '';
+    let reasoning = '';
     let usage: TokenUsage | undefined;
 
     for await (const chunk of prepared.provider.streamComplete(prepared.request)) {
@@ -193,12 +197,25 @@ export const ChatService = {
         usage = chunk.usage;
       }
 
-      if (!chunk.content) {
+      if (!chunk.content && !chunk.reasoning) {
         continue;
       }
 
-      content += chunk.content;
-      yield { event: 'delta', data: { content: chunk.content } };
+      if (chunk.content) {
+        content += chunk.content;
+      }
+
+      if (chunk.reasoning) {
+        reasoning += chunk.reasoning;
+      }
+
+      yield {
+        event: 'delta',
+        data: removeUndefinedValues({
+          content: chunk.content,
+          reasoning: chunk.reasoning,
+        }),
+      };
     }
 
     const assistantMessage = await ChatRepository.createMessage({
@@ -208,6 +225,7 @@ export const ChatService = {
       metadata: createAssistantMetadata({
         ...prepared.providerMetadata,
         model: prepared.request.model,
+        reasoning: reasoning || undefined,
         usage,
         latencyMs: Date.now() - prepared.startedAt,
         params: prepared.params,

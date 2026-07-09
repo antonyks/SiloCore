@@ -33,6 +33,14 @@ function mockResponse(response?: Partial<Response>): Response {
   } as unknown as Response;
 }
 
+function streamFromLines(lines: unknown[]): NodeJS.ReadableStream {
+  return (async function* lineStream() {
+    for (const line of lines) {
+      yield Buffer.from(`${JSON.stringify(line)}\n`);
+    }
+  })() as unknown as NodeJS.ReadableStream;
+}
+
 function getFetchOptions(index = 0): {
   headers?: Record<string, string>;
   signal?: AbortSignal;
@@ -262,5 +270,64 @@ describe('OllamaProvider streaming errors', () => {
       statusCode: 503,
       message: 'Ollama streaming error: model unavailable',
     });
+  });
+});
+
+describe('OllamaProvider reasoning output', () => {
+  beforeEach(() => {
+    mockedFetch.mockReset();
+  });
+
+  it('normalizes non-streaming thinking output to reasoning', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        model: TEST_MODEL_ID,
+        message: {
+          content: 'Final answer',
+          thinking: 'Reason through the problem.',
+        },
+      }),
+    }));
+
+    const result = await createProvider().complete({
+      model: TEST_MODEL_ID,
+      messages: [{ role: 'user', content: 'Hi' }],
+    });
+
+    expect(result).toMatchObject({
+      content: 'Final answer',
+      reasoning: 'Reason through the problem.',
+    });
+  });
+
+  it('normalizes streamed thinking chunks to reasoning', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      body: streamFromLines([
+        { message: { thinking: 'Step 1. ' }, done: false },
+        { message: { content: 'Final' }, done: false },
+        { message: { reasoning_content: 'Step 2.' }, done: false },
+        { message: { content: ' answer' }, done: true, prompt_eval_count: 1, eval_count: 2 },
+      ]),
+    }));
+
+    const chunks = [];
+    for await (const chunk of createProvider().streamComplete({
+      model: TEST_MODEL_ID,
+      messages: [{ role: 'user', content: 'Hi' }],
+    })) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toEqual([
+      { content: '', reasoning: 'Step 1. ', done: false, usage: undefined },
+      { content: 'Final', reasoning: undefined, done: false, usage: undefined },
+      { content: '', reasoning: 'Step 2.', done: false, usage: undefined },
+      {
+        content: ' answer',
+        reasoning: undefined,
+        done: true,
+        usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 },
+      },
+    ]);
   });
 });

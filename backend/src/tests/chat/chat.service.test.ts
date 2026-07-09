@@ -456,6 +456,7 @@ describe('ChatService', () => {
         .mockResolvedValueOnce(assistantMessage);
       const complete = jest.spyOn(OllamaProvider.prototype, 'complete').mockResolvedValue({
         content: 'Hi there',
+        reasoning: 'I should greet the user.',
         model: TEST_MODEL_ID,
         usage: { promptTokens: 3, completionTokens: 4, totalTokens: 7 },
         latencyMs: 12,
@@ -487,6 +488,7 @@ describe('ChatService', () => {
             providerName: 'Local Ollama',
             providerType: 'ollama',
             model: TEST_MODEL_ID,
+            reasoning: 'I should greet the user.',
           }),
         }),
         select: SelectedChatMessageFields,
@@ -599,8 +601,10 @@ describe('ChatService', () => {
 
   describe('streamAssistantResponse', () => {
     async function* streamChunks() {
+      yield { reasoning: 'Think first. ' };
       yield { content: 'Hi' };
       yield { content: ' there', usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 } };
+      yield { reasoning: 'Then finish.' };
     }
 
     it('should emit streaming events and persist the final assistant message', async () => {
@@ -639,8 +643,10 @@ describe('ChatService', () => {
 
       expect(events).toEqual([
         { event: 'user_message', data: userMessage },
+        { event: 'delta', data: { reasoning: 'Think first. ' } },
         { event: 'delta', data: { content: 'Hi' } },
         { event: 'delta', data: { content: ' there' } },
+        { event: 'delta', data: { reasoning: 'Then finish.' } },
         { event: 'assistant_message', data: assistantMessage },
         { event: 'done', data: { done: true } },
       ]);
@@ -649,6 +655,7 @@ describe('ChatService', () => {
           content: 'Hi there',
           author: 'ASSISTANT',
           metadata: expect.objectContaining({
+            reasoning: 'Think first. Then finish.',
             usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 },
           }),
         }),

@@ -73,7 +73,7 @@ export interface IChatGenerationResult {
 
 export type ChatGenerationStreamEvent =
   | { event: 'user_message'; data: import('./chat.model').SelectedChatMessage }
-  | { event: 'delta'; data: { content: string } }
+  | { event: 'delta'; data: { content?: string; reasoning?: string } }
   | { event: 'assistant_message'; data: import('./chat.model').SelectedChatMessage }
   | { event: 'done'; data: { done: true } };
 

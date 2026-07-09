@@ -25,12 +25,21 @@ interface OllamaGenerateRequest {
 
 interface OllamaGenerateResponse {
     model: string;
-    message?: { content: string };
+    message?: {
+        content?: string;
+        thinking?: string;
+        reasoning?: string;
+        reasoning_content?: string;
+    };
     done?: boolean;
     total_duration?: number;    // nanoseconds
     load_duration?: number;
     prompt_eval_count?: number;
     eval_count?: number;
+}
+
+function extractReasoning(message: OllamaGenerateResponse['message']): string | undefined {
+    return message?.thinking ?? message?.reasoning ?? message?.reasoning_content;
 }
 
 export class OllamaProvider extends AbstractLlmProvider {
@@ -83,6 +92,7 @@ export class OllamaProvider extends AbstractLlmProvider {
 
         const { value: raw, latencyMs } = result;
         const content = raw.message?.content ?? '';
+        const reasoning = extractReasoning(raw.message);
         const usage: TokenUsage | undefined = raw.prompt_eval_count != null && raw.eval_count != null
             ? {
                 promptTokens: raw.prompt_eval_count,
@@ -93,6 +103,7 @@ export class OllamaProvider extends AbstractLlmProvider {
 
         return {
             content,
+            reasoning,
             model: enriched.model,
             usage,
             latencyMs,
@@ -150,6 +161,7 @@ export class OllamaProvider extends AbstractLlmProvider {
                     const parsed = JSON.parse(line) as OllamaGenerateResponse;
                     yield {
                         content: parsed.message?.content ?? '',
+                        reasoning: extractReasoning(parsed.message),
                         done: parsed.done ?? false,
                         usage:
                             parsed.prompt_eval_count != null && parsed.eval_count != null
@@ -172,6 +184,7 @@ export class OllamaProvider extends AbstractLlmProvider {
                 const parsed = JSON.parse(buffer) as OllamaGenerateResponse;
                 yield {
                     content: parsed.message?.content ?? '',
+                    reasoning: extractReasoning(parsed.message),
                     done: parsed.done ?? false,
                     usage:
                         parsed.prompt_eval_count != null && parsed.eval_count != null

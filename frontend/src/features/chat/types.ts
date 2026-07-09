@@ -54,6 +54,7 @@ export interface ChatMessageMetadata {
   providerName?: string;
   providerType?: string;
   model?: string;
+  reasoning?: string;
   usage?: ChatTokenUsage;
   latencyMs?: number;
   latency?: number;
@@ -80,7 +81,7 @@ export interface ChatGenerationInput extends ChatGenerationParams {
 
 export type ChatGenerationStreamEvent =
   | { event: "user_message"; data: ChatSessionMessage }
-  | { event: "delta"; data: { content: string } }
+  | { event: "delta"; data: { content?: string; reasoning?: string } }
   | { event: "assistant_message"; data: ChatSessionMessage }
   | { event: "done"; data: { done: true } }
   | { event: "error"; data: { message?: string } };

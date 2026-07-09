@@ -2,7 +2,10 @@ import axios from "axios";
 import {
   AlertCircle,
   Bot,
+  Brain,
   Check,
+  ChevronDown,
+  ChevronRight,
   Edit3,
   Loader2,
   MessageSquare,
@@ -346,6 +349,46 @@ const AssistantMetadata: React.FC<{ message: ChatSessionMessage }> = ({ message 
   );
 };
 
+const AssistantReasoning: React.FC<{ message: ChatSessionMessage; isStreaming: boolean }> = ({
+  message,
+  isStreaming,
+}) => {
+  const reasoning = message.metadata?.reasoning;
+  const hasAnswerContent = message.content.trim().length > 0;
+  const shouldAutoExpand = isStreaming && !hasAnswerContent;
+  const [manualExpanded, setManualExpanded] = useState<boolean | null>(null);
+  const isExpanded = manualExpanded ?? shouldAutoExpand;
+
+  if (!reasoning) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 rounded-md border border-slate-200 bg-slate-50">
+      <button
+        type="button"
+        onClick={() => setManualExpanded(!isExpanded)}
+        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs font-medium text-slate-600"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <Brain className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>Reasoning</span>
+        </span>
+        {isExpanded ? (
+          <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
+        ) : (
+          <ChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+        )}
+      </button>
+      {isExpanded && (
+        <div className="border-t border-slate-200 px-3 py-2 text-sm leading-6 text-slate-700">
+          <p className="whitespace-pre-wrap break-words">{reasoning}</p>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const SessionLoadingRows = () => (
   <div className="space-y-2 px-3 py-3">
     {Array.from({ length: 6 }).map((_, index) => (
@@ -669,8 +712,11 @@ const Home: React.FC = () => {
     streamingAssistantIdRef.current = null;
   };
 
-  const appendAssistantDelta = (sessionId: number, content: string) => {
-    if (!content) {
+  const appendAssistantDelta = (
+    sessionId: number,
+    delta: { content?: string; reasoning?: string },
+  ) => {
+    if (!delta.content && !delta.reasoning) {
       return;
     }
 
@@ -686,7 +732,8 @@ const Home: React.FC = () => {
           {
             id: streamingAssistantId,
             author: "ASSISTANT",
-            content,
+            content: delta.content || "",
+            metadata: delta.reasoning ? { reasoning: delta.reasoning } : undefined,
             sessionId,
             createdAt: new Date().toISOString(),
           },
@@ -697,7 +744,13 @@ const Home: React.FC = () => {
         message.id === streamingAssistantId
           ? {
               ...message,
-              content: `${message.content}${content}`,
+              content: `${message.content}${delta.content || ""}`,
+              metadata: {
+                ...(message.metadata || {}),
+                ...(delta.reasoning
+                  ? { reasoning: `${message.metadata?.reasoning || ""}${delta.reasoning}` }
+                  : {}),
+              },
             }
           : message,
       );
@@ -772,7 +825,7 @@ const Home: React.FC = () => {
             }
 
             if (event.event === "delta") {
-              appendAssistantDelta(selectedSessionId, event.data.content);
+              appendAssistantDelta(selectedSessionId, event.data);
               return;
             }
 
@@ -1373,9 +1426,17 @@ const Home: React.FC = () => {
                           {formatMessageTime(message.createdAt)}
                         </time>
                       </div>
-                      <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">
-                        {message.content}
-                      </p>
+                      {message.author === "ASSISTANT" && (
+                        <AssistantReasoning
+                          message={message}
+                          isStreaming={isStreaming && message.id === streamingAssistantIdRef.current}
+                        />
+                      )}
+                      {message.content && (
+                        <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">
+                          {message.content}
+                        </p>
+                      )}
                       {message.author === "ASSISTANT" && <AssistantMetadata message={message} />}
                     </article>
                   ))}

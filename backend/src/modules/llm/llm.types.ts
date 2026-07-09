@@ -64,7 +64,10 @@ export interface TokenUsage {
 /** A single chunk received during streaming. */
 export interface LlmStreamChunk {
   /** Partial text content of this chunk. */
-  content: string;
+  content?: string;
+
+  /** Partial reasoning/thinking output of this chunk, when exposed by the provider. */
+  reasoning?: string;
 
   /** Whether this is the final chunk. */
   done?: boolean;
@@ -77,6 +80,9 @@ export interface LlmStreamChunk {
 export interface LlmCompletionResponse {
   /** The full generated text. */
   content: string;
+
+  /** Full reasoning/thinking output, when exposed by the provider. */
+  reasoning?: string;
 
   /** Model that generated the response. */
   model: string;
