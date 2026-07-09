@@ -72,6 +72,9 @@ export interface LlmStreamChunk {
   /** Whether this is the final chunk. */
   done?: boolean;
 
+  /** Provider-normalized reason generation finished, when available. */
+  finishReason?: string;
+
   /** Token usage (only present in the final chunk, if available). */
   usage?: TokenUsage;
 }
@@ -86,6 +89,9 @@ export interface LlmCompletionResponse {
 
   /** Model that generated the response. */
   model: string;
+
+  /** Provider-normalized reason generation finished, when available. */
+  finishReason?: string;
 
   /** Token usage statistics. */
   usage?: TokenUsage;

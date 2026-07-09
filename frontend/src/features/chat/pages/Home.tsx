@@ -278,6 +278,13 @@ const getUsageParts = (message: ChatSessionMessage) => {
   return { prompt, completion, total };
 };
 
+const formatFinishReason = (finishReason: string) =>
+  finishReason
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
 const getMessageStyles = (author: ChatSessionMessage["author"]) => {
   if (author === "USER") {
     return "border-cyan-100 bg-cyan-50/70";
@@ -322,6 +329,7 @@ const AssistantMetadata: React.FC<{ message: ChatSessionMessage }> = ({ message 
   const items = [
     providerLabel,
     metadata.model ? `Model ${metadata.model}` : null,
+    metadata.finishReason ? `Finished ${formatFinishReason(metadata.finishReason)}` : null,
     typeof latency === "number" ? `Latency ${formatLatency(latency)}` : null,
     typeof totalUsage === "number" ? `Tokens ${totalUsage}` : null,
   ].filter(Boolean);
@@ -354,8 +362,9 @@ const AssistantReasoning: React.FC<{ message: ChatSessionMessage; isStreaming: b
   isStreaming,
 }) => {
   const reasoning = message.metadata?.reasoning;
+  const isIncomplete = message.metadata?.incomplete === true;
   const hasAnswerContent = message.content.trim().length > 0;
-  const shouldAutoExpand = isStreaming && !hasAnswerContent;
+  const shouldAutoExpand = (isStreaming || isIncomplete) && !hasAnswerContent;
   const [manualExpanded, setManualExpanded] = useState<boolean | null>(null);
   const isExpanded = manualExpanded ?? shouldAutoExpand;
 
@@ -385,6 +394,18 @@ const AssistantReasoning: React.FC<{ message: ChatSessionMessage; isStreaming: b
           <p className="whitespace-pre-wrap break-words">{reasoning}</p>
         </div>
       )}
+    </div>
+  );
+};
+
+const AssistantIncompleteNotice: React.FC<{ message: ChatSessionMessage }> = ({ message }) => {
+  if (message.metadata?.incomplete !== true) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+      Generation ended before a final answer was produced. Try increasing Max Tokens.
     </div>
   );
 };
@@ -1436,6 +1457,9 @@ const Home: React.FC = () => {
                         <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">
                           {message.content}
                         </p>
+                      )}
+                      {message.author === "ASSISTANT" && (
+                        <AssistantIncompleteNotice message={message} />
                       )}
                       {message.author === "ASSISTANT" && <AssistantMetadata message={message} />}
                     </article>

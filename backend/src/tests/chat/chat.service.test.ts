@@ -458,6 +458,7 @@ describe('ChatService', () => {
         content: 'Hi there',
         reasoning: 'I should greet the user.',
         model: TEST_MODEL_ID,
+        finishReason: 'stop',
         usage: { promptTokens: 3, completionTokens: 4, totalTokens: 7 },
         latencyMs: 12,
       });
@@ -489,6 +490,7 @@ describe('ChatService', () => {
             providerType: 'ollama',
             model: TEST_MODEL_ID,
             reasoning: 'I should greet the user.',
+            finishReason: 'stop',
           }),
         }),
         select: SelectedChatMessageFields,
@@ -605,6 +607,7 @@ describe('ChatService', () => {
       yield { content: 'Hi' };
       yield { content: ' there', usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 } };
       yield { reasoning: 'Then finish.' };
+      yield { done: true, finishReason: 'stop' };
     }
 
     it('should emit streaming events and persist the final assistant message', async () => {
@@ -656,7 +659,65 @@ describe('ChatService', () => {
           author: 'ASSISTANT',
           metadata: expect.objectContaining({
             reasoning: 'Think first. Then finish.',
+            finishReason: 'stop',
             usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 },
+          }),
+        }),
+        select: SelectedChatMessageFields,
+      });
+    });
+
+    it('should mark reasoning-only length finishes as incomplete', async () => {
+      async function* reasoningOnlyChunks() {
+        yield { reasoning: 'Long reasoning. ' };
+        yield {
+          done: true,
+          finishReason: 'length',
+          usage: { promptTokens: 1, completionTokens: 2048, totalTokens: 2049 },
+        };
+      }
+      const userMessage: SelectedChatMessage = {
+        id: 1,
+        content: 'Hello',
+        author: 'USER',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      };
+      const assistantMessage: SelectedChatMessage = {
+        id: 2,
+        content: '',
+        author: 'ASSISTANT',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      };
+
+      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
+      mockPrisma.chatMessage.create
+        .mockResolvedValueOnce(userMessage)
+        .mockResolvedValueOnce(assistantMessage);
+      jest.spyOn(OllamaProvider.prototype, 'streamComplete').mockReturnValue(reasoningOnlyChunks());
+
+      const stream = ChatService.streamAssistantResponse({
+        sessionId: 1,
+        userId: 1,
+        content: 'Hello',
+      });
+      while (!(await stream[Symbol.asyncIterator]().next()).done) {
+        // Drain stream
+      }
+
+      expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, {
+        data: expect.objectContaining({
+          content: '',
+          author: 'ASSISTANT',
+          metadata: expect.objectContaining({
+            reasoning: 'Long reasoning. ',
+            finishReason: 'length',
+            incomplete: true,
+            usage: { promptTokens: 1, completionTokens: 2048, totalTokens: 2049 },
           }),
         }),
         select: SelectedChatMessageFields,

@@ -57,6 +57,8 @@ function createAssistantMetadata(data: {
   providerType: string;
   model: string;
   reasoning?: string;
+  finishReason?: string;
+  incomplete?: boolean;
   usage?: TokenUsage;
   latencyMs?: number;
   params: IChatGenerationParams;
@@ -67,10 +69,33 @@ function createAssistantMetadata(data: {
     providerType: data.providerType,
     model: data.model,
     reasoning: data.reasoning,
+    finishReason: data.finishReason,
+    incomplete: data.incomplete,
     usage: data.usage,
     latencyMs: data.latencyMs,
     params: removeUndefinedValues(data.params as Record<string, unknown>),
   }) as Prisma.InputJsonObject;
+}
+
+function isIncompleteGeneration(data: {
+  content: string;
+  reasoning?: string;
+  finishReason?: string;
+}): boolean | undefined {
+  if (data.reasoning && !data.content.trim()) {
+    return true;
+  }
+
+  if (!data.finishReason) {
+    return undefined;
+  }
+
+  const normalized = data.finishReason.toLowerCase();
+  if (normalized === 'length' || normalized === 'max_tokens') {
+    return true;
+  }
+
+  return undefined;
 }
 
 export const ChatService = {
@@ -172,6 +197,12 @@ export const ChatService = {
         ...prepared.providerMetadata,
         model: completion.model,
         reasoning: completion.reasoning,
+        finishReason: completion.finishReason,
+        incomplete: isIncompleteGeneration({
+          content: completion.content,
+          reasoning: completion.reasoning,
+          finishReason: completion.finishReason,
+        }),
         usage: completion.usage,
         latencyMs: completion.latencyMs,
         params: prepared.params,
@@ -191,10 +222,15 @@ export const ChatService = {
     let content = '';
     let reasoning = '';
     let usage: TokenUsage | undefined;
+    let finishReason: string | undefined;
 
     for await (const chunk of prepared.provider.streamComplete(prepared.request)) {
       if (chunk.usage) {
         usage = chunk.usage;
+      }
+
+      if (chunk.finishReason) {
+        finishReason = chunk.finishReason;
       }
 
       if (!chunk.content && !chunk.reasoning) {
@@ -226,6 +262,12 @@ export const ChatService = {
         ...prepared.providerMetadata,
         model: prepared.request.model,
         reasoning: reasoning || undefined,
+        finishReason,
+        incomplete: isIncompleteGeneration({
+          content,
+          reasoning: reasoning || undefined,
+          finishReason,
+        }),
         usage,
         latencyMs: Date.now() - prepared.startedAt,
         params: prepared.params,

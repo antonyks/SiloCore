@@ -32,6 +32,7 @@ interface OllamaGenerateResponse {
         reasoning_content?: string;
     };
     done?: boolean;
+    done_reason?: string;
     total_duration?: number;    // nanoseconds
     load_duration?: number;
     prompt_eval_count?: number;
@@ -105,6 +106,7 @@ export class OllamaProvider extends AbstractLlmProvider {
             content,
             reasoning,
             model: enriched.model,
+            finishReason: raw.done_reason,
             usage,
             latencyMs,
         };
@@ -163,6 +165,7 @@ export class OllamaProvider extends AbstractLlmProvider {
                         content: parsed.message?.content ?? '',
                         reasoning: extractReasoning(parsed.message),
                         done: parsed.done ?? false,
+                        finishReason: parsed.done_reason,
                         usage:
                             parsed.prompt_eval_count != null && parsed.eval_count != null
                                 ? {
@@ -186,6 +189,7 @@ export class OllamaProvider extends AbstractLlmProvider {
                     content: parsed.message?.content ?? '',
                     reasoning: extractReasoning(parsed.message),
                     done: parsed.done ?? false,
+                    finishReason: parsed.done_reason,
                     usage:
                         parsed.prompt_eval_count != null && parsed.eval_count != null
                             ? {

@@ -282,6 +282,7 @@ describe('OllamaProvider reasoning output', () => {
     mockedFetch.mockResolvedValue(mockResponse({
       json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
         model: TEST_MODEL_ID,
+        done_reason: 'stop',
         message: {
           content: 'Final answer',
           thinking: 'Reason through the problem.',
@@ -297,6 +298,7 @@ describe('OllamaProvider reasoning output', () => {
     expect(result).toMatchObject({
       content: 'Final answer',
       reasoning: 'Reason through the problem.',
+      finishReason: 'stop',
     });
   });
 
@@ -306,7 +308,7 @@ describe('OllamaProvider reasoning output', () => {
         { message: { thinking: 'Step 1. ' }, done: false },
         { message: { content: 'Final' }, done: false },
         { message: { reasoning_content: 'Step 2.' }, done: false },
-        { message: { content: ' answer' }, done: true, prompt_eval_count: 1, eval_count: 2 },
+        { done: true, done_reason: 'length', prompt_eval_count: 1, eval_count: 2 },
       ]),
     }));
 
@@ -323,9 +325,10 @@ describe('OllamaProvider reasoning output', () => {
       { content: 'Final', reasoning: undefined, done: false, usage: undefined },
       { content: '', reasoning: 'Step 2.', done: false, usage: undefined },
       {
-        content: ' answer',
+        content: '',
         reasoning: undefined,
         done: true,
+        finishReason: 'length',
         usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 },
       },
     ]);

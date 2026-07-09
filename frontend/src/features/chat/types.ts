@@ -55,6 +55,8 @@ export interface ChatMessageMetadata {
   providerType?: string;
   model?: string;
   reasoning?: string;
+  finishReason?: string;
+  incomplete?: boolean;
   usage?: ChatTokenUsage;
   latencyMs?: number;
   latency?: number;
