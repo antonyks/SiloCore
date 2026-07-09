@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   backend:
     build:
@@ -14,7 +12,10 @@ services:
       - ./backend:/app
       - /app/node_modules
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - insightbase-network
 
@@ -46,6 +47,11 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d insightbase"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     networks:
       - insightbase-network
 
