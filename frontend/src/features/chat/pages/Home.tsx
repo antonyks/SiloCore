@@ -56,7 +56,7 @@ import type {
 } from "../types";
 
 const SESSION_LIST_LIMIT = 50;
-const MODEL_SELECTION_STORAGE_KEY = "InsightBaseChatModelSelection";
+const MODEL_SELECTION_STORAGE_KEY = "SiloCoreChatModelSelection";
 const DEFAULT_GENERATION_SETTINGS = {
   temperature: "",
   topP: "",
@@ -1078,7 +1078,7 @@ const Home: React.FC = () => {
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-950 text-white">
             <MessageSquare className="h-4 w-4" aria-hidden="true" />
           </div>
-          <h1 className="truncate text-lg font-semibold">InsightBase</h1>
+          <h1 className="truncate text-lg font-semibold">SiloCore</h1>
         </div>
 
         <div className="ml-auto flex items-center gap-2">

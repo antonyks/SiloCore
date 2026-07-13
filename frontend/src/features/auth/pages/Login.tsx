@@ -33,7 +33,7 @@ const Login: React.FC = () => {
       <Card className="w-full max-w-md space-y-8 border-2 border-gray-200" radius="3xl">
         <div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Insight Base
+            SiloCore
           </h2>
           <p className="mt-2 text-sm text-gray-600">
             Sign in to your account

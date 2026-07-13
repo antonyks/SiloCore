@@ -92,7 +92,7 @@ const AdminLayout: React.FC = () => {
             </div>
             {!isSidebarCollapsed && (
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold">InsightBase Admin</div>
+                <div className="truncate text-sm font-semibold">SiloCore Admin</div>
                 <div className="truncate text-xs text-slate-400">Control console</div>
               </div>
             )}

@@ -1,5 +1,5 @@
 export const appConfig = {
-  appName: "InsightBase",
+  appName: "SiloCore",
   version: "1.0.0",
   apiUrl: import.meta.env.VITE_API_URL || "http://localhost:5000/api",
 };

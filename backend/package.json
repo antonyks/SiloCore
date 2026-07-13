@@ -1,7 +1,7 @@
 {
-  "name": "insightbase-backend",
+  "name": "silocore-backend",
   "version": "1.0.0",
-  "description": "Backend service for InsightBase — Node.js, Express, TypeScript, Prisma, and Docker.",
+  "description": "Backend service for SiloCore - Node.js, Express, TypeScript, Prisma, and Docker.",
   "main": "dist/index.js",
   "scripts": {
     "dev": "nodemon src/server.ts",

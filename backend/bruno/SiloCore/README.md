@@ -1,6 +1,6 @@
-# InsightBase API Collection
+# SiloCore API Collection
 
-This collection contains all the API endpoints for the InsightBase application, following the established patterns and structure.
+This collection contains all the API endpoints for the SiloCore application, following the established patterns and structure.
 
 ## Authentication
 

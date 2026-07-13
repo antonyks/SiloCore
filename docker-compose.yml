@@ -3,11 +3,14 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: insightbase-backend
+    container_name: silocore-backend
     ports:
       - "5000:5000"
     env_file:
       - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/silocore
+      OLLAMA_HOST: http://host.docker.internal:11434
     volumes:
       - ./backend:/app
       - /app/node_modules
@@ -17,13 +20,13 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
-      - insightbase-network
+      - silocore-network
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: insightbase-frontend
+    container_name: silocore-frontend
     ports:
       - "5173:5173"
     env_file:
@@ -34,29 +37,29 @@ services:
     depends_on:
       - backend
     networks:
-      - insightbase-network
+      - silocore-network
 
   postgres:
     image: postgres:16
-    container_name: insightbase-db
+    container_name: silocore-db
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: insightbase
+      POSTGRES_DB: silocore
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d insightbase"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d silocore"]
       interval: 5s
       timeout: 5s
       retries: 10
     networks:
-      - insightbase-network
+      - silocore-network
 
 networks:
-  insightbase-network:
+  silocore-network:
     driver: bridge
 
 volumes:

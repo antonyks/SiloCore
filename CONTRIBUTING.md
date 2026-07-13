@@ -1,6 +1,6 @@
-# Contributing to InsightBase
+# Contributing to SiloCore
 
-Thank you for your interest in contributing! InsightBase is an open-source project under the **Apache 2.0 License**.  
+Thank you for your interest in contributing! SiloCore is an open-source project under the **Apache 2.0 License**.  
 We welcome improvements to code, documentation, tests, and examples.
 
 ---
@@ -57,7 +57,7 @@ By contributing, you agree that your contributions will be licensed under the Ap
 # Contributor Covenant Code of Conduct
 
 ## Our Pledge
-We pledge to make participation in the InsightBase community a harassment-free experience for everyone, regardless of age, body size, disability, ethnicity, gender identity and expression, level of experience, nationality, personal appearance, race, religion, or sexual identity and orientation.
+We pledge to make participation in the SiloCore community a harassment-free experience for everyone, regardless of age, body size, disability, ethnicity, gender identity and expression, level of experience, nationality, personal appearance, race, religion, or sexual identity and orientation.
 
 ## Our Standards
 Examples of behavior that contributes to a positive environment include:
@@ -81,5 +81,4 @@ This Code applies both within project spaces and in public spaces when an indivi
 
 ## Attribution
 This Code of Conduct is adapted from the [Contributor Covenant](https://www.contributor-covenant.org/version/2/1/code_of_conduct.html), version 2.1.
-
 

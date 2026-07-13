@@ -1,6 +1,6 @@
-# InsightBase
+# SiloCore
 
-InsightBase is an open-source, full-stack AI chat platform for teams and developers who want a private application layer around dedicated or self-hosted AI infrastructure.
+SiloCore is an open-source, full-stack AI chat platform for teams and developers who want a private application layer around dedicated or self-hosted AI infrastructure.
 
 The project is currently in **active alpha**. Core chat, admin, user management, provider configuration, and local Ollama-backed inference flows are implemented, but APIs and setup details may still change.
 
@@ -93,7 +93,7 @@ You can use a different model as long as `OLLAMA_MODEL` matches it.
    docker compose up --build
    ```
 
-The backend container applies Prisma migrations and seeds local demo users on startup. The frontend runs at `http://localhost:5173`, and the backend health check is available at `http://localhost:5000/health`.
+Docker Compose starts PostgreSQL, applies Prisma migrations, and seeds local demo users on startup. The frontend runs at `http://localhost:5173`, and the backend health check is available at `http://localhost:5000/health`.
 
 ### Local Demo Accounts
 
@@ -108,7 +108,7 @@ These accounts are created by the seed script for local development only:
 
 Use this path when you want direct control over each service during development.
 
-1. Start PostgreSQL and create a database named `insightbase`.
+1. Start PostgreSQL and create a database named `silocore`.
 
 2. Install backend dependencies:
 
@@ -121,7 +121,7 @@ Use this path when you want direct control over each service during development.
 3. For a local PostgreSQL process, set `DATABASE_URL` in `backend/.env` to use `localhost`:
 
    ```env
-   DATABASE_URL=postgresql://postgres:postgres@localhost:5432/insightbase
+   DATABASE_URL=postgresql://postgres:postgres@localhost:5432/silocore
    JWT_SECRET=replace_this_with_a_long_random_secret
    OLLAMA_HOST=http://localhost:11434
    OLLAMA_MODEL=llama3.1
@@ -172,7 +172,7 @@ Frontend variables live in `frontend/.env`:
 
 ### User Chat
 
-Regular users can create, rename, delete, and search recent chat sessions. The chat workspace supports streaming responses, model selection, and generation settings such as temperature, top-p, max tokens, and stop sequences.
+Regular users can create, retitle, delete, and search recent chat sessions. The chat workspace supports streaming responses, model selection, and generation settings such as temperature, top-p, max tokens, and stop sequences.
 
 ### Admin Console
 
@@ -201,7 +201,7 @@ Authenticated requests use:
 Authorization: Bearer <jwt>
 ```
 
-The backend includes a Bruno API collection under `backend/bruno/InsightBase` for manual API testing.
+The backend includes a Bruno API collection under `backend/bruno/SiloCore` for manual API testing.
 
 ## Development Commands
 
@@ -248,4 +248,4 @@ Contributions are welcome. See `CONTRIBUTING.md` for setup notes, code style, an
 
 ## License
 
-InsightBase is licensed under the Apache License 2.0. See `LICENSE` for details.
+SiloCore is licensed under the Apache License 2.0. See `LICENSE` for details.
