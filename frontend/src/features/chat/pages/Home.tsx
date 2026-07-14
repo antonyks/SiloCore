@@ -6,6 +6,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   Edit3,
   Loader2,
   MessageSquare,
@@ -87,6 +88,32 @@ const getErrorMessage = (error: unknown, fallback: string) => {
   }
 
   return fallback;
+};
+
+const writeTextToClipboard = async (text: string): Promise<void> => {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  try {
+    const copied = document.execCommand("copy");
+    if (!copied) {
+      throw new Error("Copy command failed");
+    }
+  } finally {
+    document.body.removeChild(textarea);
+  }
 };
 
 const getStoredModelSelection = (): ModelSelection | null => {
@@ -439,6 +466,7 @@ const Home: React.FC = () => {
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const promptDraftsBySessionRef = useRef<Record<number, string>>({});
+  const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
@@ -455,6 +483,8 @@ const Home: React.FC = () => {
   const [settingsValidationError, setSettingsValidationError] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<number | null>(null);
+  const [copyErrorMessageId, setCopyErrorMessageId] = useState<number | null>(null);
 
   const listParams = useMemo(
     () => ({
@@ -546,6 +576,38 @@ const Home: React.FC = () => {
 
     window.requestAnimationFrame(() => scrollMessagesToBottom("smooth"));
   }, [messageScrollKey, selectedSessionId, selectedMessagesQuery.isLoading]);
+
+  useEffect(() => {
+    return () => {
+      if (copyFeedbackTimeoutRef.current) {
+        clearTimeout(copyFeedbackTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopyMessage = async (message: ChatSessionMessage) => {
+    if (!message.content) {
+      return;
+    }
+
+    try {
+      await writeTextToClipboard(message.content);
+      setCopiedMessageId(message.id);
+      setCopyErrorMessageId(null);
+
+      if (copyFeedbackTimeoutRef.current) {
+        clearTimeout(copyFeedbackTimeoutRef.current);
+      }
+
+      copyFeedbackTimeoutRef.current = setTimeout(() => {
+        setCopiedMessageId((current) => (current === message.id ? null : current));
+        copyFeedbackTimeoutRef.current = null;
+      }, 1500);
+    } catch {
+      setCopiedMessageId(null);
+      setCopyErrorMessageId(message.id);
+    }
+  };
 
   const handleCreateSession = async () => {
     try {
@@ -1495,39 +1557,69 @@ const Home: React.FC = () => {
                   onScroll={handleMessageScroll}
                   className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-5 sm:px-5"
                 >
-                  {selectedMessages.map((message) => (
-                    <article
-                      key={message.id}
-                      className={`max-w-full rounded-md border p-4 ${getMessageStyles(message.author)}`}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-100 text-slate-600">
-                            <MessageAuthorIcon author={message.author} />
-                          </span>
-                          {message.author}
+                  {selectedMessages.map((message) => {
+                    const isCopied = copiedMessageId === message.id;
+                    const copyFailed = copyErrorMessageId === message.id;
+                    const hasCopyableContent = message.content.length > 0;
+
+                    return (
+                      <article
+                        key={message.id}
+                        className={`max-w-full rounded-md border p-4 ${getMessageStyles(message.author)}`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-100 text-slate-600">
+                              <MessageAuthorIcon author={message.author} />
+                            </span>
+                            {message.author}
+                          </div>
+                          <time className="text-xs text-slate-400">
+                            {formatMessageTime(message.createdAt)}
+                          </time>
                         </div>
-                        <time className="text-xs text-slate-400">
-                          {formatMessageTime(message.createdAt)}
-                        </time>
-                      </div>
-                      {message.author === "ASSISTANT" && (
-                        <AssistantReasoning
-                          message={message}
-                          isStreaming={isStreaming && message.id === streamingAssistantIdRef.current}
-                        />
-                      )}
-                      {message.content && (
-                        <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">
-                          {message.content}
-                        </p>
-                      )}
-                      {message.author === "ASSISTANT" && (
-                        <AssistantIncompleteNotice message={message} />
-                      )}
-                      {message.author === "ASSISTANT" && <AssistantMetadata message={message} />}
-                    </article>
-                  ))}
+                        {message.author === "ASSISTANT" && (
+                          <AssistantReasoning
+                            message={message}
+                            isStreaming={
+                              isStreaming && message.id === streamingAssistantIdRef.current
+                            }
+                          />
+                        )}
+                        {message.content && (
+                          <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">
+                            {message.content}
+                          </p>
+                        )}
+                        {message.author === "ASSISTANT" && (
+                          <AssistantIncompleteNotice message={message} />
+                        )}
+                        {message.author === "ASSISTANT" && <AssistantMetadata message={message} />}
+                        <div className="mt-3 flex items-center justify-end gap-2">
+                          {copyFailed && (
+                            <span className="text-xs font-medium text-red-600">
+                              Copy failed
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => void handleCopyMessage(message)}
+                            disabled={!hasCopyableContent}
+                            title="Copy message"
+                            aria-label="Copy message"
+                            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {isCopied ? (
+                              <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                            ) : (
+                              <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                            )}
+                            {isCopied ? "Copied" : "Copy"}
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
               )}
 
