@@ -1,7 +1,7 @@
 import axios, { AxiosError, type AxiosInstance } from "axios";
 import { API_BASE_URL } from "../config/constants";
 import { logger } from './logger';
-import { logoutAndRedirect } from "./navigation";
+import { isAuthSessionError, logoutAndRedirect } from "./navigation";
 import { storage } from "./storage";
 
 const axiosClient: AxiosInstance = axios.create({
@@ -32,7 +32,15 @@ axiosClient.interceptors.response.use(
   },
   (error: AxiosError) => {
 
-    if (error.response?.status === 401) {
+    const responseMessage =
+      typeof error.response?.data === "object" &&
+      error.response.data !== null &&
+      "message" in error.response.data &&
+      typeof error.response.data.message === "string"
+        ? error.response.data.message
+        : error.message;
+
+    if (isAuthSessionError(error.response?.status, responseMessage)) {
       logoutAndRedirect();
     }
     return Promise.reject(error);

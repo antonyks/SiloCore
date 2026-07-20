@@ -1,5 +1,6 @@
 import axiosClient from "../../../lib/axiosClient";
 import { API_BASE_URL } from "../../../config/constants";
+import { isAuthSessionError, logoutAndRedirect } from "../../../lib/navigation";
 import { storage } from "../../../lib/storage";
 import type { ApiResponse } from "../../../types/api";
 import type {
@@ -133,7 +134,13 @@ export const chatService = {
     });
 
     if (!response.ok) {
-      throw new Error(await getResponseErrorMessage(response));
+      const errorMessage = await getResponseErrorMessage(response);
+
+      if (isAuthSessionError(response.status, errorMessage)) {
+        logoutAndRedirect();
+      }
+
+      throw new Error(errorMessage);
     }
 
     if (!response.body) {
