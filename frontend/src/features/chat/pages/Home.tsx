@@ -11,6 +11,7 @@ import {
   Loader2,
   MessageSquare,
   MoreHorizontal,
+  PanelLeft,
   Plus,
   RefreshCw,
   Search,
@@ -65,6 +66,8 @@ const DEFAULT_GENERATION_SETTINGS = {
   stopSequences: "",
 };
 const MESSAGE_SCROLL_BOTTOM_THRESHOLD = 96;
+const PROMPT_TEXTAREA_MIN_HEIGHT_PX = 80;
+const PROMPT_TEXTAREA_MAX_HEIGHT_PX = PROMPT_TEXTAREA_MIN_HEIGHT_PX * 2;
 
 type SessionGroup = {
   label: string;
@@ -464,6 +467,7 @@ const Home: React.FC = () => {
   const streamingAssistantIdRef = useRef<number | null>(null);
   const streamingAssistantHasOutputRef = useRef(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
+  const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const promptDraftsBySessionRef = useRef<Record<number, string>>({});
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -472,6 +476,7 @@ const Home: React.FC = () => {
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [openSessionMenuId, setOpenSessionMenuId] = useState<number | null>(null);
+  const [isSessionPanelOpen, setIsSessionPanelOpen] = useState(false);
   const [confirmingDeleteSession, setConfirmingDeleteSession] = useState<ChatSession | null>(null);
   const [promptDraft, setPromptDraft] = useState("");
   const [promptValidationError, setPromptValidationError] = useState<string | null>(null);
@@ -553,6 +558,24 @@ const Home: React.FC = () => {
     });
   };
 
+  const resizePromptTextarea = () => {
+    const element = promptTextareaRef.current;
+
+    if (!element) {
+      return;
+    }
+
+    element.style.height = "auto";
+    const nextHeight = Math.min(
+      Math.max(element.scrollHeight, PROMPT_TEXTAREA_MIN_HEIGHT_PX),
+      PROMPT_TEXTAREA_MAX_HEIGHT_PX,
+    );
+
+    element.style.height = `${nextHeight}px`;
+    element.style.overflowY =
+      element.scrollHeight > PROMPT_TEXTAREA_MAX_HEIGHT_PX ? "auto" : "hidden";
+  };
+
   useEffect(() => {
     if (!selectedSessionId) {
       setPromptDraft("");
@@ -564,6 +587,36 @@ const Home: React.FC = () => {
     setStreamError(null);
     shouldStickToBottomRef.current = true;
   }, [selectedSessionId]);
+
+  useEffect(() => {
+    resizePromptTextarea();
+  }, [promptDraft]);
+
+  useEffect(() => {
+    window.addEventListener("resize", resizePromptTextarea);
+
+    return () => {
+      window.removeEventListener("resize", resizePromptTextarea);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isSessionPanelOpen) {
+      return;
+    }
+
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsSessionPanelOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isSessionPanelOpen]);
 
   useEffect(() => {
     if (!selectedSessionId || selectedMessagesQuery.isLoading) {
@@ -615,6 +668,7 @@ const Home: React.FC = () => {
       setSelectedSessionId(session.id);
       setEditingSessionId(null);
       setOpenSessionMenuId(null);
+      setIsSessionPanelOpen(false);
       setSearchTerm("");
     } catch {
       // React Query exposes the error state rendered near the button.
@@ -687,6 +741,7 @@ const Home: React.FC = () => {
   const selectSession = (sessionId: number) => {
     setSelectedSessionId(sessionId);
     setOpenSessionMenuId(null);
+    setIsSessionPanelOpen(false);
   };
 
   const handleMessageScroll = () => {
@@ -1133,10 +1188,159 @@ const Home: React.FC = () => {
     );
   };
 
+  const renderSessionPanelContent = (showMobileHeader = false) => (
+    <>
+      {showMobileHeader && (
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200 px-3 lg:hidden">
+          <div className="text-sm font-semibold text-slate-900">Chat sessions</div>
+          <button
+            type="button"
+            onClick={() => setIsSessionPanelOpen(false)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-100"
+            aria-label="Close chat sessions"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+      <div className="shrink-0 border-b border-slate-200 p-3">
+        <label className="relative block">
+          <Search
+            className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+            aria-hidden="true"
+          />
+          <input
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            className="h-9 w-full rounded-md border border-slate-300 bg-white pl-8 pr-3 text-sm text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
+            placeholder="Search sessions"
+          />
+        </label>
+      </div>
+
+      {confirmingDeleteSession && (
+        <div className="shrink-0 border-b border-amber-100 bg-amber-50 p-3 text-sm text-amber-900">
+          <div className="flex gap-2">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>
+              Delete <span className="font-semibold">{confirmingDeleteSession.title}</span>?
+              This removes the chat session and its messages.
+            </span>
+          </div>
+          {deleteSession.isError && deleteSession.variables === confirmingDeleteSession.id && (
+            <div className="mt-2 flex gap-2 text-red-700">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>{getErrorMessage(deleteSession.error, "Session delete failed.")}</span>
+            </div>
+          )}
+          <div className="mt-3 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={closeDeleteConfirmation}
+              disabled={deleteSession.isPending}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-amber-200 bg-white px-2.5 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void confirmDeleteSession()}
+              disabled={deleteSession.isPending}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-red-700 px-2.5 text-xs font-semibold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:bg-red-300"
+            >
+              {deleteSession.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              {deleteSession.isPending ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {sessionsQuery.isLoading && <SessionLoadingRows />}
+
+        {sessionsQuery.isError && (
+          <div className="m-3 rounded-md border border-red-100 bg-red-50 p-3 text-sm text-red-800">
+            <div className="flex gap-2">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>
+                {getErrorMessage(sessionsQuery.error, "Could not load chat sessions.")}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => void sessionsQuery.refetch()}
+              className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 bg-white px-2.5 text-xs font-medium text-red-700 hover:bg-red-100"
+            >
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+              Retry
+            </button>
+          </div>
+        )}
+
+        {!sessionsQuery.isLoading && !sessionsQuery.isError && sessions.length === 0 && (
+          <div className="px-5 py-10 text-center">
+            <MessageSquare className="mx-auto h-8 w-8 text-slate-300" aria-hidden="true" />
+            <div className="mt-3 text-sm font-medium text-slate-800">No chat sessions</div>
+            <div className="mt-1 text-xs text-slate-500">Create a new chat to begin.</div>
+            <button
+              type="button"
+              onClick={() => void handleCreateSession()}
+              disabled={createSession.isPending}
+              className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-950 px-2.5 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {createSession.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              New Chat
+            </button>
+          </div>
+        )}
+
+        {!sessionsQuery.isLoading &&
+          !sessionsQuery.isError &&
+          sessions.length > 0 &&
+          filteredSessions.length === 0 && (
+            <div className="px-5 py-10 text-center text-sm text-slate-500">
+              No sessions match this search.
+            </div>
+          )}
+
+        {groupedSessions.length > 0 && (
+          <div className="space-y-4 p-3">
+            {groupedSessions.map((group) => (
+              <section key={group.label}>
+                <h2 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {group.label}
+                </h2>
+                <div className="space-y-2">{group.sessions.map(renderSessionRow)}</div>
+              </section>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-slate-100 text-slate-950">
       <header className="flex h-14 shrink-0 items-center border-b border-slate-200 bg-white px-4 shadow-sm">
         <div className="flex min-w-0 items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setIsSessionPanelOpen(true)}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 lg:hidden"
+            aria-label="Open chat sessions"
+            aria-expanded={isSessionPanelOpen}
+          >
+            <PanelLeft className="h-4 w-4" aria-hidden="true" />
+          </button>
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-slate-950 text-white">
             <MessageSquare className="h-4 w-4" aria-hidden="true" />
           </div>
@@ -1161,137 +1365,31 @@ const Home: React.FC = () => {
         </div>
       </header>
 
+      {isSessionPanelOpen && (
+        <button
+          type="button"
+          className="fixed inset-0 z-30 bg-slate-950/40 lg:hidden"
+          onClick={() => setIsSessionPanelOpen(false)}
+          aria-label="Close chat sessions"
+        />
+      )}
+
       {createSession.isError && (
         <div className="shrink-0 border-b border-red-100 bg-red-50 px-4 py-2 text-sm text-red-800">
           {getErrorMessage(createSession.error, "Could not create a new chat.")}
         </div>
       )}
 
-      <div className="grid min-h-0 flex-1 overflow-hidden grid-rows-[minmax(16rem,34vh)_minmax(0,1fr)] lg:grid-cols-[20rem_minmax(0,1fr)] lg:grid-rows-none">
-        <aside className="flex min-h-0 flex-col overflow-hidden border-b border-slate-200 bg-slate-50 lg:border-b-0 lg:border-r">
-          <div className="shrink-0 border-b border-slate-200 p-3">
-            <label className="relative block">
-              <Search
-                className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-                aria-hidden="true"
-              />
-              <input
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-                className="h-9 w-full rounded-md border border-slate-300 bg-white pl-8 pr-3 text-sm text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
-                placeholder="Search sessions"
-              />
-            </label>
-          </div>
-
-          {confirmingDeleteSession && (
-            <div className="shrink-0 border-b border-amber-100 bg-amber-50 p-3 text-sm text-amber-900">
-              <div className="flex gap-2">
-                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                <span>
-                  Delete <span className="font-semibold">{confirmingDeleteSession.title}</span>?
-                  This removes the chat session and its messages.
-                </span>
-              </div>
-              {deleteSession.isError && deleteSession.variables === confirmingDeleteSession.id && (
-                <div className="mt-2 flex gap-2 text-red-700">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                  <span>{getErrorMessage(deleteSession.error, "Session delete failed.")}</span>
-                </div>
-              )}
-              <div className="mt-3 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={closeDeleteConfirmation}
-                  disabled={deleteSession.isPending}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-amber-200 bg-white px-2.5 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <X className="h-3.5 w-3.5" aria-hidden="true" />
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void confirmDeleteSession()}
-                  disabled={deleteSession.isPending}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-red-700 px-2.5 text-xs font-semibold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:bg-red-300"
-                >
-                  {deleteSession.isPending ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                  ) : (
-                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                  )}
-                  {deleteSession.isPending ? "Deleting..." : "Delete"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {sessionsQuery.isLoading && <SessionLoadingRows />}
-
-            {sessionsQuery.isError && (
-              <div className="m-3 rounded-md border border-red-100 bg-red-50 p-3 text-sm text-red-800">
-                <div className="flex gap-2">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                  <span>
-                    {getErrorMessage(sessionsQuery.error, "Could not load chat sessions.")}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void sessionsQuery.refetch()}
-                  className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 bg-white px-2.5 text-xs font-medium text-red-700 hover:bg-red-100"
-                >
-                  <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-                  Retry
-                </button>
-              </div>
-            )}
-
-            {!sessionsQuery.isLoading && !sessionsQuery.isError && sessions.length === 0 && (
-              <div className="px-5 py-10 text-center">
-                <MessageSquare className="mx-auto h-8 w-8 text-slate-300" aria-hidden="true" />
-                <div className="mt-3 text-sm font-medium text-slate-800">No chat sessions</div>
-                <div className="mt-1 text-xs text-slate-500">Create a new chat to begin.</div>
-                <button
-                  type="button"
-                  onClick={() => void handleCreateSession()}
-                  disabled={createSession.isPending}
-                  className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-950 px-2.5 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {createSession.isPending ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                  ) : (
-                    <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                  )}
-                  New Chat
-                </button>
-              </div>
-            )}
-
-            {!sessionsQuery.isLoading &&
-              !sessionsQuery.isError &&
-              sessions.length > 0 &&
-              filteredSessions.length === 0 && (
-                <div className="px-5 py-10 text-center text-sm text-slate-500">
-                  No sessions match this search.
-                </div>
-              )}
-
-            {groupedSessions.length > 0 && (
-              <div className="space-y-4 p-3">
-                {groupedSessions.map((group) => (
-                  <section key={group.label}>
-                    <h2 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      {group.label}
-                    </h2>
-                    <div className="space-y-2">{group.sessions.map(renderSessionRow)}</div>
-                  </section>
-                ))}
-              </div>
-            )}
-          </div>
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[20rem_minmax(0,1fr)]">
+        <aside className="hidden min-h-0 flex-col overflow-hidden border-r border-slate-200 bg-slate-50 lg:flex">
+          {renderSessionPanelContent()}
         </aside>
+
+        {isSessionPanelOpen && (
+          <aside className="fixed inset-y-0 left-0 z-40 flex w-80 max-w-[85vw] min-h-0 flex-col overflow-hidden border-r border-slate-200 bg-slate-50 shadow-xl lg:hidden">
+            {renderSessionPanelContent(true)}
+          </aside>
+        )}
 
         <main className="min-h-0 overflow-hidden bg-white">
           {!selectedSessionId && (
@@ -1649,13 +1747,14 @@ const Home: React.FC = () => {
                     Message
                   </label>
                   <textarea
+                    ref={promptTextareaRef}
                     id="chat-prompt"
                     value={promptDraft}
                     onChange={(event) => updatePromptDraft(event.target.value)}
                     onKeyDown={handlePromptKeyDown}
                     rows={3}
                     disabled={isStreaming}
-                    className="max-h-40 min-h-20 flex-1 resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-6 text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                    className="max-h-40 min-h-20 flex-1 resize-none rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-6 text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:bg-slate-100"
                     placeholder="Send a message"
                   />
                   <button
