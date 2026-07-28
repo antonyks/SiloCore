@@ -64,6 +64,7 @@ export interface IChatGenerationInput extends IChatGenerationParams {
 export interface IChatGenerationServiceInput extends IChatGenerationInput {
   sessionId: number;
   userId: number;
+  requestId?: string;
 }
 
 export interface IChatGenerationResult {

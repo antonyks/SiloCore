@@ -14,6 +14,7 @@ import {
   LlmProviderType,
 } from './llm.types';
 import { OllamaProvider } from './providers/ollama.provider';
+import { getLlmErrorCode, logLlmEvent } from './llm.logging';
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown provider error';
@@ -92,6 +93,14 @@ function createAdapter(config: LlmProviderConfig): ILlmProvider | null {
 }
 
 function adapterUnavailable(config: LlmProviderConfig): LlmProviderOperationResult {
+  logLlmEvent({
+    providerId: config.id,
+    providerType: config.type,
+    operation: 'provider.adapterUnavailable',
+    status: 'error',
+    errorCode: 'ADAPTER_UNAVAILABLE',
+  });
+
   return {
     providerId: config.id,
     providerName: config.name,
@@ -211,13 +220,28 @@ export const LlmRuntimeService = {
     const provider = await this.getProviderConfigById(id);
     const config = toProviderConfig(provider);
     const adapter = createAdapter(config);
+    const startedAt = Date.now();
 
     if (!adapter) {
       return adapterUnavailable(config);
     }
 
+    logLlmEvent({
+      providerId: adapter.id,
+      providerType: adapter.config.type,
+      operation: 'provider.test',
+      status: 'started',
+    });
+
     try {
       await adapter.initialise();
+      logLlmEvent({
+        providerId: adapter.id,
+        providerType: adapter.config.type,
+        operation: 'provider.test',
+        latencyMs: Date.now() - startedAt,
+        status: 'success',
+      });
       return {
         providerId: adapter.id,
         providerName: adapter.config.name,
@@ -225,6 +249,14 @@ export const LlmRuntimeService = {
         status: 'success',
       };
     } catch (error) {
+      logLlmEvent({
+        providerId: adapter.id,
+        providerType: adapter.config.type,
+        operation: 'provider.test',
+        latencyMs: Date.now() - startedAt,
+        status: 'error',
+        errorCode: getLlmErrorCode(error),
+      });
       return {
         providerId: adapter.id,
         providerName: adapter.config.name,
@@ -239,6 +271,7 @@ export const LlmRuntimeService = {
     const provider = await this.getProviderConfigById(id);
     const config = toProviderConfig(provider);
     const adapter = createAdapter(config);
+    const startedAt = Date.now();
 
     if (!adapter) {
       return adapterUnavailable(config);
@@ -254,8 +287,24 @@ export const LlmRuntimeService = {
       };
     }
 
+    logLlmEvent({
+      providerId: adapter.id,
+      providerType: adapter.config.type,
+      model,
+      operation: 'provider.pullModel.runtime',
+      status: 'started',
+    });
+
     try {
       await adapter.pullModel(model);
+      logLlmEvent({
+        providerId: adapter.id,
+        providerType: adapter.config.type,
+        model,
+        operation: 'provider.pullModel.runtime',
+        latencyMs: Date.now() - startedAt,
+        status: 'success',
+      });
       return {
         providerId: adapter.id,
         providerName: adapter.config.name,
@@ -263,6 +312,15 @@ export const LlmRuntimeService = {
         status: 'success',
       };
     } catch (error) {
+      logLlmEvent({
+        providerId: adapter.id,
+        providerType: adapter.config.type,
+        model,
+        operation: 'provider.pullModel.runtime',
+        latencyMs: Date.now() - startedAt,
+        status: 'error',
+        errorCode: getLlmErrorCode(error),
+      });
       return {
         providerId: adapter.id,
         providerName: adapter.config.name,

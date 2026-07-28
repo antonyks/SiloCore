@@ -1,4 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
+import { logger } from '../../config/logger';
 import { ChatService } from '../../modules/chat/chat.service';
 import { mockPrisma } from '../setup';
 import { NotFoundError, AuthenticationError } from '../../errors';
@@ -7,9 +8,26 @@ import { SelectedLlmProviderConfig } from '../../modules/llm/llmProviderConfig.m
 import { OllamaProvider } from '../../modules/llm/providers/ollama.provider';
 
 jest.mock('node-fetch', () => jest.fn());
+jest.mock('../../config/logger', () => ({
+  logger: {
+    info: jest.fn(),
+    error: jest.fn(),
+  },
+}));
 
 const TEST_MODEL_ID = process.env.OLLAMA_MODEL as string;
 const EXPLICIT_TEST_MODEL_ID = `${TEST_MODEL_ID}-explicit`;
+const mockedLogger = logger as unknown as {
+  info: jest.Mock;
+  error: jest.Mock;
+};
+
+function loggedPayloads() {
+  return [
+    ...mockedLogger.info.mock.calls.map(([payload]) => payload),
+    ...mockedLogger.error.mock.calls.map(([payload]) => payload),
+  ];
+}
 
 function createSession(overrides: Partial<ChatSessionWithMessages> = {}): ChatSessionWithMessages {
   return {
@@ -469,6 +487,7 @@ describe('ChatService', () => {
         userId: 1,
         content: 'Hello',
         temperature: 0.2,
+        requestId: 'req-chat-complete',
       });
 
       expect(result).toEqual({ userMessage, assistantMessage });
@@ -496,6 +515,26 @@ describe('ChatService', () => {
         }),
         select: SelectedChatMessageFields,
       });
+      expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: 'req-chat-complete',
+        providerId: '1',
+        providerType: 'ollama',
+        model: TEST_MODEL_ID,
+        operation: 'chat.complete',
+        status: 'started',
+      }), 'chat.complete.started');
+      expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: 'req-chat-complete',
+        providerId: '1',
+        providerType: 'ollama',
+        model: TEST_MODEL_ID,
+        operation: 'chat.complete',
+        status: 'success',
+        latencyMs: expect.any(Number),
+      }), 'chat.complete.success');
+      expect(JSON.stringify(loggedPayloads())).not.toContain('Hello');
+      expect(JSON.stringify(loggedPayloads())).not.toContain('Hi there');
+      expect(JSON.stringify(loggedPayloads())).not.toContain('I should greet the user.');
     });
 
     it('should resolve an explicit provider and model', async () => {
@@ -657,9 +696,20 @@ describe('ChatService', () => {
         sessionId: 1,
         userId: 1,
         content: 'Hello',
+        requestId: 'req-chat-error',
       })).rejects.toThrow('provider offline');
 
       expect(mockPrisma.chatMessage.create).toHaveBeenCalledTimes(1);
+      expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: 'req-chat-error',
+        providerId: '1',
+        providerType: 'ollama',
+        model: TEST_MODEL_ID,
+        operation: 'chat.complete',
+        status: 'error',
+        errorCode: 'Error',
+        latencyMs: expect.any(Number),
+      }), 'chat.complete.error');
     });
   });
 
@@ -702,6 +752,7 @@ describe('ChatService', () => {
         sessionId: 1,
         userId: 1,
         content: 'Hello',
+        requestId: 'req-chat-stream',
       })) {
         events.push(event);
       }
@@ -727,6 +778,26 @@ describe('ChatService', () => {
         }),
         select: SelectedChatMessageFields,
       });
+      expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: 'req-chat-stream',
+        providerId: '1',
+        providerType: 'ollama',
+        model: TEST_MODEL_ID,
+        operation: 'chat.stream',
+        status: 'started',
+      }), 'chat.stream.started');
+      expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: 'req-chat-stream',
+        providerId: '1',
+        providerType: 'ollama',
+        model: TEST_MODEL_ID,
+        operation: 'chat.stream',
+        status: 'success',
+        latencyMs: expect.any(Number),
+      }), 'chat.stream.success');
+      expect(JSON.stringify(loggedPayloads())).not.toContain('Hello');
+      expect(JSON.stringify(loggedPayloads())).not.toContain('Hi there');
+      expect(JSON.stringify(loggedPayloads())).not.toContain('Think first.');
     });
 
     it('should persist partial assistant output when streaming fails after deltas', async () => {
@@ -766,6 +837,7 @@ describe('ChatService', () => {
           sessionId: 1,
           userId: 1,
           content: 'Hello',
+          requestId: 'req-chat-stream-error',
         })) {
           events.push(event);
         }
@@ -793,6 +865,18 @@ describe('ChatService', () => {
         }),
         select: SelectedChatMessageFields,
       });
+      expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: 'req-chat-stream-error',
+        providerId: '1',
+        providerType: 'ollama',
+        model: TEST_MODEL_ID,
+        operation: 'chat.stream',
+        status: 'error',
+        errorCode: 'Error',
+        latencyMs: expect.any(Number),
+      }), 'chat.stream.error');
+      expect(JSON.stringify(loggedPayloads())).not.toContain('Partial answer');
+      expect(JSON.stringify(loggedPayloads())).not.toContain('Partial reasoning');
     });
 
     it('should mark reasoning-only length finishes as incomplete', async () => {
@@ -850,6 +934,69 @@ describe('ChatService', () => {
         }),
         select: SelectedChatMessageFields,
       });
+    });
+
+    it('should persist partial assistant output and log abort when the stream is closed early', async () => {
+      async function* abortableChunks() {
+        yield { content: 'Partial answer' };
+        yield { content: 'This chunk should not be consumed' };
+      }
+      const userMessage: SelectedChatMessage = {
+        id: 1,
+        content: 'Hello',
+        author: 'USER',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      };
+      const assistantMessage: SelectedChatMessage = {
+        id: 2,
+        content: 'Partial answer',
+        author: 'ASSISTANT',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      };
+
+      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
+      mockPrisma.chatMessage.create
+        .mockResolvedValueOnce(userMessage)
+        .mockResolvedValueOnce(assistantMessage);
+      jest.spyOn(OllamaProvider.prototype, 'streamComplete').mockReturnValue(abortableChunks());
+
+      const stream = ChatService.streamAssistantResponse({
+        sessionId: 1,
+        userId: 1,
+        content: 'Hello',
+        requestId: 'req-chat-stream-abort',
+      })[Symbol.asyncIterator]();
+
+      await expect(stream.next()).resolves.toEqual({ done: false, value: { event: 'user_message', data: userMessage } });
+      await expect(stream.next()).resolves.toEqual({ done: false, value: { event: 'delta', data: { content: 'Partial answer' } } });
+      await stream.return?.();
+
+      expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, {
+        data: expect.objectContaining({
+          content: 'Partial answer',
+          author: 'ASSISTANT',
+          metadata: expect.objectContaining({
+            finishReason: 'aborted',
+            incomplete: true,
+          }),
+        }),
+        select: SelectedChatMessageFields,
+      });
+      expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: 'req-chat-stream-abort',
+        providerId: '1',
+        providerType: 'ollama',
+        model: TEST_MODEL_ID,
+        operation: 'chat.stream',
+        status: 'aborted',
+        latencyMs: expect.any(Number),
+      }), 'chat.stream.aborted');
+      expect(JSON.stringify(loggedPayloads())).not.toContain('Partial answer');
     });
   });
 

@@ -15,6 +15,7 @@ import { SelectedChatSession, ChatSessionWithMessages, SelectedChatMessage, Mess
 import { LlmRuntimeService } from '../llm/llmRuntime.service';
 import { ILlmProvider } from '../llm/llm.interface';
 import { LlmCompletionRequest, LlmMessage, TokenUsage } from '../llm/llm.types';
+import { getLlmErrorCode, logLlmEvent } from '../llm/llm.logging';
 
 type PreparedGeneration = {
   provider: ILlmProvider;
@@ -202,35 +203,75 @@ export const ChatService = {
 
   async generateAssistantResponse(input: IChatGenerationServiceInput): Promise<IChatGenerationResult> {
     const prepared = await this.prepareGeneration(input);
-    const completion = await prepared.provider.complete(prepared.request);
-    const assistantMessage = await ChatRepository.createMessage({
-      content: completion.content,
-      author: MessageAuthor.ASSISTANT,
-      sessionId: input.sessionId,
-      metadata: createAssistantMetadata({
-        ...prepared.providerMetadata,
-        model: completion.model,
-        reasoning: completion.reasoning,
-        finishReason: completion.finishReason,
-        incomplete: isIncompleteGeneration({
-          content: completion.content,
-          reasoning: completion.reasoning,
-          finishReason: completion.finishReason,
-        }),
-        usage: completion.usage,
-        latencyMs: completion.latencyMs,
-        params: prepared.params,
-      }),
+    logLlmEvent({
+      requestId: input.requestId,
+      providerId: prepared.providerMetadata.providerId,
+      providerType: prepared.providerMetadata.providerType,
+      model: prepared.request.model,
+      operation: 'chat.complete',
+      status: 'started',
     });
 
-    return {
-      userMessage: prepared.userMessage,
-      assistantMessage,
-    };
+    try {
+      const completion = await prepared.provider.complete(prepared.request);
+      const assistantMessage = await ChatRepository.createMessage({
+        content: completion.content,
+        author: MessageAuthor.ASSISTANT,
+        sessionId: input.sessionId,
+        metadata: createAssistantMetadata({
+          ...prepared.providerMetadata,
+          model: completion.model,
+          reasoning: completion.reasoning,
+          finishReason: completion.finishReason,
+          incomplete: isIncompleteGeneration({
+            content: completion.content,
+            reasoning: completion.reasoning,
+            finishReason: completion.finishReason,
+          }),
+          usage: completion.usage,
+          latencyMs: completion.latencyMs,
+          params: prepared.params,
+        }),
+      });
+      logLlmEvent({
+        requestId: input.requestId,
+        providerId: prepared.providerMetadata.providerId,
+        providerType: prepared.providerMetadata.providerType,
+        model: completion.model,
+        operation: 'chat.complete',
+        latencyMs: Date.now() - prepared.startedAt,
+        status: 'success',
+      });
+
+      return {
+        userMessage: prepared.userMessage,
+        assistantMessage,
+      };
+    } catch (error) {
+      logLlmEvent({
+        requestId: input.requestId,
+        providerId: prepared.providerMetadata.providerId,
+        providerType: prepared.providerMetadata.providerType,
+        model: prepared.request.model,
+        operation: 'chat.complete',
+        latencyMs: Date.now() - prepared.startedAt,
+        status: 'error',
+        errorCode: getLlmErrorCode(error),
+      });
+      throw error;
+    }
   },
 
   async *streamAssistantResponse(input: IChatGenerationServiceInput): AsyncIterable<ChatGenerationStreamEvent> {
     const prepared = await this.prepareGeneration(input);
+    logLlmEvent({
+      requestId: input.requestId,
+      providerId: prepared.providerMetadata.providerId,
+      providerType: prepared.providerMetadata.providerType,
+      model: prepared.request.model,
+      operation: 'chat.stream',
+      status: 'started',
+    });
     yield { event: 'user_message', data: prepared.userMessage };
 
     let content = '';
@@ -238,6 +279,8 @@ export const ChatService = {
     let usage: TokenUsage | undefined;
     let finishReason: string | undefined;
     let assistantMessagePersisted = false;
+    let completed = false;
+    let failed = false;
 
     const persistAssistantMessage = async (options?: {
       finishReason?: string;
@@ -307,8 +350,19 @@ export const ChatService = {
       if (assistantMessage) {
         yield { event: 'assistant_message', data: assistantMessage };
       }
+      completed = true;
+      logLlmEvent({
+        requestId: input.requestId,
+        providerId: prepared.providerMetadata.providerId,
+        providerType: prepared.providerMetadata.providerType,
+        model: prepared.request.model,
+        operation: 'chat.stream',
+        latencyMs: Date.now() - prepared.startedAt,
+        status: 'success',
+      });
       yield { event: 'done', data: { done: true } };
     } catch (error) {
+      failed = true;
       const errorMessage = error instanceof Error ? error.message : 'Streaming failed';
       const assistantMessage = await persistAssistantMessage({
         finishReason: 'error',
@@ -318,12 +372,33 @@ export const ChatService = {
       if (assistantMessage) {
         yield { event: 'assistant_message', data: assistantMessage };
       }
+      logLlmEvent({
+        requestId: input.requestId,
+        providerId: prepared.providerMetadata.providerId,
+        providerType: prepared.providerMetadata.providerType,
+        model: prepared.request.model,
+        operation: 'chat.stream',
+        latencyMs: Date.now() - prepared.startedAt,
+        status: 'error',
+        errorCode: getLlmErrorCode(error),
+      });
       throw error;
     } finally {
-      await persistAssistantMessage({
-        finishReason: 'aborted',
-        incomplete: true,
-      });
+      if (!completed && !failed) {
+        await persistAssistantMessage({
+          finishReason: 'aborted',
+          incomplete: true,
+        });
+        logLlmEvent({
+          requestId: input.requestId,
+          providerId: prepared.providerMetadata.providerId,
+          providerType: prepared.providerMetadata.providerType,
+          model: prepared.request.model,
+          operation: 'chat.stream',
+          latencyMs: Date.now() - prepared.startedAt,
+          status: 'aborted',
+        });
+      }
     }
   },
 

@@ -13,6 +13,7 @@ import {
     TokenUsage,
     LlmStreamingError,
 } from '../llm.types';
+import { getLlmErrorCode, logLlmEvent } from '../llm.logging';
 
 /** Ollama-specific API request shape. */
 interface OllamaGenerateRequest {
@@ -46,6 +47,13 @@ function extractReasoning(message: OllamaGenerateResponse['message']): string | 
 export class OllamaProvider extends AbstractLlmProvider {
     async initialise(): Promise<void> {
         if (!this.isEnabled) return;
+        const startedAt = Date.now();
+        logLlmEvent({
+            providerId: this.id,
+            providerType: this.config.type,
+            operation: 'provider.initialise',
+            status: 'started',
+        });
         try {
             const res = await fetch(`${this.config.baseUrl}/api/tags`, {
                 headers: this.buildRequestHeaders(),
@@ -54,7 +62,22 @@ export class OllamaProvider extends AbstractLlmProvider {
             if (!res.ok) {
                 this.throwProviderError(`Ollama health check failed with status ${res.status}`, 'HEALTH_CHECK_FAILED', res.status);
             }
+            logLlmEvent({
+                providerId: this.id,
+                providerType: this.config.type,
+                operation: 'provider.initialise',
+                latencyMs: Date.now() - startedAt,
+                status: 'success',
+            });
         } catch (err) {
+            logLlmEvent({
+                providerId: this.id,
+                providerType: this.config.type,
+                operation: 'provider.initialise',
+                latencyMs: Date.now() - startedAt,
+                status: 'error',
+                errorCode: getLlmErrorCode(err),
+            });
             this.throwProviderError(`Ollama unreachable: ${(err as Error).message}`, 'CONNECTION_ERROR');
         }
     }
@@ -72,24 +95,46 @@ export class OllamaProvider extends AbstractLlmProvider {
                 stop: enriched.stopSequences,
             },
         };
-
-        const result = await this.withLatency(async () => {
-            const res = await fetch(`${this.config.baseUrl}/api/chat`, {
-                method: 'POST',
-                headers: this.buildRequestHeaders({
-                    'Content-Type': 'application/json',
-                }),
-                body: JSON.stringify(body),
-                signal: this.buildAbortSignal(),
-            });
-
-            if (!res.ok) {
-                const text = await res.text().catch(() => '');
-                this.throwProviderError(`Ollama completion error: ${text}`, `HTTP_${res.status}`, res.status);
-            }
-
-            return (await res.json()) as OllamaGenerateResponse;
+        const startedAt = Date.now();
+        logLlmEvent({
+            providerId: this.id,
+            providerType: this.config.type,
+            model: enriched.model,
+            operation: 'provider.complete',
+            status: 'started',
         });
+
+        let result: { value: OllamaGenerateResponse; latencyMs: number };
+        try {
+            result = await this.withLatency(async () => {
+                const res = await fetch(`${this.config.baseUrl}/api/chat`, {
+                    method: 'POST',
+                    headers: this.buildRequestHeaders({
+                        'Content-Type': 'application/json',
+                    }),
+                    body: JSON.stringify(body),
+                    signal: this.buildAbortSignal(),
+                });
+
+                if (!res.ok) {
+                    const text = await res.text().catch(() => '');
+                    this.throwProviderError(`Ollama completion error: ${text}`, `HTTP_${res.status}`, res.status);
+                }
+
+                return (await res.json()) as OllamaGenerateResponse;
+            });
+        } catch (error) {
+            logLlmEvent({
+                providerId: this.id,
+                providerType: this.config.type,
+                model: enriched.model,
+                operation: 'provider.complete',
+                latencyMs: Date.now() - startedAt,
+                status: 'error',
+                errorCode: getLlmErrorCode(error),
+            });
+            throw error;
+        }
 
         const { value: raw, latencyMs } = result;
         const content = raw.message?.content ?? '';
@@ -101,6 +146,14 @@ export class OllamaProvider extends AbstractLlmProvider {
                 totalTokens: raw.prompt_eval_count + raw.eval_count,
             }
             : undefined;
+        logLlmEvent({
+            providerId: this.id,
+            providerType: this.config.type,
+            model: enriched.model,
+            operation: 'provider.complete',
+            latencyMs,
+            status: 'success',
+        });
 
         return {
             content,
@@ -125,42 +178,77 @@ export class OllamaProvider extends AbstractLlmProvider {
                 stop: enriched.stopSequences,
             },
         };
-
-        const res = await fetch(`${this.config.baseUrl}/api/chat`, {
-            method: 'POST',
-            headers: this.buildRequestHeaders({
-                'Content-Type': 'application/json',
-            }),
-            body: JSON.stringify(body),
-            signal: this.buildAbortSignal(),
+        const startedAt = Date.now();
+        let completed = false;
+        let failed = false;
+        logLlmEvent({
+            providerId: this.id,
+            providerType: this.config.type,
+            model: enriched.model,
+            operation: 'provider.stream',
+            status: 'started',
         });
 
-        if (!res.ok) {
-            const text = await res.text().catch(() => '');
-            throw new LlmStreamingError(
-                `Ollama streaming error: ${text}`,
-                this.id,
-                `HTTP_${res.status}`,
-                res.status,
-            );
-        }
+        try {
+            const res = await fetch(`${this.config.baseUrl}/api/chat`, {
+                method: 'POST',
+                headers: this.buildRequestHeaders({
+                    'Content-Type': 'application/json',
+                }),
+                body: JSON.stringify(body),
+                signal: this.buildAbortSignal(),
+            });
 
-        // Ollama returns NDJSON (one JSON object per line).
-        const reader = res.body as NodeJS.ReadableStream;
-        const decoder = new TextDecoder();
-        let buffer = '';
+            if (!res.ok) {
+                const text = await res.text().catch(() => '');
+                throw new LlmStreamingError(
+                    `Ollama streaming error: ${text}`,
+                    this.id,
+                    `HTTP_${res.status}`,
+                    res.status,
+                );
+            }
 
-        for await (const chunk of reader) {
-            buffer += typeof chunk === 'string'
-                ? chunk
-                : decoder.decode(chunk, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() ?? '';
+            // Ollama returns NDJSON (one JSON object per line).
+            const reader = res.body as NodeJS.ReadableStream;
+            const decoder = new TextDecoder();
+            let buffer = '';
 
-            for (const line of lines) {
-                if (!line.trim()) continue;
+            for await (const chunk of reader) {
+                buffer += typeof chunk === 'string'
+                    ? chunk
+                    : decoder.decode(chunk, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() ?? '';
+
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                        const parsed = JSON.parse(line) as OllamaGenerateResponse;
+                        yield {
+                            content: parsed.message?.content ?? '',
+                            reasoning: extractReasoning(parsed.message),
+                            done: parsed.done ?? false,
+                            finishReason: parsed.done_reason,
+                            usage:
+                                parsed.prompt_eval_count != null && parsed.eval_count != null
+                                    ? {
+                                        promptTokens: parsed.prompt_eval_count,
+                                        completionTokens: parsed.eval_count,
+                                        totalTokens: parsed.prompt_eval_count + parsed.eval_count,
+                                    }
+                                    : undefined,
+                        };
+                    } catch {
+                        // Ignore malformed lines
+                    }
+                }
+            }
+
+            // Flush remaining buffer
+            if (buffer.trim()) {
                 try {
-                    const parsed = JSON.parse(line) as OllamaGenerateResponse;
+                    const parsed = JSON.parse(buffer) as OllamaGenerateResponse;
                     yield {
                         content: parsed.message?.content ?? '',
                         reasoning: extractReasoning(parsed.message),
@@ -176,56 +264,121 @@ export class OllamaProvider extends AbstractLlmProvider {
                                 : undefined,
                     };
                 } catch {
-                    // Ignore malformed lines
+                    // Ignore
                 }
             }
-        }
-
-        // Flush remaining buffer
-        if (buffer.trim()) {
-            try {
-                const parsed = JSON.parse(buffer) as OllamaGenerateResponse;
-                yield {
-                    content: parsed.message?.content ?? '',
-                    reasoning: extractReasoning(parsed.message),
-                    done: parsed.done ?? false,
-                    finishReason: parsed.done_reason,
-                    usage:
-                        parsed.prompt_eval_count != null && parsed.eval_count != null
-                            ? {
-                                promptTokens: parsed.prompt_eval_count,
-                                completionTokens: parsed.eval_count,
-                                totalTokens: parsed.prompt_eval_count + parsed.eval_count,
-                            }
-                            : undefined,
-                };
-            } catch {
-                // Ignore
+            completed = true;
+            logLlmEvent({
+                providerId: this.id,
+                providerType: this.config.type,
+                model: enriched.model,
+                operation: 'provider.stream',
+                latencyMs: Date.now() - startedAt,
+                status: 'success',
+            });
+        } catch (error) {
+            failed = true;
+            logLlmEvent({
+                providerId: this.id,
+                providerType: this.config.type,
+                model: enriched.model,
+                operation: 'provider.stream',
+                latencyMs: Date.now() - startedAt,
+                status: 'error',
+                errorCode: getLlmErrorCode(error),
+            });
+            throw error;
+        } finally {
+            if (!completed && !failed) {
+                logLlmEvent({
+                    providerId: this.id,
+                    providerType: this.config.type,
+                    model: enriched.model,
+                    operation: 'provider.stream',
+                    latencyMs: Date.now() - startedAt,
+                    status: 'aborted',
+                });
             }
         }
     }
 
     async listModels(): Promise<string[]> {
-        const res = await fetch(`${this.config.baseUrl}/api/tags`, {
-            headers: this.buildRequestHeaders(),
-            signal: this.buildAbortSignal(),
+        const startedAt = Date.now();
+        logLlmEvent({
+            providerId: this.id,
+            providerType: this.config.type,
+            operation: 'provider.listModels',
+            status: 'started',
         });
-        if (!res.ok) {
-            this.throwProviderError(`Failed to list Ollama models`, 'LIST_MODELS_FAILED', res.status);
+        try {
+            const res = await fetch(`${this.config.baseUrl}/api/tags`, {
+                headers: this.buildRequestHeaders(),
+                signal: this.buildAbortSignal(),
+            });
+            if (!res.ok) {
+                this.throwProviderError(`Failed to list Ollama models`, 'LIST_MODELS_FAILED', res.status);
+            }
+            const json = (await res.json()) as { models?: Array<{ name: string }> };
+            const models = json.models?.map((m) => m.name) ?? [];
+            logLlmEvent({
+                providerId: this.id,
+                providerType: this.config.type,
+                operation: 'provider.listModels',
+                latencyMs: Date.now() - startedAt,
+                status: 'success',
+            });
+            return models;
+        } catch (error) {
+            logLlmEvent({
+                providerId: this.id,
+                providerType: this.config.type,
+                operation: 'provider.listModels',
+                latencyMs: Date.now() - startedAt,
+                status: 'error',
+                errorCode: getLlmErrorCode(error),
+            });
+            throw error;
         }
-        const json = (await res.json()) as { models?: Array<{ name: string }> };
-        return json.models?.map((m) => m.name) ?? [];
     }
 
     async pullModel(model: string): Promise<void> {
-        const res = await fetch(`${this.config.baseUrl}/api/pull`, {
-            method: 'POST',
-            headers: this.buildRequestHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ name: model, stream: false }),
-            signal: this.buildAbortSignal(),
+        const startedAt = Date.now();
+        logLlmEvent({
+            providerId: this.id,
+            providerType: this.config.type,
+            model,
+            operation: 'provider.pullModel',
+            status: 'started',
         });
-        if (!res.ok) {
-            this.throwProviderError(`Failed to pull model ${model}`, `HTTP_${res.status}`, res.status);
+        try {
+            const res = await fetch(`${this.config.baseUrl}/api/pull`, {
+                method: 'POST',
+                headers: this.buildRequestHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({ name: model, stream: false }),
+                signal: this.buildAbortSignal(),
+            });
+            if (!res.ok) {
+                this.throwProviderError(`Failed to pull model ${model}`, `HTTP_${res.status}`, res.status);
+            }
+            logLlmEvent({
+                providerId: this.id,
+                providerType: this.config.type,
+                model,
+                operation: 'provider.pullModel',
+                latencyMs: Date.now() - startedAt,
+                status: 'success',
+            });
+        } catch (error) {
+            logLlmEvent({
+                providerId: this.id,
+                providerType: this.config.type,
+                model,
+                operation: 'provider.pullModel',
+                latencyMs: Date.now() - startedAt,
+                status: 'error',
+                errorCode: getLlmErrorCode(error),
+            });
+            throw error;
         }
     }
 }

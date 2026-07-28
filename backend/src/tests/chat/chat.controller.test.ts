@@ -59,6 +59,7 @@ describe('ChatController', () => {
       const req = createAuthenticatedMockRequest({
         params: { id: '1' },
         body: { content: 'Hello' },
+        requestId: 'req-stream-controller',
         user: {
           id: 7,
           email: 'user@example.com',
@@ -82,6 +83,7 @@ describe('ChatController', () => {
         topP: undefined,
         maxTokens: undefined,
         stopSequences: undefined,
+        requestId: 'req-stream-controller',
       });
       expect(res.status).toHaveBeenCalledWith(200);
       expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'text/event-stream');

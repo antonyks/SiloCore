@@ -204,6 +204,7 @@ export const ChatController = {
       ...toGenerationInput(req.body),
       sessionId,
       userId,
+      ...(req.requestId ? { requestId: req.requestId } : {}),
     });
 
     res.status(201).json({ data: result });
@@ -221,6 +222,7 @@ export const ChatController = {
       ...toGenerationInput(req.body),
       sessionId,
       userId,
+      ...(req.requestId ? { requestId: req.requestId } : {}),
     })[Symbol.asyncIterator]();
     let clientClosed = false;
     req.on?.('aborted', () => {

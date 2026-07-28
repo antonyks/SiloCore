@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
+import { logger } from '../../../config/logger';
 import { NotFoundError } from '../../../errors';
 import { LlmProviderService } from '../../../modules/admin/llm/llmProvider.service';
 import { LlmRuntimeService } from '../../../modules/llm/llmRuntime.service';
@@ -7,9 +8,19 @@ import { OllamaProvider } from '../../../modules/llm/providers/ollama.provider';
 import { mockPrisma } from '../../setup';
 
 jest.mock('node-fetch', () => jest.fn());
+jest.mock('../../../config/logger', () => ({
+  logger: {
+    info: jest.fn(),
+    error: jest.fn(),
+  },
+}));
 
 const TEST_MODEL_ID = process.env.OLLAMA_MODEL as string;
 const SECOND_TEST_MODEL_ID = `${TEST_MODEL_ID}-secondary`;
+const mockedLogger = logger as unknown as {
+  info: jest.Mock;
+  error: jest.Mock;
+};
 
 function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): SelectedLlmProviderConfig {
   return {
@@ -32,6 +43,7 @@ function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): Sel
 
 describe('LlmProviderService', () => {
   afterEach(() => {
+    jest.clearAllMocks();
     jest.restoreAllMocks();
   });
 
@@ -147,6 +159,14 @@ describe('LlmProviderService', () => {
         status: 'error',
         errorMessage: 'No adapter is available for provider type openai-compatible',
       });
+      expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+        providerId: '1',
+        providerType: 'openai-compatible',
+        operation: 'provider.adapterUnavailable',
+        status: 'error',
+        errorCode: 'ADAPTER_UNAVAILABLE',
+      }), 'provider.adapterUnavailable.error');
+      expect(JSON.stringify(mockedLogger.error.mock.calls)).not.toContain('secret-key');
     });
 
     it('lists models for Ollama providers without leaking secrets', async () => {

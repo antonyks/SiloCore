@@ -1,11 +1,22 @@
 import fetch, { Response } from 'node-fetch';
 import { jest } from '@jest/globals';
+import { logger } from '../../config/logger';
 import { OllamaProvider } from '../../modules/llm/providers/ollama.provider';
 import { LlmProviderConfig, LlmStreamingError } from '../../modules/llm/llm.types';
 
 jest.mock('node-fetch', () => jest.fn());
+jest.mock('../../config/logger', () => ({
+  logger: {
+    info: jest.fn(),
+    error: jest.fn(),
+  },
+}));
 
 const mockedFetch = fetch as jest.MockedFunction<typeof fetch>;
+const mockedLogger = logger as unknown as {
+  info: jest.Mock;
+  error: jest.Mock;
+};
 const TEST_BASE_URL = 'http://localhost:11434';
 const TEST_MODEL_ID = process.env.OLLAMA_MODEL as string;
 
@@ -142,6 +153,7 @@ describe('OllamaProvider timeouts', () => {
 describe('OllamaProvider headers', () => {
   beforeEach(() => {
     mockedFetch.mockReset();
+    jest.clearAllMocks();
   });
 
   it('passes api key and extra headers to health checks', async () => {
@@ -242,11 +254,54 @@ describe('OllamaProvider headers', () => {
       Authorization: 'Bearer secret-token',
     });
   });
+
+  it('logs complete lifecycle fields without secrets, headers, prompts, or assistant content', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        model: TEST_MODEL_ID,
+        message: { content: 'Assistant secret content' },
+      }),
+    }));
+
+    await createProvider({
+      apiKey: 'secret-token',
+      extraHeaders: { 'X-Provider-Secret': 'secret-header' },
+    }).complete({
+      model: TEST_MODEL_ID,
+      messages: [{ role: 'user', content: 'Private user prompt' }],
+    });
+
+    expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'local-ollama',
+      providerType: 'ollama',
+      model: TEST_MODEL_ID,
+      operation: 'provider.complete',
+      status: 'started',
+    }), 'provider.complete.started');
+    expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'local-ollama',
+      providerType: 'ollama',
+      model: TEST_MODEL_ID,
+      operation: 'provider.complete',
+      status: 'success',
+      latencyMs: expect.any(Number),
+    }), 'provider.complete.success');
+
+    const logText = JSON.stringify([
+      ...mockedLogger.info.mock.calls.map(([payload]) => payload),
+      ...mockedLogger.error.mock.calls.map(([payload]) => payload),
+    ]);
+    expect(logText).not.toContain('secret-token');
+    expect(logText).not.toContain('secret-header');
+    expect(logText).not.toContain('Private user prompt');
+    expect(logText).not.toContain('Assistant secret content');
+  });
 });
 
 describe('OllamaProvider streaming errors', () => {
   beforeEach(() => {
     mockedFetch.mockReset();
+    jest.clearAllMocks();
   });
 
   it('throws LlmStreamingError for failed streaming responses', async () => {
@@ -270,6 +325,15 @@ describe('OllamaProvider streaming errors', () => {
       statusCode: 503,
       message: 'Ollama streaming error: model unavailable',
     });
+    expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'local-ollama',
+      providerType: 'ollama',
+      model: TEST_MODEL_ID,
+      operation: 'provider.stream',
+      status: 'error',
+      errorCode: 'HTTP_503',
+      latencyMs: expect.any(Number),
+    }), 'provider.stream.error');
   });
 });
 
