@@ -5,11 +5,11 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import { json, urlencoded } from 'express';
 import { router as moduleRouter } from './modules';
-import { notFoundHandler, errorHandler } from './middleware';
+import { notFoundHandler, errorHandler, requestIdMiddleware } from './middleware';
 
 const app = express();
 
-
+app.use(requestIdMiddleware);
 app.use(helmet());
 app.use(cors());
 app.use(json());
