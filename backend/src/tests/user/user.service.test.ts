@@ -33,9 +33,32 @@ describe('UserService', () => {
         updatedAt: new Date(),
       };
 
-      mockPrisma.user.findUnique.mockResolvedValue(mockExistingUser);
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce(mockExistingUser)
+        .mockResolvedValueOnce(mockCreatedUser);
       (bcrypt.hash as jest.Mock).mockResolvedValue('hashedPassword');
       mockPrisma.user.create.mockResolvedValue(mockCreatedUser);
+      mockPrisma.workspace.findFirst.mockResolvedValue(null);
+      mockPrisma.workspace.create.mockResolvedValue({
+        id: 1,
+        name: 'Personal Workspace',
+        type: 'PERSONAL',
+        status: 'ACTIVE',
+        ownerUserId: mockCreatedUser.id,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      mockPrisma.workspaceMembership.findFirst.mockResolvedValue(null);
+      mockPrisma.workspaceMembership.findUnique.mockResolvedValue(null);
+      mockPrisma.workspaceMembership.create.mockResolvedValue({
+        id: 1,
+        workspaceId: 1,
+        userId: mockCreatedUser.id,
+        role: 'OWNER',
+        status: 'ACTIVE',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
 
       const result = await UserService.createUser(userData);
 
@@ -45,6 +68,7 @@ describe('UserService', () => {
         select: SelectedUserFields,
       });
       expect(bcrypt.hash).toHaveBeenCalledWith(userData.password, BCRYPT_SALT_ROUNDS);
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
 
       const createUserData = {
         email: userData.email,
@@ -55,6 +79,22 @@ describe('UserService', () => {
       expect(mockPrisma.user.create).toHaveBeenCalledWith({
         data:createUserData,
         select: SelectedUserFields,
+      });
+      expect(mockPrisma.workspace.create).toHaveBeenCalledWith({
+        data: {
+          name: 'Personal Workspace',
+          type: 'PERSONAL',
+          status: 'ACTIVE',
+          ownerUserId: mockCreatedUser.id,
+        },
+      });
+      expect(mockPrisma.workspaceMembership.create).toHaveBeenCalledWith({
+        data: {
+          workspaceId: 1,
+          userId: mockCreatedUser.id,
+          role: 'OWNER',
+          status: 'ACTIVE',
+        },
       });
 
       expect(result).toEqual(mockCreatedUser);
@@ -86,6 +126,46 @@ describe('UserService', () => {
       );
 
       expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({where: { email:userData.email, NOT:{status:UserStatus.DELETED }}, select: SelectedUserFields});
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('should propagate provisioning failures so the transaction rolls back', async () => {
+      const userData = {
+        email: 'rollback@example.com',
+        password: 'password123',
+        name: 'Rollback User',
+      };
+
+      const mockCreatedUser = {
+        id: 2,
+        email: 'rollback@example.com',
+        passwordHash: 'hashedPassword',
+        name: 'Rollback User',
+        role: UserRole.USER,
+        status: UserStatus.ACTIVE,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const provisioningError = new Error('workspace provisioning failed');
+
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(mockCreatedUser);
+      (bcrypt.hash as jest.Mock).mockResolvedValue('hashedPassword');
+      mockPrisma.user.create.mockResolvedValue(mockCreatedUser);
+      mockPrisma.workspace.findFirst.mockRejectedValue(provisioningError);
+
+      await expect(UserService.createUser(userData)).rejects.toThrow(provisioningError);
+
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.user.create).toHaveBeenCalled();
+      expect(mockPrisma.workspace.findFirst).toHaveBeenCalledWith({
+        where: {
+          ownerUserId: mockCreatedUser.id,
+          type: 'PERSONAL',
+        },
+      });
     });
   });
 

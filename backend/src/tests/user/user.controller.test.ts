@@ -57,7 +57,31 @@ describe('UserController', () => {
             const userData = { name: mockUser.name, email: mockUser.email, password: 'password123' };
             req = {body:userData} as Partial<AuthenticatedRequest>;
             
+            mockPrisma.user.findUnique
+                .mockResolvedValueOnce(null)
+                .mockResolvedValueOnce(mockUser);
             mockPrisma.user.create.mockResolvedValue(mockUser);
+            mockPrisma.workspace.findFirst.mockResolvedValue(null);
+            mockPrisma.workspace.create.mockResolvedValue({
+                id: 1,
+                name: 'Personal Workspace',
+                type: 'PERSONAL',
+                status: 'ACTIVE',
+                ownerUserId: mockUser.id,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+            });
+            mockPrisma.workspaceMembership.findFirst.mockResolvedValue(null);
+            mockPrisma.workspaceMembership.findUnique.mockResolvedValue(null);
+            mockPrisma.workspaceMembership.create.mockResolvedValue({
+                id: 1,
+                workspaceId: 1,
+                userId: mockUser.id,
+                role: 'OWNER',
+                status: 'ACTIVE',
+                createdAt: new Date(),
+                updatedAt: new Date(),
+            });
             
             await UserController.createUser(createAuthenticatedMockRequest(req), res);
             

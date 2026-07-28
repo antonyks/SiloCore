@@ -12,6 +12,7 @@ type chatMessageResult = Awaited<ReturnType<PrismaClient['chatMessage']['create'
 
 const mockPrisma = {
   $queryRaw: jest.fn<() => Promise<unknown>>(),
+  $transaction: jest.fn(),
   user: {
     create: jest.fn<() => Promise<UserCreateResult>>(),
     findUnique: jest.fn<() => Promise<SelectedUser | null>>(),
@@ -40,7 +41,30 @@ const mockPrisma = {
     update: jest.fn<() => Promise<SelectedLlmProviderConfig>>(),
     count: jest.fn<() => Promise<number>>(),
   },
+  workspace: {
+    create: jest.fn<() => Promise<unknown>>(),
+    findFirst: jest.fn<() => Promise<unknown>>(),
+    update: jest.fn<() => Promise<unknown>>(),
+    count: jest.fn<() => Promise<number>>(),
+  },
+  workspaceMembership: {
+    create: jest.fn<() => Promise<unknown>>(),
+    findFirst: jest.fn<() => Promise<unknown>>(),
+    findUnique: jest.fn<() => Promise<unknown>>(),
+    update: jest.fn<() => Promise<unknown>>(),
+    count: jest.fn<() => Promise<number>>(),
+  },
 };
+
+mockPrisma.$transaction.mockImplementation(
+  (callback: unknown) => {
+    if (typeof callback !== 'function') {
+      throw new Error('Mock Prisma transaction expects a callback.');
+    }
+
+    return (callback as (transactionClient: typeof mockPrisma) => unknown)(mockPrisma);
+  },
+);
 
 
 class MockPrismaClientKnownRequestError extends Error {
@@ -73,6 +97,23 @@ jest.mock('@prisma/client', () => ({
   UserRole: {
     USER: 'USER',
     ADMIN: 'ADMIN',
+  },
+  WorkspaceType: {
+    PERSONAL: 'PERSONAL',
+    STANDARD: 'STANDARD',
+  },
+  WorkspaceStatus: {
+    ACTIVE: 'ACTIVE',
+    DELETED: 'DELETED',
+  },
+  WorkspaceMembershipRole: {
+    OWNER: 'OWNER',
+    EDITOR: 'EDITOR',
+    VIEWER: 'VIEWER',
+  },
+  WorkspaceMembershipStatus: {
+    ACTIVE: 'ACTIVE',
+    INACTIVE: 'INACTIVE',
   },
   MessageAuthor: {
     USER: 'USER',
@@ -107,6 +148,7 @@ jest.mock('jsonwebtoken', () => ({
 
 beforeEach(() => {
     mockPrisma.$queryRaw.mockClear();
+    mockPrisma.$transaction.mockClear();
     mockPrisma.user.create.mockClear();
     mockPrisma.user.findUnique.mockClear();
     mockPrisma.user.findMany.mockClear();
@@ -117,6 +159,15 @@ beforeEach(() => {
     mockPrisma.llmProviderConfig.findMany.mockClear();
     mockPrisma.llmProviderConfig.update.mockClear();
     mockPrisma.llmProviderConfig.count.mockClear();
+    mockPrisma.workspace.create.mockClear();
+    mockPrisma.workspace.findFirst.mockClear();
+    mockPrisma.workspace.update.mockClear();
+    mockPrisma.workspace.count.mockClear();
+    mockPrisma.workspaceMembership.create.mockClear();
+    mockPrisma.workspaceMembership.findFirst.mockClear();
+    mockPrisma.workspaceMembership.findUnique.mockClear();
+    mockPrisma.workspaceMembership.update.mockClear();
+    mockPrisma.workspaceMembership.count.mockClear();
 });
 
 export { mockPrisma };

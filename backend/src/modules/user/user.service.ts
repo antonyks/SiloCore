@@ -4,6 +4,8 @@ import { IUserCreateInput, IUserUpdate, IUserUpdatePassword } from './user.types
 import { DuplicateResourceError, NotFoundError, AuthenticationError } from '../../errors';
 import { BCRYPT_SALT_ROUNDS } from '../../config/constants';
 import { UserRole, UserStatus, SelectedUser, UserWhereInput, AuthUser } from './user.model';
+import { prisma } from '../../config/database';
+import { WorkspaceProvisioningService } from '../workspace/workspaceProvisioning.service';
 
 export const UserService = {
   async createUser(data: IUserCreateInput): Promise<SelectedUser> {
@@ -14,7 +16,11 @@ export const UserService = {
 
     const hashedPassword = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
 
-    return await UserRepository.createUser({ ...userData, password: hashedPassword });
+    return await prisma.$transaction(async (tx) => {
+      const createdUser = await UserRepository.createUser({ ...userData, password: hashedPassword }, tx);
+      await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(createdUser.id, tx);
+      return createdUser;
+    });
   },
 
   async getUserById(id: number): Promise<SelectedUser | null> {

@@ -16,10 +16,12 @@ function generateDeletedEmail(): string {
 export const UserRepository = {
 
 
-  async createUser(userData: IUserCreateInput): Promise<SelectedUser> {
+  async createUser(userData: IUserCreateInput, db?: Prisma.TransactionClient): Promise<SelectedUser> {
 
     const lowerCaseEmail:string=userData.email.toLowerCase();
-    return UserModel.create({
+    const userModel = db?.user ?? UserModel;
+
+    return userModel.create({
       data: {
         email: lowerCaseEmail,
         passwordHash: userData.password,
