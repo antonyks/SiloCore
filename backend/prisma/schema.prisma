@@ -17,7 +17,9 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   status       UserStatus @default(ACTIVE)
-  chatSessions ChatSession[]
+  chatSessions         ChatSession[]
+  ownedWorkspaces      Workspace[]           @relation("WorkspaceOwner")
+  workspaceMemberships WorkspaceMembership[]
   @@map("users")
 }
 
@@ -65,6 +67,42 @@ model LlmProviderConfig {
   @@map("llm_provider_configs")
 }
 
+model Workspace {
+  id          Int                   @id @default(autoincrement())
+  name        String
+  type        WorkspaceType
+  status      WorkspaceStatus       @default(ACTIVE)
+  ownerUserId Int
+  owner       User                  @relation("WorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  memberships WorkspaceMembership[]
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  @@index([ownerUserId])
+  @@index([type])
+  @@index([status])
+  @@map("workspaces")
+}
+
+model WorkspaceMembership {
+  id          Int                       @id @default(autoincrement())
+  workspaceId Int
+  userId      Int
+  role        WorkspaceMembershipRole
+  status      WorkspaceMembershipStatus @default(ACTIVE)
+  workspace   Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  user        User                      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId])
+  @@index([userId])
+  @@index([role])
+  @@index([status])
+  @@map("workspace_memberships")
+}
+
 enum LlmProviderConfigType {
   OLLAMA
   OPENAI_COMPATIBLE
@@ -85,4 +123,25 @@ enum UserStatus {
   ACTIVE
   DELETED
   BANNED
+}
+
+enum WorkspaceType {
+  PERSONAL
+  STANDARD
+}
+
+enum WorkspaceStatus {
+  ACTIVE
+  DELETED
+}
+
+enum WorkspaceMembershipRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+enum WorkspaceMembershipStatus {
+  ACTIVE
+  INACTIVE
 }

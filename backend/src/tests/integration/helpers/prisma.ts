@@ -2,7 +2,14 @@ import { MessageAuthor, PrismaClient, type Prisma, UserRole, UserStatus } from '
 
 export const integrationPrisma = new PrismaClient();
 
-const tablesToReset = ['chat_messages', 'chat_sessions', 'llm_provider_configs', 'users'];
+const tablesToReset = [
+  'workspace_memberships',
+  'workspaces',
+  'chat_messages',
+  'chat_sessions',
+  'llm_provider_configs',
+  'users',
+];
 
 export async function resetIntegrationDatabase(): Promise<void> {
   await integrationPrisma.$executeRawUnsafe(
