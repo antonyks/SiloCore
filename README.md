@@ -222,8 +222,44 @@ Frontend commands are run from `frontend/`:
 npm run dev
 npm run build
 npm run lint
+npm run test
+npm run test:e2e
 npm run preview
 ```
+
+### End-to-End Tests
+
+Playwright tests live in `frontend/e2e` and target the local browser app plus backend API.
+They expect PostgreSQL, the backend, and the frontend to already be running. The Docker
+flow is the recommended setup:
+
+```bash
+docker compose up --build
+```
+
+The backend container applies Prisma migrations and seeds the local demo users used by
+the initial login tests. These tests cover seeded admin and regular-user login plus
+role-based redirects, and they do not require Ollama or external LLM generation.
+
+Before the first local Playwright run, install browser binaries:
+
+```bash
+cd frontend
+npx playwright install
+```
+
+Run the suite from `frontend/`:
+
+```bash
+npm run test:e2e
+```
+
+Optional environment overrides:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PLAYWRIGHT_BASE_URL` | `http://localhost:5173` | Frontend URL under test |
+| `PLAYWRIGHT_API_URL` | `http://localhost:5000/api` | Backend API base used by readiness checks |
 
 ## Testing
 
@@ -234,10 +270,12 @@ cd backend
 npm test
 ```
 
-The frontend currently relies on TypeScript, Vite build checks, and ESLint:
+The frontend uses Vitest for unit tests and Playwright for local E2E coverage:
 
 ```bash
 cd frontend
+npm run test
+npm run test:e2e
 npm run build
 npm run lint
 ```

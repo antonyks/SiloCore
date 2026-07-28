@@ -157,6 +157,7 @@ dist
 # Testing
 .junit/
 test-results/
+playwright-report/
 
 # Misc
 *.swp
