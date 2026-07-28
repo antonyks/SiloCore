@@ -1,4 +1,4 @@
-import { PrismaClient, type Prisma, UserRole, UserStatus } from '@prisma/client';
+import { MessageAuthor, PrismaClient, type Prisma, UserRole, UserStatus } from '@prisma/client';
 
 export const integrationPrisma = new PrismaClient();
 
@@ -22,6 +22,37 @@ export async function createIntegrationTestUser(
       passwordHash: 'integration-test-password-hash',
       role: UserRole.USER,
       status: UserStatus.ACTIVE,
+      ...overrides,
+    },
+  });
+}
+
+export async function createIntegrationChatSession(
+  userId: number,
+  overrides: Partial<Prisma.ChatSessionCreateInput> = {},
+) {
+  return integrationPrisma.chatSession.create({
+    data: {
+      title: 'Integration Test Chat',
+      user: {
+        connect: { id: userId },
+      },
+      ...overrides,
+    },
+  });
+}
+
+export async function createIntegrationChatMessage(
+  sessionId: number,
+  overrides: Partial<Prisma.ChatMessageCreateInput> = {},
+) {
+  return integrationPrisma.chatMessage.create({
+    data: {
+      content: 'Integration test message',
+      author: MessageAuthor.USER,
+      session: {
+        connect: { id: sessionId },
+      },
       ...overrides,
     },
   });

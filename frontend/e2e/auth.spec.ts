@@ -50,6 +50,13 @@ test.describe("authentication", () => {
     await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
   });
 
+  test("redirects logged-out users from protected routes to login", async ({ page }) => {
+    await page.goto("/chat/home");
+
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole("heading", { name: "SiloCore" })).toBeVisible();
+  });
+
   test("seeded admin logs in and lands on the admin dashboard", async ({ page }) => {
     await login(page, accounts.admin);
   });

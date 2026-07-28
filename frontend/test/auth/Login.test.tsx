@@ -50,4 +50,25 @@ describe('Login', () => {
     expect(localStorage.getItem(TOKEN_KEY)).toBe('test-token');
     expect(JSON.parse(localStorage.getItem(USER_KEY) ?? '{}')).toEqual(user);
   });
+
+  it('shows the server error and does not store auth data when login fails', async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/auth/login`, () =>
+        HttpResponse.json({ message: 'Invalid credentials' }, { status: 401 }),
+      ),
+    );
+
+    renderWithProviders(<Login />, {
+      initialEntries: ['/login'],
+      routePath: '/login',
+    });
+
+    await userEvent.type(screen.getByPlaceholderText('Email address'), 'user@example.com');
+    await userEvent.type(screen.getByPlaceholderText('Password'), 'Wrong123!');
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    expect(await screen.findByText('Invalid credentials')).toBeInTheDocument();
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+    expect(localStorage.getItem(USER_KEY)).toBeNull();
+  });
 });
