@@ -211,6 +211,7 @@ Backend commands are run from `backend/`:
 npm run dev
 npm run build
 npm test
+npm run test:integration
 npm run lint
 npm run prisma:generate
 npm run prisma:migrate
@@ -268,6 +269,15 @@ The backend uses Jest and includes tests for auth, users, chat, LLM provider beh
 ```bash
 cd backend
 npm test
+```
+
+Backend integration tests are opt-in and use a disposable PostgreSQL database. Set
+`INTEGRATION_DATABASE_URL` to a database whose name includes `test`; the harness drops,
+recreates, migrates, and truncates that database during the run.
+
+```bash
+cd backend
+INTEGRATION_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/silocore_integration_test npm run test:integration
 ```
 
 The frontend uses Vitest for unit tests and Playwright for local E2E coverage:

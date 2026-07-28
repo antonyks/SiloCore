@@ -8,7 +8,7 @@ const config: Config = {
   clearMocks: true,
   coverageDirectory: 'coverage',
   setupFilesAfterEnv: ['<rootDir>/src/tests/setup.ts'],
-  testPathIgnorePatterns: ['/node_modules/', '/dist/'],
+  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/src/tests/integration/'],
   verbose: true,
 };
 
