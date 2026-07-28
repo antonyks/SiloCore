@@ -1,5 +1,7 @@
 import { prisma } from '../src/config/database';
 import bcrypt from 'bcryptjs';
+import { UserRole } from '@prisma/client';
+import { WorkspaceProvisioningService } from '../src/modules/workspace/workspaceProvisioning.service';
 
 async function main() {
   console.log('Seeding database...');
@@ -19,12 +21,17 @@ async function main() {
         name: u.name,
         email: u.email,
         passwordHash: hashedPassword,
-        role: u.role as 'USER' | 'ADMIN',
+        role: u.role as UserRole,
       },
     });
 
     console.log(`User ${u.email} seeded`);
   }
+
+  const workspaceBackfill = await WorkspaceProvisioningService.backfillPersonalWorkspaces();
+  console.log(
+    `Personal workspace backfill completed for ${workspaceBackfill.usersProcessed} users.`,
+  );
 
   console.log('Database seeding completed.');
 }
