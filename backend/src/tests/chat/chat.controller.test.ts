@@ -2,7 +2,8 @@ import { ChatController } from '../../modules/chat/chat.controller';
 import { ChatService } from '../../modules/chat/chat.service';
 import { ChatGenerationStreamEvent } from '../../modules/chat/chat.types';
 import { UserRole, UserStatus } from '../../modules/user/user.model';
-import { createAuthenticatedMockRequest } from '../testUtils';
+import { createAuthenticatedMockRequest, createMockResponse } from '../testUtils';
+import { WorkspaceStatus, WorkspaceType } from '@prisma/client';
 
 jest.mock('node-fetch', () => jest.fn());
 
@@ -24,6 +25,58 @@ function createSseResponse() {
 describe('ChatController', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
+  });
+
+  describe('createSession', () => {
+    it('uses the resolved request workspace when creating a chat session', async () => {
+      const createdAt = new Date('2026-01-01T00:00:00.000Z');
+      jest.spyOn(ChatService, 'createSession').mockResolvedValue({
+        id: 1,
+        title: 'New Chat',
+        userId: 7,
+        workspaceId: 25,
+        createdAt,
+        updatedAt: createdAt,
+      });
+      const req = createAuthenticatedMockRequest({
+        body: { title: 'New Chat' },
+        user: {
+          id: 7,
+          email: 'user@example.com',
+          name: 'User',
+          role: UserRole.USER,
+          status: UserStatus.ACTIVE,
+          createdAt,
+        },
+        workspace: {
+          id: 25,
+          name: 'Personal Workspace',
+          ownerUserId: 7,
+          type: WorkspaceType.PERSONAL,
+          status: WorkspaceStatus.ACTIVE,
+        },
+      });
+      const res = createMockResponse();
+
+      await ChatController.createSession(req, res);
+
+      expect(ChatService.createSession).toHaveBeenCalledWith({
+        title: 'New Chat',
+        userId: 7,
+        workspaceId: 25,
+      });
+      expect(res.status).toHaveBeenCalledWith(201);
+      expect(res.json).toHaveBeenCalledWith({
+        data: {
+          id: 1,
+          title: 'New Chat',
+          userId: 7,
+          workspaceId: 25,
+          createdAt,
+          updatedAt: createdAt,
+        },
+      });
+    });
   });
 
   describe('streamAssistantResponse', () => {

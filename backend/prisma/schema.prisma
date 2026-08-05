@@ -27,10 +27,13 @@ model ChatSession {
   id           Int     @id @default(autoincrement())
   title        String
   userId       Int
+  workspaceId  Int?
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace    Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   messages     ChatMessage[]
+  @@index([workspaceId])
   @@map("chat_sessions")
 }
 
@@ -75,6 +78,7 @@ model Workspace {
   ownerUserId Int
   owner       User                  @relation("WorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
   memberships WorkspaceMembership[]
+  chatSessions ChatSession[]
   createdAt   DateTime              @default(now())
   updatedAt   DateTime              @updatedAt
 

@@ -1,6 +1,7 @@
 import { MessageAuthor } from '@prisma/client';
 import { AuthenticationError } from '../../../errors';
 import { ChatService } from '../../../modules/chat/chat.service';
+import { WorkspaceProvisioningService } from '../../../modules/workspace/workspaceProvisioning.service';
 import {
   createIntegrationChatMessage,
   createIntegrationChatSession,
@@ -14,6 +15,29 @@ beforeEach(async () => {
 });
 
 describe('Chat ownership integration', () => {
+  it('stores and returns a chat session workspaceId when provided', async () => {
+    const owner = await createIntegrationTestUser({ email: 'workspace-chat-owner@example.com' });
+    const { workspace } = await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(owner.id);
+
+    const session = await ChatService.createSession({
+      title: 'Workspace Chat',
+      userId: owner.id,
+      workspaceId: workspace.id,
+    });
+
+    expect(session).toMatchObject({
+      title: 'Workspace Chat',
+      userId: owner.id,
+      workspaceId: workspace.id,
+    });
+
+    await expect(
+      integrationPrisma.chatSession.findUniqueOrThrow({ where: { id: session.id } }),
+    ).resolves.toMatchObject({
+      workspaceId: workspace.id,
+    });
+  });
+
   it('prevents one user from reading, updating, deleting, or appending to another user session', async () => {
     const owner = await createIntegrationTestUser({ email: 'session-owner@example.com' });
     const otherUser = await createIntegrationTestUser({ email: 'session-intruder@example.com' });

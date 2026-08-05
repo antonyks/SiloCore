@@ -7,6 +7,7 @@ const chatSessionSelection = {
   id: true, 
   title: true, 
   userId: true,
+  workspaceId: true,
   createdAt: true,
   updatedAt: true 
 } as const;

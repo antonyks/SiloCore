@@ -83,7 +83,11 @@ export const ChatController = {
       throw new InvalidInputError('User ID is required');
     }
     
-    const data: IChatSessionCreateInput = { title, userId };
+    const data: IChatSessionCreateInput = {
+      title,
+      userId,
+      workspaceId: req.workspace?.id ?? null,
+    };
     const session = await ChatService.createSession(data);
     res.status(201).json({ data: session });
   },
