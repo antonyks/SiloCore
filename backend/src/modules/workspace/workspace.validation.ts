@@ -1,0 +1,34 @@
+import { NextFunction, Request, Response } from 'express';
+import { body, param, validationResult } from 'express-validator';
+
+export const validateWorkspaceId = [
+  param('id')
+    .isInt({ min: 1 })
+    .withMessage('Valid workspace ID is required'),
+];
+
+export const validateWorkspaceCreate = [
+  body('name')
+    .trim()
+    .isLength({ min: 1 })
+    .withMessage('Workspace name is required'),
+];
+
+export const validateWorkspaceUpdate = [
+  body('name')
+    .trim()
+    .isLength({ min: 1 })
+    .withMessage('Workspace name is required'),
+];
+
+export const handleValidationErrors = (req: Request, res: Response, next: NextFunction) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: errors.array(),
+    });
+  }
+  next();
+};

@@ -44,6 +44,7 @@ const mockPrisma = {
   workspace: {
     create: jest.fn<() => Promise<unknown>>(),
     findFirst: jest.fn<() => Promise<unknown>>(),
+    findMany: jest.fn<() => Promise<unknown[]>>(),
     update: jest.fn<() => Promise<unknown>>(),
     count: jest.fn<() => Promise<number>>(),
   },
@@ -161,6 +162,7 @@ beforeEach(() => {
     mockPrisma.llmProviderConfig.count.mockClear();
     mockPrisma.workspace.create.mockClear();
     mockPrisma.workspace.findFirst.mockClear();
+    mockPrisma.workspace.findMany.mockClear();
     mockPrisma.workspace.update.mockClear();
     mockPrisma.workspace.count.mockClear();
     mockPrisma.workspaceMembership.create.mockClear();
