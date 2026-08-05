@@ -1,4 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
+import { UserRole, WorkspaceStatus, WorkspaceType } from '@prisma/client';
 import { logger } from '../../config/logger';
 import { ChatService } from '../../modules/chat/chat.service';
 import { mockPrisma } from '../setup';
@@ -6,6 +7,7 @@ import { NotFoundError } from '../../errors';
 import { SelectedChatSession, ChatSessionWithMessages, SelectedChatMessage, SelectedChatSessionFields, ChatSessionWithMessagesFields, SelectedChatMessageFields } from '../../modules/chat/chat.model';
 import { SelectedLlmProviderConfig } from '../../modules/llm/llmProviderConfig.model';
 import { OllamaProvider } from '../../modules/llm/providers/ollama.provider';
+import { IChatWorkspaceContext } from '../../modules/chat/chat.types';
 
 jest.mock('node-fetch', () => jest.fn());
 jest.mock('../../config/logger', () => ({
@@ -40,6 +42,38 @@ function createSession(overrides: Partial<ChatSessionWithMessages> = {}): ChatSe
     messages: [],
     ...overrides,
   };
+}
+
+function createWorkspaceContext(
+  overrides: Partial<IChatWorkspaceContext> = {},
+): IChatWorkspaceContext {
+  const workspace = overrides.workspace ?? {
+    id: 25,
+    name: 'Workspace',
+    ownerUserId: 1,
+    type: WorkspaceType.PERSONAL,
+    status: WorkspaceStatus.ACTIVE,
+  };
+
+  return {
+    workspace,
+    actor: overrides.actor ?? {
+      userId: workspace.ownerUserId,
+      role: UserRole.USER,
+    },
+  };
+}
+
+function createWorkspaceContextFor(workspaceId: number): IChatWorkspaceContext {
+  return createWorkspaceContext({
+    workspace: {
+      id: workspaceId,
+      name: 'Workspace',
+      ownerUserId: 1,
+      type: WorkspaceType.PERSONAL,
+      status: WorkspaceStatus.ACTIVE,
+    },
+  });
 }
 
 function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): SelectedLlmProviderConfig {
@@ -85,13 +119,45 @@ describe('ChatService', () => {
 
       mockPrisma.chatSession.create.mockResolvedValue(mockResult);
 
-      const result = await ChatService.createSession(inputData);
+      const result = await ChatService.createSession(inputData, createWorkspaceContext());
 
       expect(result).toEqual(mockResult);
       expect(mockPrisma.chatSession.create).toHaveBeenCalledWith({
-        data: inputData,
+        data: {
+          ...inputData,
+          workspaceId: 25,
+        },
         select: SelectedChatSessionFields,
       });
+    });
+
+    it('should reject a non-owner actor before creating a chat session', async () => {
+      const inputData = {
+        title: 'Test Session',
+        userId: 2,
+      };
+
+      await expect(
+        ChatService.createSession(
+          inputData,
+          createWorkspaceContext({
+            workspace: {
+              id: 25,
+              name: 'Workspace',
+              ownerUserId: 1,
+              type: WorkspaceType.PERSONAL,
+              status: WorkspaceStatus.ACTIVE,
+              memberships: [{ userId: 2, role: 'EDITOR' }],
+            },
+            actor: {
+              userId: 2,
+              role: UserRole.USER,
+            },
+          }),
+        ),
+      ).rejects.toThrow(new NotFoundError('Workspace not found'));
+
+      expect(mockPrisma.chatSession.create).not.toHaveBeenCalled();
     });
   });
 
@@ -119,7 +185,7 @@ describe('ChatService', () => {
 
       mockPrisma.chatSession.findFirst.mockResolvedValue(mockSession);
 
-      const result = await ChatService.getSessionById(sessionId, workspaceId);
+      const result = await ChatService.getSessionById(sessionId, createWorkspaceContextFor(workspaceId));
 
       expect(result).toEqual(mockSession);
       expect(mockPrisma.chatSession.findFirst).toHaveBeenCalledWith({
@@ -134,7 +200,7 @@ describe('ChatService', () => {
 
       mockPrisma.chatSession.findFirst.mockResolvedValue(null);
 
-      await expect(ChatService.getSessionById(sessionId, workspaceId)).rejects.toThrow(
+      await expect(ChatService.getSessionById(sessionId, createWorkspaceContextFor(workspaceId))).rejects.toThrow(
         new NotFoundError('Session not found')
       );
     });
@@ -145,7 +211,7 @@ describe('ChatService', () => {
 
       mockPrisma.chatSession.findFirst.mockResolvedValue(null);
 
-      await expect(ChatService.getSessionById(sessionId, workspaceId)).rejects.toThrow(
+      await expect(ChatService.getSessionById(sessionId, createWorkspaceContextFor(workspaceId))).rejects.toThrow(
         new NotFoundError('Session not found')
       );
     });
@@ -182,7 +248,15 @@ describe('ChatService', () => {
 
       mockPrisma.chatSession.findMany.mockResolvedValue(mockSessions);
 
-      const result = await ChatService.getWorkspaceSessions(params);
+      const result = await ChatService.getWorkspaceSessions(
+        {
+          skip: params.skip,
+          take: params.take,
+          orderBy: params.orderBy,
+          orderDirection: params.orderDirection,
+        },
+        createWorkspaceContextFor(params.workspaceId),
+      );
 
       expect(result).toEqual(mockSessions);
       expect(mockPrisma.chatSession.findMany).toHaveBeenCalledWith({
@@ -203,7 +277,13 @@ describe('ChatService', () => {
 
       mockPrisma.chatSession.findMany.mockResolvedValue([]);
 
-      const result = await ChatService.getWorkspaceSessions(params);
+      const result = await ChatService.getWorkspaceSessions(
+        {
+          skip: params.skip,
+          take: params.take,
+        },
+        createWorkspaceContextFor(params.workspaceId),
+      );
 
       expect(result).toEqual([]);
     });
@@ -227,7 +307,11 @@ describe('ChatService', () => {
       mockPrisma.chatSession.updateMany.mockResolvedValue({ count: 1 });
       mockPrisma.chatSession.findFirst.mockResolvedValue(mockUpdatedSession);
 
-      const result = await ChatService.updateSession(sessionId, workspaceId, updateData);
+      const result = await ChatService.updateSession(
+        sessionId,
+        updateData,
+        createWorkspaceContextFor(workspaceId),
+      );
 
       expect(result).toEqual(mockUpdatedSession);
       expect(mockPrisma.chatSession.updateMany).toHaveBeenCalledWith({
@@ -247,7 +331,9 @@ describe('ChatService', () => {
 
       mockPrisma.chatSession.updateMany.mockResolvedValue({ count: 0 });
 
-      await expect(ChatService.updateSession(sessionId, workspaceId, updateData)).rejects.toThrow(
+      await expect(
+        ChatService.updateSession(sessionId, updateData, createWorkspaceContextFor(workspaceId)),
+      ).rejects.toThrow(
         new NotFoundError('Session not found')
       );
     });
@@ -259,7 +345,9 @@ describe('ChatService', () => {
 
       mockPrisma.chatSession.updateMany.mockResolvedValue({ count: 0 });
 
-      await expect(ChatService.updateSession(sessionId, workspaceId, updateData)).rejects.toThrow(
+      await expect(
+        ChatService.updateSession(sessionId, updateData, createWorkspaceContextFor(workspaceId)),
+      ).rejects.toThrow(
         new NotFoundError('Session not found')
       );
     });
@@ -282,7 +370,7 @@ describe('ChatService', () => {
       mockPrisma.chatSession.findFirst.mockResolvedValue(mockDeletedSession);
       mockPrisma.chatSession.deleteMany.mockResolvedValue({ count: 1 });
 
-      const result = await ChatService.deleteSession(sessionId, workspaceId);
+      const result = await ChatService.deleteSession(sessionId, createWorkspaceContextFor(workspaceId));
 
       expect(result).toEqual(mockDeletedSession);
       expect(mockPrisma.chatSession.findFirst).toHaveBeenCalledWith({
@@ -300,7 +388,7 @@ describe('ChatService', () => {
 
       mockPrisma.chatSession.findFirst.mockResolvedValue(null);
 
-      await expect(ChatService.deleteSession(sessionId, workspaceId)).rejects.toThrow(
+      await expect(ChatService.deleteSession(sessionId, createWorkspaceContextFor(workspaceId))).rejects.toThrow(
         new NotFoundError('Session not found')
       );
     });
@@ -311,7 +399,7 @@ describe('ChatService', () => {
 
       mockPrisma.chatSession.findFirst.mockResolvedValue(null);
 
-      await expect(ChatService.deleteSession(sessionId, workspaceId)).rejects.toThrow(
+      await expect(ChatService.deleteSession(sessionId, createWorkspaceContextFor(workspaceId))).rejects.toThrow(
         new NotFoundError('Session not found')
       );
     });
@@ -338,7 +426,7 @@ describe('ChatService', () => {
       mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
       mockPrisma.chatMessage.create.mockResolvedValue(mockResult);
 
-      const result = await ChatService.createMessage(inputData, 1);
+      const result = await ChatService.createMessage(inputData, createWorkspaceContextFor(1));
 
       expect(result).toEqual(mockResult);
       expect(mockPrisma.chatSession.findFirst).toHaveBeenCalledWith({
@@ -370,7 +458,7 @@ describe('ChatService', () => {
       mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
       mockPrisma.chatMessage.create.mockResolvedValue(mockResult);
 
-      const result = await ChatService.createMessage(inputData, 1);
+      const result = await ChatService.createMessage(inputData, createWorkspaceContextFor(1));
 
       expect(result).toEqual(mockResult);
     });
@@ -382,7 +470,7 @@ describe('ChatService', () => {
         content: 'Hello',
         author: 'USER',
         sessionId: 999,
-      }, 1)).rejects.toThrow(new NotFoundError('Session not found'));
+      }, createWorkspaceContextFor(1))).rejects.toThrow(new NotFoundError('Session not found'));
 
       expect(mockPrisma.chatMessage.create).not.toHaveBeenCalled();
     });
@@ -394,7 +482,7 @@ describe('ChatService', () => {
         content: 'Hello',
         author: 'USER',
         sessionId: 1,
-      }, 99)).rejects.toThrow(new NotFoundError('Session not found'));
+      }, createWorkspaceContextFor(99))).rejects.toThrow(new NotFoundError('Session not found'));
 
       expect(mockPrisma.chatMessage.create).not.toHaveBeenCalled();
     });
@@ -452,11 +540,10 @@ describe('ChatService', () => {
 
       const result = await ChatService.generateAssistantResponse({
         sessionId: 1,
-        workspaceId: 25,
         content: 'Hello',
         temperature: 0.2,
         requestId: 'req-chat-complete',
-      });
+      }, createWorkspaceContextFor(25));
 
       expect(result).toEqual({ userMessage, assistantMessage });
       expect(complete).toHaveBeenCalledWith(expect.objectContaining({
@@ -532,11 +619,10 @@ describe('ChatService', () => {
 
       await ChatService.generateAssistantResponse({
         sessionId: 1,
-        workspaceId: 25,
         content: 'Hello',
         providerId: 2,
         model: EXPLICIT_TEST_MODEL_ID,
-      });
+      }, createWorkspaceContextFor(25));
 
       expect(mockPrisma.llmProviderConfig.findUnique).toHaveBeenCalledWith({
         where: { id: 2 },
@@ -580,10 +666,9 @@ describe('ChatService', () => {
 
       await ChatService.generateAssistantResponse({
         sessionId: 1,
-        workspaceId: 25,
         content: 'Hello',
         temperature: 0.2,
-      });
+      }, createWorkspaceContextFor(25));
 
       expect(complete).toHaveBeenCalledWith(expect.objectContaining({
         temperature: 0.2,
@@ -612,9 +697,8 @@ describe('ChatService', () => {
 
       await expect(ChatService.generateAssistantResponse({
         sessionId: 1,
-        workspaceId: 25,
         content: 'Hello',
-      })).rejects.toThrow('LLM provider config not found');
+      }, createWorkspaceContextFor(25))).rejects.toThrow('LLM provider config not found');
 
       expect(mockPrisma.chatMessage.create).not.toHaveBeenCalled();
     });
@@ -625,10 +709,9 @@ describe('ChatService', () => {
 
       await expect(ChatService.generateAssistantResponse({
         sessionId: 1,
-        workspaceId: 25,
         content: 'Hello',
         providerId: 1,
-      })).rejects.toThrow('LLM provider is disabled');
+      }, createWorkspaceContextFor(25))).rejects.toThrow('LLM provider is disabled');
 
       expect(mockPrisma.chatMessage.create).not.toHaveBeenCalled();
     });
@@ -639,10 +722,9 @@ describe('ChatService', () => {
 
       await expect(ChatService.generateAssistantResponse({
         sessionId: 1,
-        workspaceId: 25,
         content: 'Hello',
         providerId: 1,
-      })).rejects.toThrow('LLM provider config not found');
+      }, createWorkspaceContextFor(25))).rejects.toThrow('LLM provider config not found');
 
       expect(mockPrisma.chatMessage.create).not.toHaveBeenCalled();
     });
@@ -662,10 +744,9 @@ describe('ChatService', () => {
 
       await expect(ChatService.generateAssistantResponse({
         sessionId: 1,
-        workspaceId: 25,
         content: 'Hello',
         requestId: 'req-chat-error',
-      })).rejects.toThrow('provider offline');
+      }, createWorkspaceContextFor(25))).rejects.toThrow('provider offline');
 
       expect(mockPrisma.chatMessage.create).toHaveBeenCalledTimes(1);
       expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
@@ -718,10 +799,9 @@ describe('ChatService', () => {
       const events = [];
       for await (const event of ChatService.streamAssistantResponse({
         sessionId: 1,
-        workspaceId: 25,
         content: 'Hello',
         requestId: 'req-chat-stream',
-      })) {
+      }, createWorkspaceContextFor(25))) {
         events.push(event);
       }
 
@@ -803,10 +883,9 @@ describe('ChatService', () => {
       try {
         for await (const event of ChatService.streamAssistantResponse({
           sessionId: 1,
-          workspaceId: 25,
           content: 'Hello',
           requestId: 'req-chat-stream-error',
-        })) {
+        }, createWorkspaceContextFor(25))) {
           events.push(event);
         }
       } catch (error) {
@@ -882,9 +961,8 @@ describe('ChatService', () => {
 
       const stream = ChatService.streamAssistantResponse({
         sessionId: 1,
-        workspaceId: 25,
         content: 'Hello',
-      });
+      }, createWorkspaceContextFor(25));
       while (!(await stream[Symbol.asyncIterator]().next()).done) {
         // Drain stream
       }
@@ -935,10 +1013,9 @@ describe('ChatService', () => {
 
       const stream = ChatService.streamAssistantResponse({
         sessionId: 1,
-        workspaceId: 25,
         content: 'Hello',
         requestId: 'req-chat-stream-abort',
-      })[Symbol.asyncIterator]();
+      }, createWorkspaceContextFor(25))[Symbol.asyncIterator]();
 
       await expect(stream.next()).resolves.toEqual({ done: false, value: { event: 'user_message', data: userMessage } });
       await expect(stream.next()).resolves.toEqual({ done: false, value: { event: 'delta', data: { content: 'Partial answer' } } });
@@ -1005,7 +1082,10 @@ describe('ChatService', () => {
       mockPrisma.chatSession.findFirst.mockResolvedValue(mockSession);
       mockPrisma.chatMessage.findMany.mockResolvedValue(mockMessages);
 
-      const result = await ChatService.getMessagesBySessionId(sessionId, workspaceId);
+      const result = await ChatService.getMessagesBySessionId(
+        sessionId,
+        createWorkspaceContextFor(workspaceId),
+      );
 
       expect(result).toEqual(mockMessages);
       expect(mockPrisma.chatSession.findFirst).toHaveBeenCalledWith({
@@ -1032,7 +1112,9 @@ describe('ChatService', () => {
 
       mockPrisma.chatSession.findFirst.mockResolvedValue(null);
 
-      await expect(ChatService.getMessagesBySessionId(sessionId, workspaceId)).rejects.toThrow(
+      await expect(
+        ChatService.getMessagesBySessionId(sessionId, createWorkspaceContextFor(workspaceId)),
+      ).rejects.toThrow(
         new NotFoundError('Session not found')
       );
     });
@@ -1043,7 +1125,9 @@ describe('ChatService', () => {
 
       mockPrisma.chatSession.findFirst.mockResolvedValue(null);
 
-      await expect(ChatService.getMessagesBySessionId(sessionId, workspaceId)).rejects.toThrow(
+      await expect(
+        ChatService.getMessagesBySessionId(sessionId, createWorkspaceContextFor(workspaceId)),
+      ).rejects.toThrow(
         new NotFoundError('Session not found')
       );
     });
@@ -1059,7 +1143,7 @@ describe('ChatService', () => {
 
       mockPrisma.chatSession.create.mockRejectedValue(new Error('Database connection error'));
 
-      await expect(ChatService.createSession(inputData)).rejects.toThrow(
+      await expect(ChatService.createSession(inputData, createWorkspaceContext())).rejects.toThrow(
         new Error('Database connection error')
       );
     });

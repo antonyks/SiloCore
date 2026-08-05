@@ -4,11 +4,12 @@ import {
   IChatSessionCreateInput, 
   IChatSessionUpdateInput, 
   IChatMessageCreateInput,
-  IChatSessionListParams,
   IChatGenerationServiceInput,
   IChatGenerationResult,
   ChatGenerationStreamEvent,
-  IChatGenerationParams
+  IChatGenerationParams,
+  IChatWorkspaceContext,
+  IChatSessionListServiceParams
 } from './chat.types';
 import { NotFoundError } from '../../errors';
 import { SelectedChatSession, ChatSessionWithMessages, SelectedChatMessage, MessageAuthor } from './chat.model';
@@ -16,6 +17,7 @@ import { LlmRuntimeService } from '../llm/llmRuntime.service';
 import { ILlmProvider } from '../llm/llm.interface';
 import { LlmCompletionRequest, LlmMessage, TokenUsage } from '../llm/llm.types';
 import { getLlmErrorCode, logLlmEvent } from '../llm/llm.logging';
+import { CoreSingleOwnerWorkspaceAuthorizationPolicy, WorkspaceAction } from '../workspace';
 
 type PreparedGeneration = {
   provider: ILlmProvider;
@@ -29,6 +31,9 @@ type PreparedGeneration = {
   startedAt: number;
   params: IChatGenerationParams;
 };
+
+const workspaceAuthorizationPolicy = new CoreSingleOwnerWorkspaceAuthorizationPolicy();
+const WORKSPACE_NOT_FOUND_MESSAGE = 'Workspace not found';
 
 function toLlmRole(author: MessageAuthor): LlmMessage['role'] {
   if (author === MessageAuthor.ASSISTANT) return 'assistant';
@@ -113,12 +118,41 @@ function isIncompleteGeneration(data: {
   return undefined;
 }
 
+function ensureAuthorizedWorkspace(
+  context: IChatWorkspaceContext,
+  action: WorkspaceAction,
+): number {
+  const decision = workspaceAuthorizationPolicy.checkWorkspaceAction(
+    context.actor,
+    context.workspace,
+    action,
+  );
+
+  if (!decision.allowed) {
+    throw new NotFoundError(WORKSPACE_NOT_FOUND_MESSAGE);
+  }
+
+  return context.workspace.id;
+}
+
 export const ChatService = {
-  async createSession(data: IChatSessionCreateInput): Promise<SelectedChatSession> {
-    return await ChatRepository.createSession(data);
+  async createSession(
+    data: IChatSessionCreateInput,
+    context: IChatWorkspaceContext,
+  ): Promise<SelectedChatSession> {
+    const workspaceId = ensureAuthorizedWorkspace(context, WorkspaceAction.CREATE_RESOURCE);
+
+    return await ChatRepository.createSession({
+      ...data,
+      workspaceId,
+    });
   },
 
-  async getSessionById(id: number, workspaceId: number): Promise<ChatSessionWithMessages | null> {
+  async getSessionById(
+    id: number,
+    context: IChatWorkspaceContext,
+  ): Promise<ChatSessionWithMessages | null> {
+    const workspaceId = ensureAuthorizedWorkspace(context, WorkspaceAction.READ_WORKSPACE);
     const session = await ChatRepository.getSessionInWorkspace(id, workspaceId);
     
     if (!session) {
@@ -128,15 +162,24 @@ export const ChatService = {
     return session;
   },
 
-  async getWorkspaceSessions(params: IChatSessionListParams): Promise<SelectedChatSession[]> {
-    return await ChatRepository.listSessionsInWorkspace(params);
+  async getWorkspaceSessions(
+    params: IChatSessionListServiceParams,
+    context: IChatWorkspaceContext,
+  ): Promise<SelectedChatSession[]> {
+    const workspaceId = ensureAuthorizedWorkspace(context, WorkspaceAction.READ_WORKSPACE);
+
+    return await ChatRepository.listSessionsInWorkspace({
+      ...params,
+      workspaceId,
+    });
   },
 
   async updateSession(
     id: number,
-    workspaceId: number,
     data: IChatSessionUpdateInput,
+    context: IChatWorkspaceContext,
   ): Promise<SelectedChatSession | null> {
+    const workspaceId = ensureAuthorizedWorkspace(context, WorkspaceAction.UPDATE_RESOURCE);
     const session = await ChatRepository.updateSessionInWorkspace(id, workspaceId, data);
     
     if (!session) {
@@ -146,7 +189,11 @@ export const ChatService = {
     return session;
   },
 
-  async deleteSession(id: number, workspaceId: number): Promise<SelectedChatSession | null> {
+  async deleteSession(
+    id: number,
+    context: IChatWorkspaceContext,
+  ): Promise<SelectedChatSession | null> {
+    const workspaceId = ensureAuthorizedWorkspace(context, WorkspaceAction.DELETE_RESOURCE);
     const session = await ChatRepository.deleteSessionInWorkspace(id, workspaceId);
     
     if (!session) {
@@ -156,12 +203,20 @@ export const ChatService = {
     return session;
   },
 
-  async createMessage(data: IChatMessageCreateInput, workspaceId: number): Promise<SelectedChatMessage> {
+  async createMessage(
+    data: IChatMessageCreateInput,
+    context: IChatWorkspaceContext,
+  ): Promise<SelectedChatMessage> {
+    const workspaceId = ensureAuthorizedWorkspace(context, WorkspaceAction.CREATE_RESOURCE);
     await this.ensureSessionInWorkspace(data.sessionId, workspaceId);
     return await ChatRepository.createMessage(data);
   },
 
-  async getMessagesBySessionId(sessionId: number, workspaceId: number): Promise<SelectedChatMessage[] | []> {
+  async getMessagesBySessionId(
+    sessionId: number,
+    context: IChatWorkspaceContext,
+  ): Promise<SelectedChatMessage[] | []> {
+    const workspaceId = ensureAuthorizedWorkspace(context, WorkspaceAction.READ_WORKSPACE);
     await this.ensureSessionInWorkspace(sessionId, workspaceId);
     return await ChatRepository.listMessagesInWorkspace(sessionId, workspaceId);
   },
@@ -179,8 +234,12 @@ export const ChatService = {
     return session;
   },
 
-  async generateAssistantResponse(input: IChatGenerationServiceInput): Promise<IChatGenerationResult> {
-    const prepared = await this.prepareGeneration(input);
+  async generateAssistantResponse(
+    input: IChatGenerationServiceInput,
+    context: IChatWorkspaceContext,
+  ): Promise<IChatGenerationResult> {
+    ensureAuthorizedWorkspace(context, WorkspaceAction.CREATE_RESOURCE);
+    const prepared = await this.prepareGeneration(input, context);
     logLlmEvent({
       requestId: input.requestId,
       providerId: prepared.providerMetadata.providerId,
@@ -240,8 +299,12 @@ export const ChatService = {
     }
   },
 
-  async *streamAssistantResponse(input: IChatGenerationServiceInput): AsyncIterable<ChatGenerationStreamEvent> {
-    const prepared = await this.prepareGeneration(input);
+  async *streamAssistantResponse(
+    input: IChatGenerationServiceInput,
+    context: IChatWorkspaceContext,
+  ): AsyncIterable<ChatGenerationStreamEvent> {
+    ensureAuthorizedWorkspace(context, WorkspaceAction.CREATE_RESOURCE);
+    const prepared = await this.prepareGeneration(input, context);
     logLlmEvent({
       requestId: input.requestId,
       providerId: prepared.providerMetadata.providerId,
@@ -380,8 +443,12 @@ export const ChatService = {
     }
   },
 
-  async prepareGeneration(input: IChatGenerationServiceInput): Promise<PreparedGeneration> {
-    const session = await this.ensureSessionInWorkspace(input.sessionId, input.workspaceId);
+  async prepareGeneration(
+    input: IChatGenerationServiceInput,
+    context: IChatWorkspaceContext,
+  ): Promise<PreparedGeneration> {
+    const workspaceId = ensureAuthorizedWorkspace(context, WorkspaceAction.READ_WORKSPACE);
+    const session = await this.ensureSessionInWorkspace(input.sessionId, workspaceId);
     const resolved = await LlmRuntimeService.resolveGenerationProvider({
       providerId: input.providerId,
       model: input.model,

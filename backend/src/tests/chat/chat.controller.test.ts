@@ -32,6 +32,13 @@ function createWorkspace() {
   };
 }
 
+function createWorkspaceActor() {
+  return {
+    userId: 7,
+    role: UserRole.USER,
+  };
+}
+
 describe('ChatController', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
@@ -65,6 +72,7 @@ describe('ChatController', () => {
           type: WorkspaceType.PERSONAL,
           status: WorkspaceStatus.ACTIVE,
         },
+        workspaceActor: createWorkspaceActor(),
       });
       const res = createMockResponse();
 
@@ -73,7 +81,9 @@ describe('ChatController', () => {
       expect(ChatService.createSession).toHaveBeenCalledWith({
         title: 'New Chat',
         userId: 7,
-        workspaceId: 25,
+      }, {
+        workspace: createWorkspace(),
+        actor: createWorkspaceActor(),
       });
       expect(res.status).toHaveBeenCalledWith(201);
       expect(res.json).toHaveBeenCalledWith({
@@ -132,6 +142,7 @@ describe('ChatController', () => {
           createdAt: new Date(),
         },
         workspace: createWorkspace(),
+        workspaceActor: createWorkspaceActor(),
       });
       const res = createSseResponse();
 
@@ -139,7 +150,6 @@ describe('ChatController', () => {
 
       expect(ChatService.streamAssistantResponse).toHaveBeenCalledWith({
         sessionId: 1,
-        workspaceId: 25,
         content: 'Hello',
         providerId: undefined,
         model: undefined,
@@ -148,6 +158,9 @@ describe('ChatController', () => {
         maxTokens: undefined,
         stopSequences: undefined,
         requestId: 'req-stream-controller',
+      }, {
+        workspace: createWorkspace(),
+        actor: createWorkspaceActor(),
       });
       expect(res.status).toHaveBeenCalledWith(200);
       expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'text/event-stream');
@@ -193,6 +206,7 @@ describe('ChatController', () => {
           createdAt: new Date(),
         },
         workspace: createWorkspace(),
+        workspaceActor: createWorkspaceActor(),
       });
       const res = createSseResponse();
 
@@ -239,6 +253,7 @@ describe('ChatController', () => {
           createdAt: new Date(),
         },
         workspace: createWorkspace(),
+        workspaceActor: createWorkspaceActor(),
       });
       const res = createSseResponse();
 
@@ -290,6 +305,7 @@ describe('ChatController', () => {
           createdAt: new Date(),
         },
         workspace: createWorkspace(),
+        workspaceActor: createWorkspaceActor(),
       });
       const res = createSseResponse();
 

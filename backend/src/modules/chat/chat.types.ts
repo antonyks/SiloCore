@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { ResolvedWorkspaceContext, WorkspaceActor, WorkspaceAuthorizationTarget } from '../workspace';
 
 export interface IChatSession {
   id: number;
@@ -65,7 +66,6 @@ export interface IChatGenerationInput extends IChatGenerationParams {
 
 export interface IChatGenerationServiceInput extends IChatGenerationInput {
   sessionId: number;
-  workspaceId: number;
   requestId?: string;
 }
 
@@ -87,3 +87,10 @@ export interface IChatSessionListParams {
   orderBy?: 'createdAt' | 'updatedAt';
   orderDirection?: 'asc' | 'desc';
 }
+
+export interface IChatWorkspaceContext {
+  workspace: ResolvedWorkspaceContext & Partial<Pick<WorkspaceAuthorizationTarget, 'memberships'>>;
+  actor: WorkspaceActor;
+}
+
+export type IChatSessionListServiceParams = Omit<IChatSessionListParams, 'workspaceId'>;

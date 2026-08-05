@@ -8,7 +8,8 @@ import {
   IChatSessionCreateInput,
   IChatSessionUpdateInput,
   IChatMessageCreateInput,
-  IChatSessionListParams,
+  IChatSessionListServiceParams,
+  IChatWorkspaceContext,
 } from './chat.types';
 import { MessageAuthor } from './chat.model';
 
@@ -74,14 +75,17 @@ function toGenerationInput(body: IChatGenerationInput): IChatGenerationInput {
   };
 }
 
-function getWorkspaceId(req: AuthenticatedRequest): number {
-  const workspaceId = req.workspace?.id;
+function getChatWorkspaceContext(req: AuthenticatedRequest): IChatWorkspaceContext {
+  const { workspace, workspaceActor } = req;
 
-  if (!workspaceId) {
+  if (!workspace || !workspaceActor) {
     throw new InvalidInputError('Workspace context is required');
   }
 
-  return workspaceId;
+  return {
+    workspace,
+    actor: workspaceActor,
+  };
 }
 
 export const ChatController = {
@@ -96,15 +100,12 @@ export const ChatController = {
     const data: IChatSessionCreateInput = {
       title,
       userId,
-      workspaceId: req.workspace?.id ?? null,
     };
-    const session = await ChatService.createSession(data);
+    const session = await ChatService.createSession(data, getChatWorkspaceContext(req));
     res.status(201).json({ data: session });
   },
 
   async getSessions(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const workspaceId = getWorkspaceId(req);
-    
     const { skip, take, orderBy, orderDirection } = req.query;
     
     const paginationSkip: number | undefined = skip ? parseInt(skip as string, 10) : undefined;
@@ -117,48 +118,43 @@ export const ChatController = {
       throw new InvalidInputError("Invalid value for take parameter");
     }
     
-    const params:IChatSessionListParams = {
-      workspaceId,
+    const params:IChatSessionListServiceParams = {
       skip: paginationSkip,
       take: paginationTake,
       orderBy: orderBy as 'createdAt' | 'updatedAt' | undefined,
       orderDirection: orderDirection as 'asc' | 'desc' | undefined
     };
     
-    const sessions = await ChatService.getWorkspaceSessions(params);
+    const sessions = await ChatService.getWorkspaceSessions(params, getChatWorkspaceContext(req));
     res.status(200).json({ data: sessions });
   },
 
   async getSessionById(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const workspaceId = getWorkspaceId(req);
     const idString: string = req.params.id;
     const id: number = parseSessionId(idString);
 
-    const session = await ChatService.getSessionById(id, workspaceId);
+    const session = await ChatService.getSessionById(id, getChatWorkspaceContext(req));
     res.status(200).json({ data: session });
   },
 
   async updateSession(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const workspaceId = getWorkspaceId(req);
     const idString: string = req.params.id;
     const id: number = parseSessionId(idString);
     
     const data: IChatSessionUpdateInput = req.body;
-    const session = await ChatService.updateSession(id, workspaceId, data);
+    const session = await ChatService.updateSession(id, data, getChatWorkspaceContext(req));
     res.status(200).json({ data: session });
   },
 
   async deleteSession(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const workspaceId = getWorkspaceId(req);
     const idString: string = req.params.id;
     const id: number = parseSessionId(idString);
     
-    const session = await ChatService.deleteSession(id, workspaceId);
+    const session = await ChatService.deleteSession(id, getChatWorkspaceContext(req));
     res.status(200).json({ data: session });
   },
 
   async createMessage(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const workspaceId = getWorkspaceId(req);
     const { content, sessionId, metadata } = req.body;
     const author=MessageAuthor.USER;
     
@@ -169,43 +165,44 @@ export const ChatController = {
       metadata 
     };
     
-    const message = await ChatService.createMessage(data, workspaceId);
+    const message = await ChatService.createMessage(data, getChatWorkspaceContext(req));
     res.status(201).json({ data: message });
   },
 
   async getMessagesBySessionId(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const workspaceId = getWorkspaceId(req);
     const idString: string = req.params.id;
     const id: number = parseSessionId(idString);
     
-    const messages = await ChatService.getMessagesBySessionId(id, workspaceId);
+    const messages = await ChatService.getMessagesBySessionId(id, getChatWorkspaceContext(req));
     res.status(200).json({ data: messages });
   },
 
   async generateAssistantResponse(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const workspaceId = getWorkspaceId(req);
     const sessionId = parseSessionId(req.params.id);
 
-    const result = await ChatService.generateAssistantResponse({
-      ...toGenerationInput(req.body),
-      sessionId,
-      workspaceId,
-      ...(req.requestId ? { requestId: req.requestId } : {}),
-    });
+    const result = await ChatService.generateAssistantResponse(
+      {
+        ...toGenerationInput(req.body),
+        sessionId,
+        ...(req.requestId ? { requestId: req.requestId } : {}),
+      },
+      getChatWorkspaceContext(req),
+    );
 
     res.status(201).json({ data: result });
   },
 
   async streamAssistantResponse(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const workspaceId = getWorkspaceId(req);
     const sessionId = parseSessionId(req.params.id);
 
-    const events = ChatService.streamAssistantResponse({
-      ...toGenerationInput(req.body),
-      sessionId,
-      workspaceId,
-      ...(req.requestId ? { requestId: req.requestId } : {}),
-    })[Symbol.asyncIterator]();
+    const events = ChatService.streamAssistantResponse(
+      {
+        ...toGenerationInput(req.body),
+        sessionId,
+        ...(req.requestId ? { requestId: req.requestId } : {}),
+      },
+      getChatWorkspaceContext(req),
+    )[Symbol.asyncIterator]();
     let clientClosed = false;
     req.on?.('aborted', () => {
       clientClosed = true;
