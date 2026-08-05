@@ -6,11 +6,14 @@ import {
   WorkspaceStatus,
   WorkspaceType,
 } from '@prisma/client';
+import jwt from 'jsonwebtoken';
 import { NotFoundError } from '../../../errors';
+import { authenticate } from '../../../middleware';
 import { ChatService } from '../../../modules/chat/chat.service';
 import { IChatWorkspaceContext } from '../../../modules/chat/chat.types';
 import { WorkspaceService } from '../../../modules/workspace/workspace.service';
 import { WorkspaceProvisioningService } from '../../../modules/workspace/workspaceProvisioning.service';
+import { AuthenticatedRequest } from '../../../types/authenticatedRequest';
 import {
   createIntegrationChatMessage,
   createIntegrationChatSession,
@@ -41,6 +44,35 @@ function createChatWorkspaceContext(input: {
       role: input.actorRole ?? UserRole.USER,
     },
   };
+}
+
+function signToken(user: {
+  id: number;
+  email: string;
+  name: string | null;
+  role: UserRole;
+  status: string;
+}) {
+  return jwt.sign(
+    {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      status: user.status,
+    },
+    process.env.JWT_SECRET as string,
+    { expiresIn: '1d' },
+  );
+}
+
+function createAuthenticatedRequest(token: string, workspaceId: number): AuthenticatedRequest {
+  return ({
+    headers: {
+      authorization: `Bearer ${token}`,
+      'x-workspace-id': String(workspaceId),
+    },
+  } as unknown) as AuthenticatedRequest;
 }
 
 describe('Chat ownership integration', () => {
@@ -152,6 +184,80 @@ describe('Chat ownership integration', () => {
     ).resolves.toMatchObject([{ id: standardSession.id, workspaceId: standardWorkspace.id }]);
   });
 
+  it('rejects same-owner cross-workspace session, message, and generation preparation operations', async () => {
+    const owner = await createIntegrationTestUser({ email: 'same-owner-cross-workspace@example.com' });
+    const { workspace: personalWorkspace } =
+      await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(owner.id);
+    const standardWorkspace = await WorkspaceService.createStandardWorkspace({
+      ownerUserId: owner.id,
+      name: 'Isolated Project Workspace',
+    });
+    const standardSession = await createIntegrationChatSession(owner.id, {
+      workspace: {
+        connect: { id: standardWorkspace.id },
+      },
+    });
+    await createIntegrationChatMessage(standardSession.id, {
+      content: 'Project-only message',
+      author: MessageAuthor.USER,
+    });
+
+    const personalContext = createChatWorkspaceContext({
+      workspace: personalWorkspace,
+      actorUserId: owner.id,
+    });
+
+    await expect(
+      ChatService.getSessionById(standardSession.id, personalContext),
+    ).rejects.toThrow(new NotFoundError('Session not found'));
+    await expect(
+      ChatService.updateSession(
+        standardSession.id,
+        { title: 'Wrong Workspace Update' },
+        personalContext,
+      ),
+    ).rejects.toThrow(new NotFoundError('Session not found'));
+    await expect(
+      ChatService.getMessagesBySessionId(standardSession.id, personalContext),
+    ).rejects.toThrow(new NotFoundError('Session not found'));
+    await expect(
+      ChatService.createMessage(
+        {
+          sessionId: standardSession.id,
+          content: 'Wrong workspace append',
+          author: MessageAuthor.USER,
+        },
+        personalContext,
+      ),
+    ).rejects.toThrow(new NotFoundError('Session not found'));
+    await expect(
+      ChatService.prepareGeneration(
+        {
+          sessionId: standardSession.id,
+          content: 'Wrong workspace generation',
+        },
+        personalContext,
+      ),
+    ).rejects.toThrow(new NotFoundError('Session not found'));
+    await expect(
+      ChatService.deleteSession(standardSession.id, personalContext),
+    ).rejects.toThrow(new NotFoundError('Session not found'));
+
+    await expect(
+      ChatService.getSessionById(
+        standardSession.id,
+        createChatWorkspaceContext({
+          workspace: standardWorkspace,
+          actorUserId: owner.id,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      id: standardSession.id,
+      workspaceId: standardWorkspace.id,
+      messages: [expect.objectContaining({ content: 'Project-only message' })],
+    });
+  });
+
   it('prevents one workspace context from reading, updating, deleting, or appending to another workspace session', async () => {
     const owner = await createIntegrationTestUser({ email: 'session-owner@example.com' });
     const otherUser = await createIntegrationTestUser({ email: 'session-intruder@example.com' });
@@ -240,6 +346,37 @@ describe('Chat ownership integration', () => {
     ).rejects.toThrow(new NotFoundError('Workspace not found'));
   });
 
+  it('rejects generation preparation when a non-owner membership row targets the session workspace', async () => {
+    const owner = await createIntegrationTestUser({ email: 'membership-generation-owner@example.com' });
+    const invitedUser = await createIntegrationTestUser({ email: 'membership-generation-non-owner@example.com' });
+    const { workspace } = await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(owner.id);
+    const session = await createIntegrationChatSession(owner.id, {
+      workspace: {
+        connect: { id: workspace.id },
+      },
+    });
+
+    await integrationPrisma.workspaceMembership.create({
+      data: {
+        workspaceId: workspace.id,
+        userId: invitedUser.id,
+        role: WorkspaceMembershipRole.VIEWER,
+        status: WorkspaceMembershipStatus.ACTIVE,
+      },
+    });
+
+    await expect(
+      ChatService.prepareGeneration(
+        {
+          sessionId: session.id,
+          content: 'Membership should not grant generation access',
+        },
+        createChatWorkspaceContext({ workspace, actorUserId: invitedUser.id }),
+      ),
+    ).rejects.toThrow(new NotFoundError('Workspace not found'));
+    await expect(integrationPrisma.chatMessage.count()).resolves.toBe(0);
+  });
+
   it('does not let a global admin role read another user workspace chat', async () => {
     const owner = await createIntegrationTestUser({ email: 'admin-denial-owner@example.com' });
     const admin = await createIntegrationTestUser({
@@ -263,6 +400,57 @@ describe('Chat ownership integration', () => {
         }),
       ),
     ).rejects.toThrow(new NotFoundError('Workspace not found'));
+  });
+
+  it('does not let a global admin role prepare generation in another user workspace', async () => {
+    const owner = await createIntegrationTestUser({ email: 'admin-generation-denial-owner@example.com' });
+    const admin = await createIntegrationTestUser({
+      email: 'admin-generation-denial-admin@example.com',
+      role: UserRole.ADMIN,
+    });
+    const { workspace } = await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(owner.id);
+    const session = await createIntegrationChatSession(owner.id, {
+      workspace: {
+        connect: { id: workspace.id },
+      },
+    });
+
+    await expect(
+      ChatService.prepareGeneration(
+        {
+          sessionId: session.id,
+          content: 'Admin role should not grant workspace content access',
+        },
+        createChatWorkspaceContext({
+          workspace,
+          actorUserId: admin.id,
+          actorRole: UserRole.ADMIN,
+        }),
+      ),
+    ).rejects.toThrow(new NotFoundError('Workspace not found'));
+    await expect(integrationPrisma.chatMessage.count()).resolves.toBe(0);
+  });
+
+  it('rejects selecting a soft-deleted standard workspace as request context', async () => {
+    const owner = await createIntegrationTestUser({ email: 'deleted-standard-owner@example.com' });
+    await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(owner.id);
+    const standardWorkspace = await WorkspaceService.createStandardWorkspace({
+      ownerUserId: owner.id,
+      name: 'Temporary Workspace',
+    });
+    await createIntegrationChatSession(owner.id, {
+      workspace: {
+        connect: { id: standardWorkspace.id },
+      },
+    });
+
+    await WorkspaceService.deleteWorkspace(standardWorkspace.id, owner.id, owner.role);
+
+    const req = createAuthenticatedRequest(signToken(owner), standardWorkspace.id);
+
+    await expect(authenticate(req, {} as never, jest.fn())).rejects.toThrow(
+      new NotFoundError('Workspace not found'),
+    );
   });
 
   it('cascades messages when a chat session is deleted in the real database', async () => {
