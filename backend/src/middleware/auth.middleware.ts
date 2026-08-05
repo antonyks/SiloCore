@@ -1,8 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { WorkspaceStatus } from '@prisma/client';
 import { SelectedUser, UserRole, UserStatus } from '../modules/user/user.model';
-import { AuthenticationError } from '../errors'
+import { AuthenticationError, NotFoundError } from '../errors'
 import {AuthenticatedRequest} from '../types/authenticatedRequest'
+import { prisma } from '../config/database';
+import { CoreSingleOwnerWorkspaceAuthorizationPolicy } from '../modules/workspace';
 
 type AuthTokenPayload = {
   id: number;
@@ -13,7 +16,69 @@ type AuthTokenPayload = {
   createdAt: Date;
 };
 
-export const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+const WORKSPACE_NOT_FOUND_MESSAGE = 'Workspace not found';
+const workspaceAuthorizationPolicy = new CoreSingleOwnerWorkspaceAuthorizationPolicy();
+
+function getWorkspaceHeaderValue(req: AuthenticatedRequest): string | null {
+    const headerValue = req.headers['x-workspace-id'] ?? req.headers['X-Workspace-Id'];
+
+    if (typeof headerValue !== 'string') {
+      return null;
+    }
+
+    const trimmedValue = headerValue.trim();
+
+    return trimmedValue.length > 0 ? trimmedValue : null;
+}
+
+function parseWorkspaceId(req: AuthenticatedRequest): number {
+    const workspaceIdValue = getWorkspaceHeaderValue(req);
+
+    if (!workspaceIdValue || !/^\d+$/.test(workspaceIdValue)) {
+      throw new NotFoundError(WORKSPACE_NOT_FOUND_MESSAGE);
+    }
+
+    const workspaceId = Number(workspaceIdValue);
+
+    if (!Number.isSafeInteger(workspaceId) || workspaceId <= 0) {
+      throw new NotFoundError(WORKSPACE_NOT_FOUND_MESSAGE);
+    }
+
+    return workspaceId;
+}
+
+async function attachWorkspaceContext(req: AuthenticatedRequest): Promise<void> {
+    const workspaceId = parseWorkspaceId(req);
+    const workspace = await prisma.workspace.findFirst({
+      where: {
+        id: workspaceId,
+        status: WorkspaceStatus.ACTIVE,
+      },
+      select: {
+        id: true,
+        name: true,
+        ownerUserId: true,
+        type: true,
+        status: true,
+      },
+    });
+
+    if (!workspace) {
+      throw new NotFoundError(WORKSPACE_NOT_FOUND_MESSAGE);
+    }
+
+    const actor = workspaceAuthorizationPolicy.resolveActor(req.user);
+    const accessDecision = workspaceAuthorizationPolicy.checkWorkspaceAccess(actor, workspace);
+
+    if (!accessDecision.allowed || !actor) {
+      throw new NotFoundError(WORKSPACE_NOT_FOUND_MESSAGE);
+    }
+
+    req.workspace = workspace;
+    req.workspaceActor = actor;
+}
+
+export const authenticate = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
 
     const authHeader = req.headers.authorization;
 
@@ -34,6 +99,7 @@ export const authenticate = (req: AuthenticatedRequest, res: Response, next: Nex
 
     const user:SelectedUser=decoded;
     req.user = { token:token,...user};
+    await attachWorkspaceContext(req);
 
     next();
 

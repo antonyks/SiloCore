@@ -27,6 +27,11 @@ export type WorkspaceAuthorizationTarget = Pick<
   memberships?: unknown[];
 };
 
+export type ResolvedWorkspaceContext = Pick<
+  Workspace,
+  'id' | 'name' | 'ownerUserId' | 'type' | 'status'
+>;
+
 export interface WorkspaceAuthorizationDecision {
   allowed: boolean;
   reason?: WorkspaceAuthorizationDenialReason;

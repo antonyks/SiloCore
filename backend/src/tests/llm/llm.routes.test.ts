@@ -6,6 +6,7 @@ import { LlmController } from '../../modules/llm/llm.controller';
 import { SelectedLlmProviderConfig } from '../../modules/llm/llmProviderConfig.model';
 import { OllamaProvider } from '../../modules/llm/providers/ollama.provider';
 import { UserRole, UserStatus } from '../../modules/user/user.model';
+import { WorkspaceStatus, WorkspaceType } from '@prisma/client';
 import {
   createAuthenticatedMockRequest,
   createMockNext,
@@ -36,25 +37,35 @@ function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): Sel
   };
 }
 
+function createWorkspace() {
+  return {
+    id: 25,
+    name: 'Personal Workspace',
+    ownerUserId: 1,
+    type: WorkspaceType.PERSONAL,
+    status: WorkspaceStatus.ACTIVE,
+  };
+}
+
 describe('LLM route authorization boundary', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
 
-  it('blocks unauthenticated requests from common model listing', () => {
+  it('blocks unauthenticated requests from common model listing', async () => {
     const req = createAuthenticatedMockRequest({ headers: {} });
     const res = createMockResponse();
     const next = createMockNext();
 
-    expect(() => authenticate(req, res, next)).toThrow(AuthenticationError);
+    await expect(authenticate(req, res, next)).rejects.toThrow(AuthenticationError);
   });
 
-  it('blocks unauthenticated requests from provider-specific model listing', () => {
+  it('blocks unauthenticated requests from provider-specific model listing', async () => {
     const req = createAuthenticatedMockRequest({ headers: {} });
     const res = createMockResponse();
     const next = createMockNext();
 
-    expect(() => authenticate(req, res, next)).toThrow(AuthenticationError);
+    await expect(authenticate(req, res, next)).rejects.toThrow(AuthenticationError);
   });
 
   it('allows authenticated USER requests to common model listing', async () => {
@@ -69,13 +80,14 @@ describe('LLM route authorization boundary', () => {
       createdAt: new Date(),
     });
     mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
+    mockPrisma.workspace.findFirst.mockResolvedValue(createWorkspace());
     const req = createAuthenticatedMockRequest({
-      headers: { authorization: 'Bearer valid-user-token' },
+      headers: { authorization: 'Bearer valid-user-token', 'x-workspace-id': '25' },
     });
     const res = createMockResponse();
     const next = createMockNext();
 
-    authenticate(req, res, next);
+    await authenticate(req, res, next);
     await LlmController.listAvailableModels(req, res);
 
     expect(next).toHaveBeenCalledTimes(1);
@@ -99,14 +111,15 @@ describe('LLM route authorization boundary', () => {
       createdAt: new Date(),
     });
     mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider());
+    mockPrisma.workspace.findFirst.mockResolvedValue(createWorkspace());
     const req = createAuthenticatedMockRequest({
-      headers: { authorization: 'Bearer valid-user-token' },
+      headers: { authorization: 'Bearer valid-user-token', 'x-workspace-id': '25' },
       params: { id: '1' },
     });
     const res = createMockResponse();
     const next = createMockNext();
 
-    authenticate(req, res, next);
+    await authenticate(req, res, next);
     await LlmController.listProviderModels(req, res);
 
     expect(next).toHaveBeenCalledTimes(1);
