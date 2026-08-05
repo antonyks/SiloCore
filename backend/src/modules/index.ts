@@ -4,6 +4,7 @@ import authRoutes from './auth/auth.routes';
 import chatRoutes from './chat/chat.routes';
 import adminLlmRoutes from './admin/llm/llmProvider.routes';
 import adminSystemRoutes from './admin/system/adminSystem.routes';
+import adminWorkspaceRoutes from './admin/workspace/adminWorkspace.routes';
 import llmRoutes from './llm/llm.routes';
 import workspaceRoutes from './workspace/workspace.routes';
 
@@ -14,5 +15,6 @@ router.use('/auth', authRoutes);
 router.use('/chat',chatRoutes);
 router.use('/llm', llmRoutes);
 router.use('/workspaces', workspaceRoutes);
+router.use('/admin', adminWorkspaceRoutes);
 router.use('/admin', adminSystemRoutes);
 router.use('/admin/llm', adminLlmRoutes);

@@ -155,6 +155,16 @@ beforeEach(() => {
     mockPrisma.user.findMany.mockClear();
     mockPrisma.user.update.mockClear();
     mockPrisma.user.count.mockClear();
+    mockPrisma.chatSession.create.mockClear();
+    mockPrisma.chatSession.findUnique.mockClear();
+    mockPrisma.chatSession.findMany.mockClear();
+    mockPrisma.chatSession.update.mockClear();
+    mockPrisma.chatSession.delete.mockClear();
+    mockPrisma.chatMessage.create.mockClear();
+    mockPrisma.chatMessage.findUnique.mockClear();
+    mockPrisma.chatMessage.findMany.mockClear();
+    mockPrisma.chatMessage.update.mockClear();
+    mockPrisma.chatMessage.delete.mockClear();
     mockPrisma.llmProviderConfig.create.mockClear();
     mockPrisma.llmProviderConfig.findUnique.mockClear();
     mockPrisma.llmProviderConfig.findMany.mockClear();
