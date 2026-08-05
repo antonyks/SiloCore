@@ -23,6 +23,23 @@ describe('chatService.streamGenerateMessage', () => {
 
   it('sends bearer auth and parses server-sent events', async () => {
     localStorage.setItem(TOKEN_KEY, 'stream-token');
+    localStorage.setItem(
+      USER_KEY,
+      JSON.stringify({
+        id: '1',
+        email: 'user@example.com',
+        name: 'User',
+        role: 'USER',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        personalWorkspace: {
+          id: 25,
+          name: 'Personal Workspace',
+          type: 'PERSONAL',
+          status: 'ACTIVE',
+        },
+      }),
+    );
     const fetchMock = vi.spyOn(window, 'fetch').mockResolvedValue(
       createStreamingResponse(
         [
@@ -56,6 +73,7 @@ describe('chatService.streamGenerateMessage', () => {
         method: 'POST',
         headers: expect.objectContaining({
           Authorization: 'Bearer stream-token',
+          'X-Workspace-Id': '25',
         }),
       }),
     );

@@ -1,7 +1,8 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { UserStatus } from '@prisma/client';
+import { UserStatus, WorkspaceStatus, WorkspaceType } from '@prisma/client';
 import { loginUser } from '../../../modules/auth/auth.service';
+import { WorkspaceProvisioningService } from '../../../modules/workspace/workspaceProvisioning.service';
 import { createIntegrationTestUser, resetIntegrationDatabase } from '../helpers/prisma';
 
 beforeEach(async () => {
@@ -16,6 +17,7 @@ describe('Auth integration', () => {
       email: 'login-user@example.com',
       passwordHash,
     });
+    const { workspace } = await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(user.id);
 
     const result = await loginUser({
       email: 'LOGIN-user@example.com',
@@ -26,12 +28,24 @@ describe('Auth integration', () => {
       id: user.id,
       email: 'login-user@example.com',
       status: UserStatus.ACTIVE,
+      personalWorkspace: {
+        id: workspace.id,
+        name: workspace.name,
+        type: WorkspaceType.PERSONAL,
+        status: WorkspaceStatus.ACTIVE,
+      },
     });
     expect(result.user).not.toHaveProperty('passwordHash');
     expect(jwt.verify(result.token, process.env.JWT_SECRET as string)).toMatchObject({
       id: user.id,
       email: 'login-user@example.com',
     });
+    expect(jwt.verify(result.token, process.env.JWT_SECRET as string)).not.toHaveProperty(
+      'personalWorkspace',
+    );
+    expect(jwt.verify(result.token, process.env.JWT_SECRET as string)).not.toHaveProperty(
+      'workspaceId',
+    );
   });
 
   it('rejects banned users', async () => {

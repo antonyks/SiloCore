@@ -1,3 +1,10 @@
+export interface PersonalWorkspace {
+  id: number;
+  name: string;
+  type: 'PERSONAL';
+  status: 'ACTIVE';
+}
+
 export interface User {
   id: string;
   email: string;
@@ -5,6 +12,7 @@ export interface User {
   role: UserRole;
   createdAt: string;
   updatedAt: string;
+  personalWorkspace?: PersonalWorkspace;
 }
 
 export const UserRole = {

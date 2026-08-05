@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import { UserRole, UserStatus } from '../../modules/user/user.model';
 import { NotFoundError } from '../../errors';
 import { createMockRequest, createMockResponse } from '../testUtils';
+import { WorkspaceStatus, WorkspaceType } from '@prisma/client';
 
 describe('AuthController', () => {
   beforeEach(() => {
@@ -29,6 +30,12 @@ describe('AuthController', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       };
+      const mockPersonalWorkspace = {
+        id: 25,
+        name: 'Personal Workspace',
+        type: WorkspaceType.PERSONAL,
+        status: WorkspaceStatus.ACTIVE,
+      };
 
       const req = createMockRequest({
         body: loginData,
@@ -46,13 +53,15 @@ describe('AuthController', () => {
             role: mockUser.role,
             status: mockUser.status,
             createdAt: mockUser.createdAt,
-            updatedAt: mockUser.updatedAt
+            updatedAt: mockUser.updatedAt,
+            personalWorkspace: mockPersonalWorkspace
           },
           token: 'test-jwt-token',
         }
       };
 
       mockPrisma.user.findUnique.mockResolvedValue(mockUser);
+      mockPrisma.workspace.findFirst.mockResolvedValue(mockPersonalWorkspace);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       (jwt.sign as jest.Mock).mockReturnValue('test-jwt-token');
 

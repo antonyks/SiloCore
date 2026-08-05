@@ -123,11 +123,15 @@ export const chatService = {
     options: StreamGenerateOptions,
   ): Promise<void> {
     const token = storage.getToken();
+    const personalWorkspaceId = storage.getPersonalWorkspaceId();
     const response = await fetch(`${API_BASE_URL}/chat/${id}/generate/stream`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(token && personalWorkspaceId !== null
+          ? { "X-Workspace-Id": String(personalWorkspaceId) }
+          : {}),
       },
       body: JSON.stringify(input),
       signal: options.signal,

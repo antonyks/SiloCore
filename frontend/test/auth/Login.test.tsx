@@ -14,6 +14,12 @@ const user = {
   role: UserRole.USER,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
+  personalWorkspace: {
+    id: 25,
+    name: 'Personal Workspace',
+    type: 'PERSONAL',
+    status: 'ACTIVE',
+  },
 };
 
 describe('Login', () => {

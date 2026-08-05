@@ -17,6 +17,11 @@ axiosClient.interceptors.request.use(
     const token = storage.getToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+
+      const personalWorkspaceId = storage.getPersonalWorkspaceId();
+      if (personalWorkspaceId !== null) {
+        config.headers["X-Workspace-Id"] = String(personalWorkspaceId);
+      }
     }
     return config;
   },

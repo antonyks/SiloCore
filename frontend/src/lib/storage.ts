@@ -18,15 +18,15 @@ export const storage = {
     const user = localStorage.getItem(USER_KEY);
 
     if (!user || user === "undefined") {
-    return null;
-  }
+      return null;
+    }
 
-  try {
-    return JSON.parse(user) as User;
-  } catch {
-    console.error("Corrupted storage found for user key");
-    return null;
-  }
+    try {
+      return JSON.parse(user) as User;
+    } catch {
+      console.error("Corrupted storage found for user key");
+      return null;
+    }
   },
 
   setUser: (user: User): void => {
@@ -40,5 +40,9 @@ export const storage = {
   clear: () => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
+  },
+
+  getPersonalWorkspaceId: (): number | null => {
+    return storage.getUser()?.personalWorkspace?.id ?? null;
   },
 };
