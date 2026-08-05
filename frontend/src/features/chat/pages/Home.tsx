@@ -3,10 +3,12 @@ import {
   AlertCircle,
   Bot,
   Brain,
+  Building2,
   Check,
   ChevronDown,
   ChevronRight,
   Copy,
+  Database,
   Edit3,
   Loader2,
   MessageSquare,
@@ -36,8 +38,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import UserProfileDropdown from "../../../components/ui/UserProfileDropdown";
 import { useAuth } from "../../auth/hooks/useAuth";
-import { useOwnedWorkspaces } from "../../workspace/hooks/useWorkspaces";
+import {
+  useCreateWorkspace,
+  useDeleteWorkspace,
+  useOwnedWorkspaces,
+  useUpdateWorkspace,
+} from "../../workspace/hooks/useWorkspaces";
 import { getPersonalWorkspaceRoute } from "../../../lib/workspaceRouting";
+import type { Workspace } from "../../workspace/types";
 import {
   chatSessionQueryKeys,
   useChatSession,
@@ -83,6 +91,13 @@ type ModelSelection = {
 };
 
 type GenerationSettings = typeof DEFAULT_GENERATION_SETTINGS;
+
+type WorkspaceDialogMode = "create" | "rename" | "delete" | null;
+
+const getWorkspaceRoute = (workspaceId: number) => `/workspaces/${workspaceId}/chat/home`;
+
+const formatWorkspaceType = (workspace: Workspace) =>
+  workspace.type === "PERSONAL" ? "Personal" : "Standard";
 
 const getErrorMessage = (error: unknown, fallback: string) => {
   if (axios.isAxiosError<{ message?: string }>(error)) {
@@ -487,6 +502,9 @@ const Home: React.FC = () => {
   const [promptValidationError, setPromptValidationError] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<ModelSelection | null>(getStoredModelSelection);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
+  const [workspaceDialogMode, setWorkspaceDialogMode] = useState<WorkspaceDialogMode>(null);
+  const [workspaceNameDraft, setWorkspaceNameDraft] = useState("");
   const [generationSettings, setGenerationSettings] = useState<GenerationSettings>(
     DEFAULT_GENERATION_SETTINGS,
   );
@@ -495,6 +513,9 @@ const Home: React.FC = () => {
   const [streamError, setStreamError] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<number | null>(null);
   const [copyErrorMessageId, setCopyErrorMessageId] = useState<number | null>(null);
+  const createWorkspace = useCreateWorkspace();
+  const updateWorkspace = useUpdateWorkspace();
+  const deleteWorkspace = useDeleteWorkspace();
 
   const listParams = useMemo(
     () => ({
@@ -525,6 +546,10 @@ const Home: React.FC = () => {
             (workspace) => workspace.id === routeWorkspaceId && workspace.status === "ACTIVE",
           ),
     [routeWorkspaceId, workspacesQuery.data],
+  );
+  const ownedWorkspaces = useMemo(
+    () => (workspacesQuery.data || []).filter((workspace) => workspace.status === "ACTIVE"),
+    [workspacesQuery.data],
   );
   const activeWorkspaceId = activeWorkspace?.id ?? null;
   const isWorkspaceValidated = routeWorkspaceId !== null && workspacesQuery.isSuccess && !!activeWorkspace;
@@ -617,6 +642,9 @@ const Home: React.FC = () => {
     setPromptDraft("");
     setPromptValidationError(null);
     setStreamError(null);
+    setIsWorkspaceMenuOpen(false);
+    setWorkspaceDialogMode(null);
+    setWorkspaceNameDraft("");
     streamingAssistantIdRef.current = null;
     streamingAssistantHasOutputRef.current = false;
     promptDraftsBySessionRef.current = {};
@@ -753,6 +781,91 @@ const Home: React.FC = () => {
       setSearchTerm("");
     } catch {
       // React Query exposes the error state rendered near the button.
+    }
+  };
+
+  const closeWorkspaceDialog = () => {
+    setWorkspaceDialogMode(null);
+    setWorkspaceNameDraft("");
+  };
+
+  const openCreateWorkspaceDialog = () => {
+    setWorkspaceNameDraft("");
+    setWorkspaceDialogMode("create");
+    setIsWorkspaceMenuOpen(false);
+  };
+
+  const openRenameWorkspaceDialog = () => {
+    if (!activeWorkspace || activeWorkspace.type !== "STANDARD") {
+      setWorkspaceDialogMode("rename");
+      setWorkspaceNameDraft(activeWorkspace?.name || "");
+      return;
+    }
+
+    setWorkspaceNameDraft(activeWorkspace.name);
+    setWorkspaceDialogMode("rename");
+    setIsWorkspaceMenuOpen(false);
+  };
+
+  const openDeleteWorkspaceDialog = () => {
+    if (!activeWorkspace) {
+      return;
+    }
+
+    setWorkspaceDialogMode("delete");
+    setIsWorkspaceMenuOpen(false);
+  };
+
+  const handleWorkspaceSelect = (workspace: Workspace) => {
+    if (workspace.id === activeWorkspaceId) {
+      setIsWorkspaceMenuOpen(false);
+      return;
+    }
+
+    navigate(getWorkspaceRoute(workspace.id));
+    setIsWorkspaceMenuOpen(false);
+  };
+
+  const handleWorkspaceFormSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const name = workspaceNameDraft.trim();
+
+    if (workspaceDialogMode === "create") {
+      try {
+        const workspace = await createWorkspace.mutateAsync({ name });
+        closeWorkspaceDialog();
+        navigate(getWorkspaceRoute(workspace.id));
+      } catch {
+        // React Query exposes the error state rendered in the modal.
+      }
+      return;
+    }
+
+    if (workspaceDialogMode === "rename" && activeWorkspace?.type === "STANDARD") {
+      try {
+        await updateWorkspace.mutateAsync({ id: activeWorkspace.id, input: { name } });
+        closeWorkspaceDialog();
+      } catch {
+        // React Query exposes the error state rendered in the modal.
+      }
+    }
+  };
+
+  const confirmDeleteWorkspace = async () => {
+    if (!activeWorkspace || activeWorkspace.type !== "STANDARD") {
+      return;
+    }
+
+    try {
+      await deleteWorkspace.mutateAsync(activeWorkspace.id);
+      closeWorkspaceDialog();
+
+      if (personalWorkspaceRoute) {
+        navigate(personalWorkspaceRoute, { replace: true });
+      }
+    } catch {
+      // React Query exposes the error state rendered in the modal.
     }
   };
 
@@ -1282,6 +1395,304 @@ const Home: React.FC = () => {
     );
   };
 
+  const renderWorkspaceControls = () => (
+    <div className="shrink-0 border-b border-slate-200 p-3">
+      <div className="flex items-center gap-2">
+        <div className="relative min-w-0 flex-1">
+          <button
+            type="button"
+            onClick={() => setIsWorkspaceMenuOpen((current) => !current)}
+            disabled={!isWorkspaceValidated}
+            className="flex h-11 w-full min-w-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-left text-slate-900 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            aria-haspopup="menu"
+            aria-expanded={isWorkspaceMenuOpen}
+          >
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-cyan-50 text-cyan-700">
+              <Building2 className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold">
+                {activeWorkspace?.name || "Loading workspace"}
+              </span>
+              {activeWorkspace && (
+                <span className="block text-xs text-slate-500">
+                  {formatWorkspaceType(activeWorkspace)} workspace
+                </span>
+              )}
+            </span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+          </button>
+
+          {isWorkspaceMenuOpen && (
+            <div
+              role="menu"
+              className="absolute left-0 right-0 top-12 z-40 rounded-md border border-slate-200 bg-white py-1 text-sm shadow-lg"
+            >
+              {workspacesQuery.isLoading && (
+                <div className="px-3 py-2 text-slate-500">Loading workspaces...</div>
+              )}
+              {workspacesQuery.isError && (
+                <div className="px-3 py-2 text-red-700">
+                  {getErrorMessage(workspacesQuery.error, "Could not load workspaces.")}
+                </div>
+              )}
+              {ownedWorkspaces.map((workspace) => {
+                const isActive = workspace.id === activeWorkspaceId;
+
+                return (
+                  <button
+                    key={workspace.id}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => handleWorkspaceSelect(workspace)}
+                    className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 ${
+                      isActive ? "text-cyan-800" : "text-slate-700"
+                    }`}
+                  >
+                    <Building2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">{workspace.name}</span>
+                      <span className="block text-xs text-slate-500">
+                        {formatWorkspaceType(workspace)}
+                      </span>
+                    </span>
+                    {isActive && <Check className="h-4 w-4 shrink-0" aria-hidden="true" />}
+                  </button>
+                );
+              })}
+              <div className="mt-1 border-t border-slate-100 pt-1">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={openCreateWorkspaceDialog}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left font-medium text-slate-800 hover:bg-slate-50"
+                >
+                  <Plus className="h-4 w-4" aria-hidden="true" />
+                  Create New Workspace
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={openRenameWorkspaceDialog}
+          disabled={!activeWorkspace}
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+          aria-label="Workspace settings"
+        >
+          <Settings2 className="h-4 w-4" aria-hidden="true" />
+        </button>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => void handleCreateSession()}
+        disabled={createSession.isPending || !isWorkspaceValidated}
+        className="mt-3 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {createSession.isPending ? (
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+        ) : (
+          <Plus className="h-4 w-4" aria-hidden="true" />
+        )}
+        New Chat
+      </button>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-md border border-cyan-200 bg-cyan-50 px-2 text-sm font-semibold text-cyan-800"
+          aria-current="page"
+        >
+          <MessageSquare className="h-4 w-4" aria-hidden="true" />
+          Chats
+        </button>
+        <button
+          type="button"
+          disabled
+          className="inline-flex h-9 cursor-not-allowed items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-slate-100 px-2 text-sm font-medium text-slate-400"
+          title="Files & Data is planned for the RAG phase."
+        >
+          <Database className="h-4 w-4" aria-hidden="true" />
+          Files & Data
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderWorkspaceDialog = () => {
+    if (!workspaceDialogMode || !activeWorkspace) {
+      return null;
+    }
+
+    const isCreate = workspaceDialogMode === "create";
+    const isRename = workspaceDialogMode === "rename";
+    const isDelete = workspaceDialogMode === "delete";
+    const isPersonal = activeWorkspace.type === "PERSONAL";
+    const nameError =
+      createWorkspace.isError && isCreate
+        ? getErrorMessage(createWorkspace.error, "Workspace creation failed.")
+        : updateWorkspace.isError && isRename
+          ? getErrorMessage(updateWorkspace.error, "Workspace rename failed.")
+          : null;
+    const deleteError =
+      deleteWorkspace.isError && isDelete
+        ? getErrorMessage(deleteWorkspace.error, "Workspace delete failed.")
+        : null;
+    const isSubmitting =
+      createWorkspace.isPending || updateWorkspace.isPending || deleteWorkspace.isPending;
+    const canSubmitName = workspaceNameDraft.trim().length > 0 && !isSubmitting;
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="w-full max-w-md rounded-md border border-slate-200 bg-white shadow-xl"
+        >
+          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-950">
+                {isCreate
+                  ? "Create workspace"
+                  : isDelete
+                    ? "Delete workspace"
+                    : "Workspace settings"}
+              </h2>
+              <p className="mt-0.5 text-xs text-slate-500">
+                {isCreate ? "Create a private standard workspace." : activeWorkspace.name}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={closeWorkspaceDialog}
+              disabled={isSubmitting}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              aria-label="Close workspace settings"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
+
+          {isPersonal && !isCreate ? (
+            <div className="p-4 text-sm text-slate-700">
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                Personal workspaces cannot be renamed or deleted.
+              </div>
+              <div className="mt-4 flex justify-end">
+                <button
+                  type="button"
+                  onClick={closeWorkspaceDialog}
+                  className="inline-flex h-9 items-center rounded-md border border-slate-200 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          ) : isDelete ? (
+            <div className="p-4 text-sm text-slate-700">
+              <div className="flex gap-2 rounded-md border border-amber-100 bg-amber-50 p-3 text-amber-900">
+                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>
+                  Delete <span className="font-semibold">{activeWorkspace.name}</span>? This
+                  workspace will no longer appear in your switcher.
+                </span>
+              </div>
+              {deleteError && (
+                <div className="mt-3 flex gap-2 rounded-md border border-red-100 bg-red-50 p-3 text-red-800">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span>{deleteError}</span>
+                </div>
+              )}
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeWorkspaceDialog}
+                  disabled={isSubmitting}
+                  className="inline-flex h-9 items-center rounded-md border border-slate-200 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmDeleteWorkspace()}
+                  disabled={isSubmitting}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-md bg-red-700 px-3 text-sm font-semibold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:bg-red-300"
+                >
+                  {deleteWorkspace.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  )}
+                  Delete
+                </button>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={(event) => void handleWorkspaceFormSubmit(event)} className="p-4">
+              <label className="block text-sm font-medium text-slate-700">
+                Workspace name
+                <input
+                  value={workspaceNameDraft}
+                  onChange={(event) => setWorkspaceNameDraft(event.target.value)}
+                  className="mt-1 h-10 w-full rounded-md border border-slate-300 px-3 text-sm text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
+                  autoFocus
+                />
+              </label>
+              {nameError && (
+                <div className="mt-3 flex gap-2 rounded-md border border-red-100 bg-red-50 p-3 text-sm text-red-800">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span>{nameError}</span>
+                </div>
+              )}
+              <div className="mt-4 flex justify-between gap-2">
+                {isRename ? (
+                  <button
+                    type="button"
+                    onClick={openDeleteWorkspaceDialog}
+                    disabled={isSubmitting}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-md border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    Delete
+                  </button>
+                ) : (
+                  <span />
+                )}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={closeWorkspaceDialog}
+                    disabled={isSubmitting}
+                    className="inline-flex h-9 items-center rounded-md border border-slate-200 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!canSubmitName}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-md bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {createWorkspace.isPending || updateWorkspace.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    ) : isCreate ? (
+                      <Plus className="h-4 w-4" aria-hidden="true" />
+                    ) : (
+                      <Check className="h-4 w-4" aria-hidden="true" />
+                    )}
+                    {isCreate ? "Create" : "Save"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderSessionPanelContent = (showMobileHeader = false) => (
     <>
       {showMobileHeader && (
@@ -1297,6 +1708,7 @@ const Home: React.FC = () => {
           </button>
         </div>
       )}
+      {renderWorkspaceControls()}
       <div className="shrink-0 border-b border-slate-200 p-3">
         <label className="relative block">
           <Search
@@ -1454,19 +1866,6 @@ const Home: React.FC = () => {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void handleCreateSession()}
-            disabled={createSession.isPending || !isWorkspaceValidated}
-            className="inline-flex h-9 items-center gap-1.5 rounded-md bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {createSession.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Plus className="h-4 w-4" aria-hidden="true" />
-            )}
-            <span className="hidden sm:inline">New Chat</span>
-          </button>
           <UserProfileDropdown user={user} />
         </div>
       </header>
@@ -1891,6 +2290,7 @@ const Home: React.FC = () => {
           )}
         </main>
       </div>
+      {renderWorkspaceDialog()}
     </div>
   );
 };
