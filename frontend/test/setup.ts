@@ -9,6 +9,7 @@ beforeAll(() => {
 
 afterEach(() => {
   cleanup();
+  window.history.pushState({}, '', '/');
   localStorage.clear();
   server.resetHandlers();
 });

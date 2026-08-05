@@ -3,6 +3,7 @@ import { API_BASE_URL } from "../config/constants";
 import { logger } from './logger';
 import { isAuthSessionError, logoutAndRedirect } from "./navigation";
 import { storage } from "./storage";
+import { getRouteWorkspaceId } from "./workspaceRouting";
 
 const axiosClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
@@ -18,9 +19,18 @@ axiosClient.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
 
-      const personalWorkspaceId = storage.getPersonalWorkspaceId();
-      if (personalWorkspaceId !== null) {
-        config.headers["X-Workspace-Id"] = String(personalWorkspaceId);
+      const hasWorkspaceHeader =
+        config.headers.has?.("X-Workspace-Id") ||
+        config.headers.has?.("x-workspace-id") ||
+        Boolean(config.headers["X-Workspace-Id"] ?? config.headers["x-workspace-id"]);
+
+      if (!hasWorkspaceHeader) {
+        const routeWorkspaceId = getRouteWorkspaceId(window.location.pathname);
+        const workspaceId = routeWorkspaceId ?? storage.getPersonalWorkspaceId();
+
+        if (workspaceId !== null) {
+          config.headers["X-Workspace-Id"] = String(workspaceId);
+        }
       }
     }
     return config;

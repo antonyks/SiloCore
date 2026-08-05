@@ -21,7 +21,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ allowedRoles }) => {
 
   if (allowedRoles && user && !allowedRoles.includes(user.role)) {
     
-    const url=authService.getRedirectPath(user.role)
+    const url=authService.getRedirectPath(user.role, user)
     return <Navigate to={url} replace />
   }
 

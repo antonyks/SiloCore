@@ -13,7 +13,7 @@ const accounts = {
   user: {
     email: "user@example.com",
     password: "User123!",
-    redirectPath: "/chat/home",
+    redirectPath: "/workspaces/\\d+/chat/home",
     routeText: "New Chat",
   },
 } as const;

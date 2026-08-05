@@ -1,5 +1,6 @@
 import axiosClient from "../../../lib/axiosClient";
 import { storage } from "../../../lib/storage";
+import { getPersonalWorkspaceRoute } from "../../../lib/workspaceRouting";
 import { UserRole as UserRoleValue } from "../../../types/user"
 import type { User, UserRole } from "../../../types/user";
 import { type LoginCredentials, type AuthResponse } from "../types";
@@ -23,14 +24,14 @@ export const authService = {
     return storage.getUser();
   },
 
-  getRedirectPath: (role: UserRole): string => {
+  getRedirectPath: (role: UserRole, user?: User | null): string => {
     switch (role) {
       case UserRoleValue.ADMIN:
         return '/analytics/dashboard';
       case UserRoleValue.USER:
-        return '/chat/home';
+        return user ? getPersonalWorkspaceRoute(user) ?? '/login' : '/login';
       default:
-        return '/chat/home';
+        return user ? getPersonalWorkspaceRoute(user) ?? '/login' : '/login';
     }
   }
 };

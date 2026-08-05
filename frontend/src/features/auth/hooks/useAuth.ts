@@ -16,7 +16,7 @@ export const useLogin = () => {
       storage.setUser(user);
       queryClient.setQueryData(["auth-user"],user);
       
-      const url=authService.getRedirectPath(user.role)
+      const url=authService.getRedirectPath(user.role, user)
       navigate(url);
     },
   });

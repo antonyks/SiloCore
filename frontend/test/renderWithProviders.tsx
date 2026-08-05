@@ -36,7 +36,8 @@ export function renderWithProviders(
       <MemoryRouter initialEntries={initialEntries}>
         <Routes>
           <Route path={routePath} element={ui} />
-          <Route path="/chat/home" element={<div>Chat home route</div>} />
+          <Route path="/chat/home" element={<div>Legacy chat route</div>} />
+          <Route path="/workspaces/:workspaceId/chat/home" element={<div>Chat home route</div>} />
           <Route path="/analytics/dashboard" element={<div>Admin dashboard route</div>} />
         </Routes>
       </MemoryRouter>

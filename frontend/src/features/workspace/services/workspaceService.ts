@@ -3,8 +3,12 @@ import type { ApiResponse } from "../../../types/api";
 import type { Workspace, WorkspaceCreateInput, WorkspaceUpdateInput } from "../types";
 
 export const workspaceService = {
-  async listWorkspaces(): Promise<Workspace[]> {
-    const { data } = await axiosClient.get<ApiResponse<Workspace[]>>("/workspaces");
+  async listWorkspaces(options: { workspaceId?: number } = {}): Promise<Workspace[]> {
+    const { data } = await axiosClient.get<ApiResponse<Workspace[]>>("/workspaces", {
+      headers: options.workspaceId
+        ? { "X-Workspace-Id": String(options.workspaceId) }
+        : undefined,
+    });
 
     return data.data;
   },

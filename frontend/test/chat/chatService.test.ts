@@ -64,7 +64,7 @@ describe('chatService.streamGenerateMessage', () => {
         content: 'Hello',
         model: 'llama3.1',
       },
-      { onEvent },
+      { workspaceId: 30, onEvent },
     );
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -73,7 +73,7 @@ describe('chatService.streamGenerateMessage', () => {
         method: 'POST',
         headers: expect.objectContaining({
           Authorization: 'Bearer stream-token',
-          'X-Workspace-Id': '25',
+          'X-Workspace-Id': '30',
         }),
       }),
     );
@@ -111,7 +111,7 @@ describe('chatService.streamGenerateMessage', () => {
           content: 'Hello',
           model: 'llama3.1',
         },
-        { onEvent: vi.fn() },
+        { workspaceId: 25, onEvent: vi.fn() },
       ),
     ).rejects.toThrow('jwt expired');
 

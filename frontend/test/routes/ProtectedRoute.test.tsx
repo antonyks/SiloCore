@@ -12,6 +12,12 @@ const createUser = (role: UserRole): User => ({
   role,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
+  personalWorkspace: {
+    id: 25,
+    name: 'Personal Workspace',
+    type: 'PERSONAL',
+    status: 'ACTIVE',
+  },
 });
 
 const renderProtectedRoute = (initialPath: string, allowedRoles: UserRole[]) => {
@@ -30,7 +36,8 @@ const renderProtectedRoute = (initialPath: string, allowedRoles: UserRole[]) => 
             <Route path={initialPath} element={<div>Protected route</div>} />
           </Route>
           <Route path="/login" element={<div>Login route</div>} />
-          <Route path="/chat/home" element={<div>Chat home route</div>} />
+          <Route path="/chat/home" element={<div>Legacy chat route</div>} />
+          <Route path="/workspaces/:workspaceId/chat/home" element={<div>Chat home route</div>} />
           <Route path="/analytics/dashboard" element={<div>Admin dashboard route</div>} />
         </Routes>
       </MemoryRouter>
@@ -40,7 +47,7 @@ const renderProtectedRoute = (initialPath: string, allowedRoles: UserRole[]) => 
 
 describe('ProtectedRoute', () => {
   it('redirects unauthenticated users to login', async () => {
-    renderProtectedRoute('/chat/home', [UserRole.USER]);
+    renderProtectedRoute('/workspaces/25/chat/home', [UserRole.USER]);
 
     expect(await screen.findByText('Login route')).toBeInTheDocument();
   });

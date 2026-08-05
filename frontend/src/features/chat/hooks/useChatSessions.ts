@@ -11,75 +11,101 @@ import type {
 
 export const chatSessionQueryKeys = {
   all: ["chat-sessions"] as const,
-  lists: () => [...chatSessionQueryKeys.all, "list"] as const,
-  list: (params: ChatSessionListParams) => [...chatSessionQueryKeys.lists(), params] as const,
-  details: () => [...chatSessionQueryKeys.all, "detail"] as const,
-  detail: (id: number) => [...chatSessionQueryKeys.details(), id] as const,
-  messages: (id: number) => [...chatSessionQueryKeys.all, "messages", id] as const,
+  workspace: (workspaceId: number) => [...chatSessionQueryKeys.all, "workspace", workspaceId] as const,
+  lists: (workspaceId: number) => [...chatSessionQueryKeys.workspace(workspaceId), "list"] as const,
+  list: (workspaceId: number, params: ChatSessionListParams) =>
+    [...chatSessionQueryKeys.lists(workspaceId), params] as const,
+  details: (workspaceId: number) =>
+    [...chatSessionQueryKeys.workspace(workspaceId), "detail"] as const,
+  detail: (workspaceId: number, id: number) =>
+    [...chatSessionQueryKeys.details(workspaceId), id] as const,
+  messages: (workspaceId: number, id: number) =>
+    [...chatSessionQueryKeys.workspace(workspaceId), "messages", id] as const,
 };
 
-export const useChatSessions = (params: ChatSessionListParams = {}) => {
+export const useChatSessions = (
+  workspaceId: number | null,
+  params: ChatSessionListParams = {},
+  enabled = true,
+) => {
   return useQuery({
-    queryKey: chatSessionQueryKeys.list(params),
+    queryKey: workspaceId
+      ? chatSessionQueryKeys.list(workspaceId, params)
+      : [...chatSessionQueryKeys.all, "workspace", "none", "list", params],
     queryFn: () => chatService.getSessions(params),
+    enabled: workspaceId !== null && enabled,
   });
 };
 
-export const useChatSession = (id: number | null) => {
+export const useChatSession = (workspaceId: number | null, id: number | null, enabled = true) => {
   return useQuery({
-    queryKey: id ? chatSessionQueryKeys.detail(id) : [...chatSessionQueryKeys.details(), "none"],
+    queryKey: workspaceId && id
+      ? chatSessionQueryKeys.detail(workspaceId, id)
+      : [...chatSessionQueryKeys.all, "workspace", workspaceId ?? "none", "detail", "none"],
     queryFn: () => chatService.getSession(id as number),
-    enabled: id !== null,
+    enabled: workspaceId !== null && id !== null && enabled,
   });
 };
 
-export const useChatSessionMessages = (id: number | null) => {
+export const useChatSessionMessages = (
+  workspaceId: number | null,
+  id: number | null,
+  enabled = true,
+) => {
   return useQuery({
-    queryKey: id
-      ? chatSessionQueryKeys.messages(id)
-      : [...chatSessionQueryKeys.all, "messages", "none"],
+    queryKey: workspaceId && id
+      ? chatSessionQueryKeys.messages(workspaceId, id)
+      : [...chatSessionQueryKeys.all, "workspace", workspaceId ?? "none", "messages", "none"],
     queryFn: () => chatService.getMessages(id as number),
-    enabled: id !== null,
+    enabled: workspaceId !== null && id !== null && enabled,
   });
 };
 
-export const useCreateChatSession = () => {
+export const useCreateChatSession = (workspaceId: number | null) => {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (input: ChatSessionCreateInput) => chatService.createSession(input),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.lists() });
+      if (workspaceId !== null) {
+        void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.lists(workspaceId) });
+      }
     },
   });
 };
 
-export const useUpdateChatSession = () => {
+export const useUpdateChatSession = (workspaceId: number | null) => {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: ({ id, input }: { id: number; input: ChatSessionUpdateInput }) =>
       chatService.updateSession(id, input),
     onSuccess: (session) => {
-      void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.lists() });
-      void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.detail(session.id) });
+      if (workspaceId !== null) {
+        void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.lists(workspaceId) });
+        void queryClient.invalidateQueries({
+          queryKey: chatSessionQueryKeys.detail(workspaceId, session.id),
+        });
+      }
     },
   });
 };
 
-export const useDeleteChatSession = () => {
+export const useDeleteChatSession = (workspaceId: number | null) => {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (id: number) => chatService.deleteSession(id),
     onSuccess: (session) => {
-      void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.lists() });
-      queryClient.removeQueries({ queryKey: chatSessionQueryKeys.detail(session.id) });
+      if (workspaceId !== null) {
+        void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.lists(workspaceId) });
+        queryClient.removeQueries({ queryKey: chatSessionQueryKeys.detail(workspaceId, session.id) });
+      }
     },
   });
 };
 
-export const useGenerateChatMessage = () => {
+export const useGenerateChatMessage = (workspaceId: number | null) => {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -87,7 +113,9 @@ export const useGenerateChatMessage = () => {
       chatService.generateMessage(id, input),
     onSuccess: (result, variables) => {
       queryClient.setQueryData<ChatSessionDetail>(
-        chatSessionQueryKeys.detail(variables.id),
+        workspaceId === null
+          ? [...chatSessionQueryKeys.all, "workspace", "none", "detail", variables.id]
+          : chatSessionQueryKeys.detail(workspaceId, variables.id),
         (current) => {
           if (!current) {
             return current;
@@ -100,11 +128,17 @@ export const useGenerateChatMessage = () => {
         },
       );
       queryClient.setQueryData<ChatSessionMessage[]>(
-        chatSessionQueryKeys.messages(variables.id),
+        workspaceId === null
+          ? [...chatSessionQueryKeys.all, "workspace", "none", "messages", variables.id]
+          : chatSessionQueryKeys.messages(workspaceId, variables.id),
         (current) => [...(current || []), result.userMessage, result.assistantMessage],
       );
-      void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.lists() });
-      void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.messages(variables.id) });
+      if (workspaceId !== null) {
+        void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.lists(workspaceId) });
+        void queryClient.invalidateQueries({
+          queryKey: chatSessionQueryKeys.messages(workspaceId, variables.id),
+        });
+      }
     },
   });
 };

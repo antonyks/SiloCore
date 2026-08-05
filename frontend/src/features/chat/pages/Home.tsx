@@ -33,8 +33,11 @@ import {
   type KeyboardEvent,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
 import UserProfileDropdown from "../../../components/ui/UserProfileDropdown";
 import { useAuth } from "../../auth/hooks/useAuth";
+import { useOwnedWorkspaces } from "../../workspace/hooks/useWorkspaces";
+import { getPersonalWorkspaceRoute } from "../../../lib/workspaceRouting";
 import {
   chatSessionQueryKeys,
   useChatSession,
@@ -462,6 +465,8 @@ const SessionLoadingRows = () => (
 
 const Home: React.FC = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const { workspaceId: workspaceIdParam } = useParams<{ workspaceId: string }>();
   const queryClient = useQueryClient();
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingAssistantIdRef = useRef<number | null>(null);
@@ -500,13 +505,44 @@ const Home: React.FC = () => {
     [],
   );
 
-  const sessionsQuery = useChatSessions(listParams);
-  const selectedSessionQuery = useChatSession(selectedSessionId);
-  const selectedMessagesQuery = useChatSessionMessages(selectedSessionId);
-  const modelsQuery = useLlmModels();
-  const createSession = useCreateChatSession();
-  const updateSession = useUpdateChatSession();
-  const deleteSession = useDeleteChatSession();
+  const routeWorkspaceId = useMemo(() => {
+    if (!workspaceIdParam || !/^\d+$/.test(workspaceIdParam)) {
+      return null;
+    }
+
+    const workspaceId = Number(workspaceIdParam);
+
+    return Number.isSafeInteger(workspaceId) && workspaceId > 0 ? workspaceId : null;
+  }, [workspaceIdParam]);
+  const personalWorkspaceId = user?.personalWorkspace?.id ?? null;
+  const personalWorkspaceRoute = user ? getPersonalWorkspaceRoute(user) : null;
+  const workspacesQuery = useOwnedWorkspaces(personalWorkspaceId);
+  const activeWorkspace = useMemo(
+    () =>
+      routeWorkspaceId === null
+        ? undefined
+        : workspacesQuery.data?.find(
+            (workspace) => workspace.id === routeWorkspaceId && workspace.status === "ACTIVE",
+          ),
+    [routeWorkspaceId, workspacesQuery.data],
+  );
+  const activeWorkspaceId = activeWorkspace?.id ?? null;
+  const isWorkspaceValidated = routeWorkspaceId !== null && workspacesQuery.isSuccess && !!activeWorkspace;
+  const sessionsQuery = useChatSessions(activeWorkspaceId, listParams, isWorkspaceValidated);
+  const selectedSessionQuery = useChatSession(
+    activeWorkspaceId,
+    selectedSessionId,
+    isWorkspaceValidated,
+  );
+  const selectedMessagesQuery = useChatSessionMessages(
+    activeWorkspaceId,
+    selectedSessionId,
+    isWorkspaceValidated,
+  );
+  const modelsQuery = useLlmModels(activeWorkspaceId, isWorkspaceValidated);
+  const createSession = useCreateChatSession(activeWorkspaceId);
+  const updateSession = useUpdateChatSession(activeWorkspaceId);
+  const deleteSession = useDeleteChatSession(activeWorkspaceId);
 
   const sessions = useMemo(() => sessionsQuery.data || [], [sessionsQuery.data]);
   const filteredSessions = useMemo(() => {
@@ -544,6 +580,47 @@ const Home: React.FC = () => {
     () => selectedMessages.map((message) => `${message.id}:${message.content.length}`).join("|"),
     [selectedMessages],
   );
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    if (routeWorkspaceId === null && personalWorkspaceRoute) {
+      navigate(personalWorkspaceRoute, { replace: true });
+    }
+  }, [navigate, personalWorkspaceRoute, routeWorkspaceId, user]);
+
+  useEffect(() => {
+    if (!user || routeWorkspaceId === null || !workspacesQuery.isSuccess || activeWorkspace) {
+      return;
+    }
+
+    if (personalWorkspaceRoute) {
+      navigate(personalWorkspaceRoute, { replace: true });
+    }
+  }, [
+    activeWorkspace,
+    navigate,
+    personalWorkspaceRoute,
+    routeWorkspaceId,
+    user,
+    workspacesQuery.isSuccess,
+  ]);
+
+  useEffect(() => {
+    setSelectedSessionId(null);
+    setEditingSessionId(null);
+    setEditingTitle("");
+    setOpenSessionMenuId(null);
+    setConfirmingDeleteSession(null);
+    setPromptDraft("");
+    setPromptValidationError(null);
+    setStreamError(null);
+    streamingAssistantIdRef.current = null;
+    streamingAssistantHasOutputRef.current = false;
+    promptDraftsBySessionRef.current = {};
+  }, [activeWorkspaceId]);
 
   const scrollMessagesToBottom = (behavior: ScrollBehavior = "smooth") => {
     const element = messageListRef.current;
@@ -663,6 +740,10 @@ const Home: React.FC = () => {
   };
 
   const handleCreateSession = async () => {
+    if (!isWorkspaceValidated) {
+      return;
+    }
+
     try {
       const session = await createSession.mutateAsync({ title: "New Chat" });
       setSelectedSessionId(session.id);
@@ -822,12 +903,16 @@ const Home: React.FC = () => {
     sessionId: number,
     updater: (messages: ChatSessionMessage[]) => ChatSessionMessage[],
   ) => {
+    if (activeWorkspaceId === null) {
+      return;
+    }
+
     queryClient.setQueryData<ChatSessionMessage[]>(
-      chatSessionQueryKeys.messages(sessionId),
+      chatSessionQueryKeys.messages(activeWorkspaceId, sessionId),
       (current) => updater(current || []),
     );
     queryClient.setQueryData<ChatSessionDetail>(
-      chatSessionQueryKeys.detail(sessionId),
+      chatSessionQueryKeys.detail(activeWorkspaceId, sessionId),
       (current) => {
         if (!current) {
           return current;
@@ -962,7 +1047,7 @@ const Home: React.FC = () => {
   };
 
   const submitPrompt = async () => {
-    if (!selectedSessionId || isStreaming) {
+    if (!selectedSessionId || isStreaming || activeWorkspaceId === null || !isWorkspaceValidated) {
       return;
     }
 
@@ -995,13 +1080,16 @@ const Home: React.FC = () => {
           ...generationParams,
         },
         {
+          workspaceId: activeWorkspaceId,
           signal: abortController.signal,
           onEvent: (event) => {
             if (event.event === "user_message") {
               appendCachedMessage(selectedSessionId, event.data);
               setPromptDraft("");
               promptDraftsBySessionRef.current[selectedSessionId] = "";
-              void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.lists() });
+              void queryClient.invalidateQueries({
+                queryKey: chatSessionQueryKeys.lists(activeWorkspaceId),
+              });
               return;
             }
 
@@ -1012,7 +1100,9 @@ const Home: React.FC = () => {
 
             if (event.event === "assistant_message") {
               reconcileAssistantMessage(selectedSessionId, event.data);
-              void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.lists() });
+              void queryClient.invalidateQueries({
+                queryKey: chatSessionQueryKeys.lists(activeWorkspaceId),
+              });
               return;
             }
 
@@ -1048,9 +1138,13 @@ const Home: React.FC = () => {
       if (!shouldKeepTemporaryPartial) {
         streamingAssistantIdRef.current = null;
         streamingAssistantHasOutputRef.current = false;
-        void queryClient.refetchQueries({ queryKey: chatSessionQueryKeys.messages(selectedSessionId) });
+        void queryClient.refetchQueries({
+          queryKey: chatSessionQueryKeys.messages(activeWorkspaceId, selectedSessionId),
+        });
       }
-      void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.lists() });
+      void queryClient.invalidateQueries({
+        queryKey: chatSessionQueryKeys.lists(activeWorkspaceId),
+      });
     }
   };
 
@@ -1328,6 +1422,18 @@ const Home: React.FC = () => {
     </>
   );
 
+  if (!personalWorkspaceRoute) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (routeWorkspaceId === null) {
+    return <Navigate to={personalWorkspaceRoute} replace />;
+  }
+
+  if (workspacesQuery.isSuccess && !activeWorkspace) {
+    return <Navigate to={personalWorkspaceRoute} replace />;
+  }
+
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden bg-slate-100 text-slate-950">
       <header className="flex h-14 shrink-0 items-center border-b border-slate-200 bg-white px-4 shadow-sm">
@@ -1351,7 +1457,7 @@ const Home: React.FC = () => {
           <button
             type="button"
             onClick={() => void handleCreateSession()}
-            disabled={createSession.isPending}
+            disabled={createSession.isPending || !isWorkspaceValidated}
             className="inline-flex h-9 items-center gap-1.5 rounded-md bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {createSession.isPending ? (

@@ -1,10 +1,12 @@
 import React, { lazy, Suspense } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Navigate, Routes, Route } from 'react-router-dom';
 import Login from '../features/auth/pages/Login';
 import NotFound from '../pages/NotFound';
 import ProtectedRoute from './ProtectedRoute';
 import { UserRole } from '../types';
 import { RootRedirect } from './RootRedirect';
+import { useAuth } from '../features/auth/hooks/useAuth';
+import { getPersonalWorkspaceRoute } from '../lib/workspaceRouting';
 
 const AdminLayout = lazy(() => import('../components/layout/AdminLayout'));
 const Dashboard = lazy(() => import('../features/analytics/pages/Dashboard'));
@@ -21,6 +23,18 @@ const UserAccessPage = lazy(
   () => import('../features/analytics/pages/UserAccessPage'),
 );
 const Home = lazy(() => import('../features/chat/pages/Home'));
+
+const LegacyChatRedirect: React.FC = () => {
+  const { user } = useAuth();
+
+  if (!user) {
+    return <NotFound />;
+  }
+
+  const workspaceRoute = getPersonalWorkspaceRoute(user);
+
+  return workspaceRoute ? <Navigate to={workspaceRoute} replace /> : <NotFound />;
+};
 
 const AppRoutes: React.FC = () => {
 
@@ -52,7 +66,8 @@ const AppRoutes: React.FC = () => {
           </Route>
         </Route>
         <Route element={<ProtectedRoute allowedRoles={[UserRole.USER]}/>}>
-          <Route path="/chat/home" element={<Home/>}/>
+          <Route path="/chat/home" element={<LegacyChatRedirect />}/>
+          <Route path="/workspaces/:workspaceId/chat/home" element={<Home/>}/>
         </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>
