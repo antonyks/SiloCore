@@ -17,13 +17,14 @@ describe('ChatRepository', () => {
       const sessionData = {
         title: 'Test Conversation',
         userId: 1,
+        workspaceId: 25,
       };
 
       const mockSession: SelectedChatSession = {
         id: 1,
         title: 'Test Conversation',
         userId: 1,
-        workspaceId: null,
+        workspaceId: 25,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -47,7 +48,7 @@ describe('ChatRepository', () => {
         id: 1,
         title: 'Test Conversation',
         userId: 1,
-        workspaceId: null,
+        workspaceId: 25,
         createdAt: new Date(),
         updatedAt: new Date(),
         messages: [
@@ -98,7 +99,7 @@ describe('ChatRepository', () => {
           id: 1,
           title: 'Conversation 1',
           userId: 1,
-          workspaceId: null,
+          workspaceId: 25,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -106,7 +107,7 @@ describe('ChatRepository', () => {
           id: 2,
           title: 'Conversation 2',
           userId: 1,
-          workspaceId: null,
+          workspaceId: 25,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -180,7 +181,7 @@ describe('ChatRepository', () => {
         id: 1,
         title: 'Updated Conversation Title',
         userId: 1,
-        workspaceId: null,
+        workspaceId: 25,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -229,7 +230,7 @@ describe('ChatRepository', () => {
         id: 1,
         title: 'Deleted Conversation',
         userId: 1,
-        workspaceId: null,
+        workspaceId: 25,
         createdAt: new Date(),
         updatedAt: new Date(),
       };

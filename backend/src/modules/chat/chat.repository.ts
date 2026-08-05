@@ -9,7 +9,7 @@ import {
   SelectedChatMessageFields
 } from './chat.model';
 import { 
-  IChatSessionCreateInput, 
+  IChatSessionRepositoryCreateInput,
   IChatSessionUpdateInput, 
   IChatMessageCreateInput,
   IChatSessionListParams
@@ -17,7 +17,7 @@ import {
 import { prisma } from '../../config/database';
 
 export const ChatRepository = {
-  async createSession(data: IChatSessionCreateInput): Promise<SelectedChatSession> {
+  async createSession(data: IChatSessionRepositoryCreateInput): Promise<SelectedChatSession> {
     return ChatSessionModel.create({
       data,
       select: SelectedChatSessionFields

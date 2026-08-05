@@ -15,7 +15,7 @@ export interface ChatSession {
   id: number;
   title: string;
   userId: number;
-  workspaceId: number | null;
+  workspaceId: number;
   createdAt: string;
   updatedAt: string;
 }

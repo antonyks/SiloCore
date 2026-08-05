@@ -36,7 +36,8 @@ export async function createIntegrationTestUser(
 
 export async function createIntegrationChatSession(
   userId: number,
-  overrides: Partial<Prisma.ChatSessionCreateInput> = {},
+  overrides: Partial<Omit<Prisma.ChatSessionCreateInput, 'workspace'>> &
+    Pick<Prisma.ChatSessionCreateInput, 'workspace'>,
 ) {
   return integrationPrisma.chatSession.create({
     data: {

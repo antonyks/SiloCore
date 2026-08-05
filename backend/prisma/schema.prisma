@@ -27,9 +27,9 @@ model ChatSession {
   id           Int     @id @default(autoincrement())
   title        String
   userId       Int
-  workspaceId  Int?
+  workspaceId  Int
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  workspace    Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   messages     ChatMessage[]

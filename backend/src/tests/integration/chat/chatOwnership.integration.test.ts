@@ -44,6 +44,22 @@ function createChatWorkspaceContext(input: {
 }
 
 describe('Chat ownership integration', () => {
+  it('rejects creating a chat session without a workspaceId at the database layer', async () => {
+    const owner = await createIntegrationTestUser({ email: 'missing-workspace-chat-owner@example.com' });
+
+    await expect(
+      integrationPrisma.$executeRaw`
+        INSERT INTO "chat_sessions" ("title", "userId", "createdAt", "updatedAt")
+        VALUES ('Missing Workspace', ${owner.id}, NOW(), NOW())
+      `,
+    ).rejects.toMatchObject({
+      code: 'P2010',
+      meta: expect.objectContaining({
+        code: '23502',
+      }),
+    });
+  });
+
   it('stores and returns a chat session workspaceId when provided', async () => {
     const owner = await createIntegrationTestUser({ email: 'workspace-chat-owner@example.com' });
     const { workspace } = await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(owner.id);

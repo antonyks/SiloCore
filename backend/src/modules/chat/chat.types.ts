@@ -5,7 +5,7 @@ export interface IChatSession {
   id: number;
   title: string;
   userId: number;
-  workspaceId: number | null;
+  workspaceId: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -37,7 +37,10 @@ export interface IChatMessage {
 export interface IChatSessionCreateInput {
   title: string;
   userId: number;
-  workspaceId?: number | null;
+}
+
+export interface IChatSessionRepositoryCreateInput extends IChatSessionCreateInput {
+  workspaceId: number;
 }
 
 export interface IChatSessionUpdateInput {
