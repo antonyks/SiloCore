@@ -22,6 +22,16 @@ function createSseResponse() {
   return response;
 }
 
+function createWorkspace() {
+  return {
+    id: 25,
+    name: 'Personal Workspace',
+    ownerUserId: 7,
+    type: WorkspaceType.PERSONAL,
+    status: WorkspaceStatus.ACTIVE,
+  };
+}
+
 describe('ChatController', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
@@ -121,6 +131,7 @@ describe('ChatController', () => {
           status: UserStatus.ACTIVE,
           createdAt: new Date(),
         },
+        workspace: createWorkspace(),
       });
       const res = createSseResponse();
 
@@ -128,7 +139,7 @@ describe('ChatController', () => {
 
       expect(ChatService.streamAssistantResponse).toHaveBeenCalledWith({
         sessionId: 1,
-        userId: 7,
+        workspaceId: 25,
         content: 'Hello',
         providerId: undefined,
         model: undefined,
@@ -181,6 +192,7 @@ describe('ChatController', () => {
           status: UserStatus.ACTIVE,
           createdAt: new Date(),
         },
+        workspace: createWorkspace(),
       });
       const res = createSseResponse();
 
@@ -226,6 +238,7 @@ describe('ChatController', () => {
           status: UserStatus.ACTIVE,
           createdAt: new Date(),
         },
+        workspace: createWorkspace(),
       });
       const res = createSseResponse();
 
@@ -276,6 +289,7 @@ describe('ChatController', () => {
           status: UserStatus.ACTIVE,
           createdAt: new Date(),
         },
+        workspace: createWorkspace(),
       });
       const res = createSseResponse();
 

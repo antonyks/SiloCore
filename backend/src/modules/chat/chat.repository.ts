@@ -14,6 +14,7 @@ import {
   IChatMessageCreateInput,
   IChatSessionListParams
 } from './chat.types';
+import { prisma } from '../../config/database';
 
 export const ChatRepository = {
   async createSession(data: IChatSessionCreateInput): Promise<SelectedChatSession> {
@@ -23,18 +24,24 @@ export const ChatRepository = {
     });
   },
 
-  async getSessionById(id: number): Promise<ChatSessionWithMessages | null> {
-    return ChatSessionModel.findUnique({
-      where: { id },
+  async getSessionInWorkspace(
+    sessionId: number,
+    workspaceId: number,
+  ): Promise<ChatSessionWithMessages | null> {
+    return ChatSessionModel.findFirst({
+      where: {
+        id: sessionId,
+        workspaceId,
+      },
       select: ChatSessionWithMessagesFields
     });
   },
 
-  async getSessionsByUserId(params: IChatSessionListParams): Promise<SelectedChatSession[]> {
-    const { userId, skip, take, orderBy = 'createdAt', orderDirection = 'desc' } = params;
+  async listSessionsInWorkspace(params: IChatSessionListParams): Promise<SelectedChatSession[]> {
+    const { workspaceId, skip, take, orderBy = 'createdAt', orderDirection = 'desc' } = params;
     
     return ChatSessionModel.findMany({
-      where: { userId },
+      where: { workspaceId },
       skip,
       take,
       orderBy: {
@@ -44,18 +51,59 @@ export const ChatRepository = {
     });
   },
 
-  async updateSession(id: number, data: IChatSessionUpdateInput): Promise<SelectedChatSession | null> {
-    return ChatSessionModel.update({
-      where: { id },
-      data,
-      select: SelectedChatSessionFields
+  async updateSessionInWorkspace(
+    sessionId: number,
+    workspaceId: number,
+    data: IChatSessionUpdateInput,
+  ): Promise<SelectedChatSession | null> {
+    return prisma.$transaction(async (tx) => {
+      const updateResult = await tx.chatSession.updateMany({
+        where: {
+          id: sessionId,
+          workspaceId,
+        },
+        data,
+      });
+
+      if (updateResult.count === 0) {
+        return null;
+      }
+
+      return tx.chatSession.findFirst({
+        where: {
+          id: sessionId,
+          workspaceId,
+        },
+        select: SelectedChatSessionFields,
+      });
     });
   },
 
-  async deleteSession(id: number): Promise<SelectedChatSession | null> {
-    return ChatSessionModel.delete({
-      where: { id },
-      select: SelectedChatSessionFields
+  async deleteSessionInWorkspace(
+    sessionId: number,
+    workspaceId: number,
+  ): Promise<SelectedChatSession | null> {
+    return prisma.$transaction(async (tx) => {
+      const session = await tx.chatSession.findFirst({
+        where: {
+          id: sessionId,
+          workspaceId,
+        },
+        select: SelectedChatSessionFields,
+      });
+
+      if (!session) {
+        return null;
+      }
+
+      await tx.chatSession.deleteMany({
+        where: {
+          id: sessionId,
+          workspaceId,
+        },
+      });
+
+      return session;
     });
   },
 
@@ -66,9 +114,17 @@ export const ChatRepository = {
     });
   },
 
-  async getMessagesBySessionId(sessionId: number): Promise<SelectedChatMessage[] | []> {
+  async listMessagesInWorkspace(
+    sessionId: number,
+    workspaceId: number,
+  ): Promise<SelectedChatMessage[] | []> {
     return ChatMessageModel.findMany({
-      where: { sessionId },
+      where: {
+        sessionId,
+        session: {
+          workspaceId,
+        },
+      },
       orderBy: {
         createdAt: 'asc'
       },

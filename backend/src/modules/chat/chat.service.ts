@@ -10,7 +10,7 @@ import {
   ChatGenerationStreamEvent,
   IChatGenerationParams
 } from './chat.types';
-import { NotFoundError, AuthenticationError } from '../../errors';
+import { NotFoundError } from '../../errors';
 import { SelectedChatSession, ChatSessionWithMessages, SelectedChatMessage, MessageAuthor } from './chat.model';
 import { LlmRuntimeService } from '../llm/llmRuntime.service';
 import { ILlmProvider } from '../llm/llm.interface';
@@ -118,84 +118,62 @@ export const ChatService = {
     return await ChatRepository.createSession(data);
   },
 
-  async getSessionById(id: number, userId: number): Promise<ChatSessionWithMessages | null> {
-    const session = await ChatRepository.getSessionById(id);
+  async getSessionById(id: number, workspaceId: number): Promise<ChatSessionWithMessages | null> {
+    const session = await ChatRepository.getSessionInWorkspace(id, workspaceId);
     
     if (!session) {
       throw new NotFoundError('Session not found');
-    }
-    
-    if (session.userId !== userId) {
-      throw new AuthenticationError('Access denied to this session');
     }
     
     return session;
   },
 
-  async getUserSessions(params: IChatSessionListParams): Promise<SelectedChatSession[]> {
-    return await ChatRepository.getSessionsByUserId(params);
+  async getWorkspaceSessions(params: IChatSessionListParams): Promise<SelectedChatSession[]> {
+    return await ChatRepository.listSessionsInWorkspace(params);
   },
 
-  async updateSession(id: number, userId: number, data: IChatSessionUpdateInput): Promise<SelectedChatSession | null> {
-    const session = await ChatRepository.getSessionById(id);
+  async updateSession(
+    id: number,
+    workspaceId: number,
+    data: IChatSessionUpdateInput,
+  ): Promise<SelectedChatSession | null> {
+    const session = await ChatRepository.updateSessionInWorkspace(id, workspaceId, data);
     
     if (!session) {
       throw new NotFoundError('Session not found');
     }
-    
-    if (session.userId !== userId) {
-      throw new AuthenticationError('Access denied to update this session');
-    }
-    
-    return await ChatRepository.updateSession(id, data);
+
+    return session;
   },
 
-  async deleteSession(id: number, userId: number): Promise<SelectedChatSession | null> {
-    const session = await ChatRepository.getSessionById(id);
+  async deleteSession(id: number, workspaceId: number): Promise<SelectedChatSession | null> {
+    const session = await ChatRepository.deleteSessionInWorkspace(id, workspaceId);
     
     if (!session) {
       throw new NotFoundError('Session not found');
     }
-    
-    if (session.userId !== userId) {
-      throw new AuthenticationError('Access denied to delete this session');
-    }
-    
-    return await ChatRepository.deleteSession(id);
+
+    return session;
   },
 
-  async createMessage(data: IChatMessageCreateInput, userId: number): Promise<SelectedChatMessage> {
-    await this.ensureSessionOwnedByUser(data.sessionId, userId, 'Access denied to this session');
+  async createMessage(data: IChatMessageCreateInput, workspaceId: number): Promise<SelectedChatMessage> {
+    await this.ensureSessionInWorkspace(data.sessionId, workspaceId);
     return await ChatRepository.createMessage(data);
   },
 
-  async getMessagesBySessionId(sessionId: number, userId: number): Promise<SelectedChatMessage[] | []> {
-    const session = await ChatRepository.getSessionById(sessionId);
-    
-    if (!session) {
-      throw new NotFoundError('Session not found');
-    }
-    
-    if (session.userId !== userId) {
-      throw new AuthenticationError('Access denied to this session');
-    }
-    
-    return await ChatRepository.getMessagesBySessionId(sessionId);
+  async getMessagesBySessionId(sessionId: number, workspaceId: number): Promise<SelectedChatMessage[] | []> {
+    await this.ensureSessionInWorkspace(sessionId, workspaceId);
+    return await ChatRepository.listMessagesInWorkspace(sessionId, workspaceId);
   },
 
-  async ensureSessionOwnedByUser(
+  async ensureSessionInWorkspace(
     sessionId: number,
-    userId: number,
-    accessDeniedMessage = 'Access denied to this session',
+    workspaceId: number,
   ): Promise<ChatSessionWithMessages> {
-    const session = await ChatRepository.getSessionById(sessionId);
+    const session = await ChatRepository.getSessionInWorkspace(sessionId, workspaceId);
 
     if (!session) {
       throw new NotFoundError('Session not found');
-    }
-
-    if (session.userId !== userId) {
-      throw new AuthenticationError(accessDeniedMessage);
     }
 
     return session;
@@ -403,7 +381,7 @@ export const ChatService = {
   },
 
   async prepareGeneration(input: IChatGenerationServiceInput): Promise<PreparedGeneration> {
-    const session = await this.ensureSessionOwnedByUser(input.sessionId, input.userId);
+    const session = await this.ensureSessionInWorkspace(input.sessionId, input.workspaceId);
     const resolved = await LlmRuntimeService.resolveGenerationProvider({
       providerId: input.providerId,
       model: input.model,

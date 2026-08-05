@@ -23,9 +23,12 @@ const mockPrisma = {
   chatSession: {
     create: jest.fn<() => Promise<chatSessionResult>>(),
     findUnique: jest.fn<() => Promise<SelectedChatSession | null>>(),
+    findFirst: jest.fn<() => Promise<SelectedChatSession | null>>(),
     findMany: jest.fn<() => Promise<SelectedChatSession[]>>(),
     update: jest.fn<() => Promise<SelectedChatSession>>(),
+    updateMany: jest.fn<() => Promise<{ count: number }>>(),
     delete: jest.fn<() => Promise<SelectedChatSession>>(),
+    deleteMany: jest.fn<() => Promise<{ count: number }>>(),
   },
   chatMessage: {
     create: jest.fn<() => Promise<chatMessageResult>>(),
@@ -157,9 +160,12 @@ beforeEach(() => {
     mockPrisma.user.count.mockClear();
     mockPrisma.chatSession.create.mockClear();
     mockPrisma.chatSession.findUnique.mockClear();
+    mockPrisma.chatSession.findFirst.mockClear();
     mockPrisma.chatSession.findMany.mockClear();
     mockPrisma.chatSession.update.mockClear();
+    mockPrisma.chatSession.updateMany.mockClear();
     mockPrisma.chatSession.delete.mockClear();
+    mockPrisma.chatSession.deleteMany.mockClear();
     mockPrisma.chatMessage.create.mockClear();
     mockPrisma.chatMessage.findUnique.mockClear();
     mockPrisma.chatMessage.findMany.mockClear();

@@ -74,6 +74,16 @@ function toGenerationInput(body: IChatGenerationInput): IChatGenerationInput {
   };
 }
 
+function getWorkspaceId(req: AuthenticatedRequest): number {
+  const workspaceId = req.workspace?.id;
+
+  if (!workspaceId) {
+    throw new InvalidInputError('Workspace context is required');
+  }
+
+  return workspaceId;
+}
+
 export const ChatController = {
   async createSession(req: AuthenticatedRequest, res: Response): Promise<void> {
     const { title } = req.body;
@@ -93,11 +103,7 @@ export const ChatController = {
   },
 
   async getSessions(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const userId = req.user?.id;
-    
-    if (!userId) {
-      throw new InvalidInputError('User ID is required');
-    }
+    const workspaceId = getWorkspaceId(req);
     
     const { skip, take, orderBy, orderDirection } = req.query;
     
@@ -112,65 +118,49 @@ export const ChatController = {
     }
     
     const params:IChatSessionListParams = {
-      userId,
+      workspaceId,
       skip: paginationSkip,
       take: paginationTake,
       orderBy: orderBy as 'createdAt' | 'updatedAt' | undefined,
       orderDirection: orderDirection as 'asc' | 'desc' | undefined
     };
     
-    const sessions = await ChatService.getUserSessions(params);
+    const sessions = await ChatService.getWorkspaceSessions(params);
     res.status(200).json({ data: sessions });
   },
 
   async getSessionById(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const userId = req.user?.id;
+    const workspaceId = getWorkspaceId(req);
     const idString: string = req.params.id;
     const id: number = parseSessionId(idString);
-    
-    if (!userId) {
-      throw new InvalidInputError('User ID is required');
-    }
-    
-    const session = await ChatService.getSessionById(id, userId);
+
+    const session = await ChatService.getSessionById(id, workspaceId);
     res.status(200).json({ data: session });
   },
 
   async updateSession(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const userId = req.user?.id;
+    const workspaceId = getWorkspaceId(req);
     const idString: string = req.params.id;
     const id: number = parseSessionId(idString);
     
-    if (!userId) {
-      throw new InvalidInputError('User ID is required');
-    }
-    
     const data: IChatSessionUpdateInput = req.body;
-    const session = await ChatService.updateSession(id, userId, data);
+    const session = await ChatService.updateSession(id, workspaceId, data);
     res.status(200).json({ data: session });
   },
 
   async deleteSession(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const userId = req.user?.id;
+    const workspaceId = getWorkspaceId(req);
     const idString: string = req.params.id;
     const id: number = parseSessionId(idString);
     
-    if (!userId) {
-      throw new InvalidInputError('User ID is required');
-    }
-    
-    const session = await ChatService.deleteSession(id, userId);
+    const session = await ChatService.deleteSession(id, workspaceId);
     res.status(200).json({ data: session });
   },
 
   async createMessage(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const userId = req.user?.id;
+    const workspaceId = getWorkspaceId(req);
     const { content, sessionId, metadata } = req.body;
     const author=MessageAuthor.USER;
-    
-    if (!userId) {
-      throw new InvalidInputError('User ID is required');
-    }
     
     const data: IChatMessageCreateInput = { 
       content, 
@@ -179,35 +169,27 @@ export const ChatController = {
       metadata 
     };
     
-    const message = await ChatService.createMessage(data, userId);
+    const message = await ChatService.createMessage(data, workspaceId);
     res.status(201).json({ data: message });
   },
 
   async getMessagesBySessionId(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const userId = req.user?.id;
+    const workspaceId = getWorkspaceId(req);
     const idString: string = req.params.id;
     const id: number = parseSessionId(idString);
     
-    if (!userId) {
-      throw new InvalidInputError('User ID is required');
-    }
-    
-    const messages = await ChatService.getMessagesBySessionId(id, userId);
+    const messages = await ChatService.getMessagesBySessionId(id, workspaceId);
     res.status(200).json({ data: messages });
   },
 
   async generateAssistantResponse(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const userId = req.user?.id;
+    const workspaceId = getWorkspaceId(req);
     const sessionId = parseSessionId(req.params.id);
-
-    if (!userId) {
-      throw new InvalidInputError('User ID is required');
-    }
 
     const result = await ChatService.generateAssistantResponse({
       ...toGenerationInput(req.body),
       sessionId,
-      userId,
+      workspaceId,
       ...(req.requestId ? { requestId: req.requestId } : {}),
     });
 
@@ -215,17 +197,13 @@ export const ChatController = {
   },
 
   async streamAssistantResponse(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const userId = req.user?.id;
+    const workspaceId = getWorkspaceId(req);
     const sessionId = parseSessionId(req.params.id);
-
-    if (!userId) {
-      throw new InvalidInputError('User ID is required');
-    }
 
     const events = ChatService.streamAssistantResponse({
       ...toGenerationInput(req.body),
       sessionId,
-      userId,
+      workspaceId,
       ...(req.requestId ? { requestId: req.requestId } : {}),
     })[Symbol.asyncIterator]();
     let clientClosed = false;

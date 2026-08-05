@@ -41,8 +41,8 @@ describe('ChatRepository', () => {
     });
   });
 
-  describe('getSessionById', () => {
-    it('should return chat session with messages by id', async () => {
+  describe('getSessionInWorkspace', () => {
+    it('should return chat session with messages by id and workspace id', async () => {
       const mockSession: ChatSessionWithMessages = {
         id: 1,
         title: 'Test Conversation',
@@ -66,12 +66,12 @@ describe('ChatRepository', () => {
         ],
       };
 
-      (mockPrisma.chatSession.findUnique as jest.Mock).mockResolvedValue(mockSession);
+      (mockPrisma.chatSession.findFirst as jest.Mock).mockResolvedValue(mockSession);
 
-      const result = await ChatRepository.getSessionById(1);
+      const result = await ChatRepository.getSessionInWorkspace(1, 25);
 
-      expect(mockPrisma.chatSession.findUnique).toHaveBeenCalledWith({
-        where: { id: 1 },
+      expect(mockPrisma.chatSession.findFirst).toHaveBeenCalledWith({
+        where: { id: 1, workspaceId: 25 },
         select: ChatSessionWithMessagesFields,
       });
 
@@ -79,20 +79,20 @@ describe('ChatRepository', () => {
     });
 
     it('should return null when session not found', async () => {
-      (mockPrisma.chatSession.findUnique as jest.Mock).mockResolvedValue(null);
+      (mockPrisma.chatSession.findFirst as jest.Mock).mockResolvedValue(null);
 
-      const result = await ChatRepository.getSessionById(999);
+      const result = await ChatRepository.getSessionInWorkspace(999, 25);
 
       expect(result).toBeNull();
-      expect(mockPrisma.chatSession.findUnique).toHaveBeenCalledWith({
-        where: { id: 999 },
+      expect(mockPrisma.chatSession.findFirst).toHaveBeenCalledWith({
+        where: { id: 999, workspaceId: 25 },
         select: ChatSessionWithMessagesFields,
       });
     });
   });
 
-  describe('getSessionsByUserId', () => {
-    it('should return paginated sessions for a user', async () => {
+  describe('listSessionsInWorkspace', () => {
+    it('should return paginated sessions for a workspace', async () => {
       const mockSessions: SelectedChatSession[] = [
         {
           id: 1,
@@ -114,14 +114,14 @@ describe('ChatRepository', () => {
 
       (mockPrisma.chatSession.findMany as jest.Mock).mockResolvedValue(mockSessions);
 
-      const result = await ChatRepository.getSessionsByUserId({
-        userId: 1,
+      const result = await ChatRepository.listSessionsInWorkspace({
+        workspaceId: 25,
         skip: 0,
         take: 10,
       });
 
       expect(mockPrisma.chatSession.findMany).toHaveBeenCalledWith({
-        where: { userId: 1 },
+        where: { workspaceId: 25 },
         skip: 0,
         take: 10,
         orderBy: {
@@ -138,7 +138,7 @@ describe('ChatRepository', () => {
 
       (mockPrisma.chatSession.findMany as jest.Mock).mockResolvedValue(mockSessions);
 
-      await ChatRepository.getSessionsByUserId({ userId: 1 });
+      await ChatRepository.listSessionsInWorkspace({ workspaceId: 25 });
 
       expect(mockPrisma.chatSession.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -152,8 +152,8 @@ describe('ChatRepository', () => {
 
       (mockPrisma.chatSession.findMany as jest.Mock).mockResolvedValue(mockSessions);
 
-      await ChatRepository.getSessionsByUserId({
-        userId: 1,
+      await ChatRepository.listSessionsInWorkspace({
+        workspaceId: 25,
         orderBy: 'updatedAt',
         orderDirection: 'asc',
       });
@@ -168,7 +168,7 @@ describe('ChatRepository', () => {
     it('should return empty array when no sessions found', async () => {
       (mockPrisma.chatSession.findMany as jest.Mock).mockResolvedValue([]);
 
-      const result = await ChatRepository.getSessionsByUserId({ userId: 999 });
+      const result = await ChatRepository.listSessionsInWorkspace({ workspaceId: 25 });
 
       expect(result).toEqual([]);
     });
@@ -185,13 +185,21 @@ describe('ChatRepository', () => {
         updatedAt: new Date(),
       };
 
-      (mockPrisma.chatSession.update as jest.Mock).mockResolvedValue(mockSession);
+      mockPrisma.chatSession.updateMany.mockResolvedValue({ count: 1 });
+      (mockPrisma.chatSession.findFirst as jest.Mock).mockResolvedValue(mockSession);
 
-      const result = await ChatRepository.updateSession(1, { title: 'Updated Conversation Title' });
+      const result = await ChatRepository.updateSessionInWorkspace(
+        1,
+        25,
+        { title: 'Updated Conversation Title' },
+      );
 
-      expect(mockPrisma.chatSession.update).toHaveBeenCalledWith({
-        where: { id: 1 },
+      expect(mockPrisma.chatSession.updateMany).toHaveBeenCalledWith({
+        where: { id: 1, workspaceId: 25 },
         data: { title: 'Updated Conversation Title' },
+      });
+      expect(mockPrisma.chatSession.findFirst).toHaveBeenCalledWith({
+        where: { id: 1, workspaceId: 25 },
         select: SelectedChatSessionFields,
       });
 
@@ -207,9 +215,11 @@ describe('ChatRepository', () => {
         }
       );
 
-      (mockPrisma.chatSession.update as jest.Mock).mockRejectedValue(error);
+      mockPrisma.chatSession.updateMany.mockRejectedValue(error);
 
-      await expect(ChatRepository.updateSession(999, { title: 'Test' })).rejects.toThrow(error);
+      await expect(
+        ChatRepository.updateSessionInWorkspace(999, 25, { title: 'Test' }),
+      ).rejects.toThrow(error);
     });
   });
 
@@ -224,13 +234,17 @@ describe('ChatRepository', () => {
         updatedAt: new Date(),
       };
 
-      (mockPrisma.chatSession.delete as jest.Mock).mockResolvedValue(mockSession);
+      (mockPrisma.chatSession.findFirst as jest.Mock).mockResolvedValue(mockSession);
+      mockPrisma.chatSession.deleteMany.mockResolvedValue({ count: 1 });
 
-      const result = await ChatRepository.deleteSession(1);
+      const result = await ChatRepository.deleteSessionInWorkspace(1, 25);
 
-      expect(mockPrisma.chatSession.delete).toHaveBeenCalledWith({
-        where: { id: 1 },
+      expect(mockPrisma.chatSession.findFirst).toHaveBeenCalledWith({
+        where: { id: 1, workspaceId: 25 },
         select: SelectedChatSessionFields,
+      });
+      expect(mockPrisma.chatSession.deleteMany).toHaveBeenCalledWith({
+        where: { id: 1, workspaceId: 25 },
       });
 
       expect(result).toEqual(mockSession);
@@ -245,9 +259,9 @@ describe('ChatRepository', () => {
         }
       );
 
-      (mockPrisma.chatSession.delete as jest.Mock).mockRejectedValue(error);
+      (mockPrisma.chatSession.findFirst as jest.Mock).mockRejectedValue(error);
 
-      await expect(ChatRepository.deleteSession(999)).rejects.toThrow(error);
+      await expect(ChatRepository.deleteSessionInWorkspace(999, 25)).rejects.toThrow(error);
     });
   });
 
@@ -329,7 +343,7 @@ describe('ChatRepository', () => {
     });
   });
 
-  describe('getMessagesBySessionId', () => {
+  describe('listMessagesInWorkspace', () => {
     it('should return messages ordered by creation date ascending', async () => {
       const mockMessages: SelectedChatMessage[] = [
         {
@@ -360,10 +374,15 @@ describe('ChatRepository', () => {
 
       (mockPrisma.chatMessage.findMany as jest.Mock).mockResolvedValue(mockMessages);
 
-      const result = await ChatRepository.getMessagesBySessionId(1);
+      const result = await ChatRepository.listMessagesInWorkspace(1, 25);
 
       expect(mockPrisma.chatMessage.findMany).toHaveBeenCalledWith({
-        where: { sessionId: 1 },
+        where: {
+          sessionId: 1,
+          session: {
+            workspaceId: 25,
+          },
+        },
         orderBy: {
           createdAt: 'asc',
         },
@@ -377,7 +396,7 @@ describe('ChatRepository', () => {
     it('should return empty array when no messages found', async () => {
       (mockPrisma.chatMessage.findMany as jest.Mock).mockResolvedValue([]);
 
-      const result = await ChatRepository.getMessagesBySessionId(999);
+      const result = await ChatRepository.listMessagesInWorkspace(999, 25);
 
       expect(result).toEqual([]);
       expect(result.length).toBe(0);
@@ -406,7 +425,7 @@ describe('ChatRepository', () => {
 
       (mockPrisma.chatMessage.findMany as jest.Mock).mockResolvedValue(mockMessages);
 
-      const result = await ChatRepository.getMessagesBySessionId(1);
+      const result = await ChatRepository.listMessagesInWorkspace(1, 25);
 
       expect((result[0].metadata as unknown as IChatMetadata)?.tokens?.total).toBe(173);
       expect((result[0].metadata as unknown as IChatMetadata)?.isFavorited).toBe(true);

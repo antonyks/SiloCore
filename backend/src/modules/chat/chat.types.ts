@@ -65,7 +65,7 @@ export interface IChatGenerationInput extends IChatGenerationParams {
 
 export interface IChatGenerationServiceInput extends IChatGenerationInput {
   sessionId: number;
-  userId: number;
+  workspaceId: number;
   requestId?: string;
 }
 
@@ -81,7 +81,7 @@ export type ChatGenerationStreamEvent =
   | { event: 'done'; data: { done: true } };
 
 export interface IChatSessionListParams {
-  userId: number;
+  workspaceId: number;
   skip?: number;
   take?: number;
   orderBy?: 'createdAt' | 'updatedAt';

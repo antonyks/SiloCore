@@ -2,7 +2,7 @@ import { describe, it, expect } from '@jest/globals';
 import { logger } from '../../config/logger';
 import { ChatService } from '../../modules/chat/chat.service';
 import { mockPrisma } from '../setup';
-import { NotFoundError, AuthenticationError } from '../../errors';
+import { NotFoundError } from '../../errors';
 import { SelectedChatSession, ChatSessionWithMessages, SelectedChatMessage, SelectedChatSessionFields, ChatSessionWithMessagesFields, SelectedChatMessageFields } from '../../modules/chat/chat.model';
 import { SelectedLlmProviderConfig } from '../../modules/llm/llmProviderConfig.model';
 import { OllamaProvider } from '../../modules/llm/providers/ollama.provider';
@@ -96,9 +96,9 @@ describe('ChatService', () => {
   });
 
   describe('getSessionById', () => {
-    it('should return session with messages when user has access', async () => {
+    it('should return session with messages when it belongs to the workspace', async () => {
       const sessionId = 1;
-      const userId = 1;
+      const workspaceId = 25;
 
       const mockSession: ChatSessionWithMessages = {
         id: 1,
@@ -117,54 +117,44 @@ describe('ChatService', () => {
         ],
       };
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(mockSession);
+      mockPrisma.chatSession.findFirst.mockResolvedValue(mockSession);
 
-      const result = await ChatService.getSessionById(sessionId, userId);
+      const result = await ChatService.getSessionById(sessionId, workspaceId);
 
       expect(result).toEqual(mockSession);
-      expect(mockPrisma.chatSession.findUnique).toHaveBeenCalledWith({
-        where: { id: sessionId },
+      expect(mockPrisma.chatSession.findFirst).toHaveBeenCalledWith({
+        where: { id: sessionId, workspaceId },
         select: ChatSessionWithMessagesFields,
       });
     });
 
     it('should throw NotFoundError when session does not exist', async () => {
       const sessionId = 999;
-      const userId = 1;
+      const workspaceId = 25;
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(null);
+      mockPrisma.chatSession.findFirst.mockResolvedValue(null);
 
-      await expect(ChatService.getSessionById(sessionId, userId)).rejects.toThrow(
+      await expect(ChatService.getSessionById(sessionId, workspaceId)).rejects.toThrow(
         new NotFoundError('Session not found')
       );
     });
 
-    it('should throw AuthenticationError when user does not own the session', async () => {
+    it('should throw NotFoundError when the session is outside the workspace', async () => {
       const sessionId = 1;
-      const userId = 2;
+      const workspaceId = 99;
 
-      const mockSession: ChatSessionWithMessages = {
-        id: 1,
-        title: 'Test Session',
-        userId: 1,
-        workspaceId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        messages: [],
-      };
+      mockPrisma.chatSession.findFirst.mockResolvedValue(null);
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(mockSession);
-
-      await expect(ChatService.getSessionById(sessionId, userId)).rejects.toThrow(
-        new AuthenticationError('Access denied to this session')
+      await expect(ChatService.getSessionById(sessionId, workspaceId)).rejects.toThrow(
+        new NotFoundError('Session not found')
       );
     });
   });
 
-  describe('getUserSessions', () => {
-    it('should return paginated sessions for user', async () => {
+  describe('getWorkspaceSessions', () => {
+    it('should return paginated sessions for workspace', async () => {
       const params = {
-        userId: 1,
+        workspaceId: 25,
         skip: 0,
         take: 10,
         orderBy: 'createdAt' as const,
@@ -192,11 +182,11 @@ describe('ChatService', () => {
 
       mockPrisma.chatSession.findMany.mockResolvedValue(mockSessions);
 
-      const result = await ChatService.getUserSessions(params);
+      const result = await ChatService.getWorkspaceSessions(params);
 
       expect(result).toEqual(mockSessions);
       expect(mockPrisma.chatSession.findMany).toHaveBeenCalledWith({
-        where: { userId: params.userId },
+        where: { workspaceId: params.workspaceId },
         skip: params.skip,
         take: params.take,
         orderBy: { [params.orderBy]: params.orderDirection },
@@ -204,36 +194,26 @@ describe('ChatService', () => {
       });
     });
 
-    it('should return empty array when user has no sessions', async () => {
+    it('should return empty array when workspace has no sessions', async () => {
       const params = {
-        userId: 999,
+        workspaceId: 25,
         skip: 0,
         take: 10,
       };
 
       mockPrisma.chatSession.findMany.mockResolvedValue([]);
 
-      const result = await ChatService.getUserSessions(params);
+      const result = await ChatService.getWorkspaceSessions(params);
 
       expect(result).toEqual([]);
     });
   });
 
   describe('updateSession', () => {
-    it('should update session successfully when user owns it', async () => {
+    it('should update session successfully when it belongs to the workspace', async () => {
       const sessionId = 1;
-      const userId = 1;
+      const workspaceId = 25;
       const updateData = { title: 'Updated Title' };
-
-      const mockExistingSession: ChatSessionWithMessages = {
-        id: 1,
-        title: 'Old Title',
-        userId: 1,
-        workspaceId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        messages: [],
-      };
 
       const mockUpdatedSession: SelectedChatSession = {
         id: 1,
@@ -244,68 +224,51 @@ describe('ChatService', () => {
         updatedAt: new Date(),
       };
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(mockExistingSession);
-      mockPrisma.chatSession.update.mockResolvedValue(mockUpdatedSession);
+      mockPrisma.chatSession.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.chatSession.findFirst.mockResolvedValue(mockUpdatedSession);
 
-      const result = await ChatService.updateSession(sessionId, userId, updateData);
+      const result = await ChatService.updateSession(sessionId, workspaceId, updateData);
 
       expect(result).toEqual(mockUpdatedSession);
-      expect(mockPrisma.chatSession.update).toHaveBeenCalledWith({
-        where: { id: sessionId },
+      expect(mockPrisma.chatSession.updateMany).toHaveBeenCalledWith({
+        where: { id: sessionId, workspaceId },
         data: updateData,
+      });
+      expect(mockPrisma.chatSession.findFirst).toHaveBeenCalledWith({
+        where: { id: sessionId, workspaceId },
         select: SelectedChatSessionFields,
       });
     });
 
     it('should throw NotFoundError when session does not exist', async () => {
       const sessionId = 999;
-      const userId = 1;
+      const workspaceId = 25;
       const updateData = { title: 'Updated Title' };
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(null);
+      mockPrisma.chatSession.updateMany.mockResolvedValue({ count: 0 });
 
-      await expect(ChatService.updateSession(sessionId, userId, updateData)).rejects.toThrow(
+      await expect(ChatService.updateSession(sessionId, workspaceId, updateData)).rejects.toThrow(
         new NotFoundError('Session not found')
       );
     });
 
-    it('should throw AuthenticationError when user does not own the session', async () => {
+    it('should throw NotFoundError when the session is outside the workspace', async () => {
       const sessionId = 1;
-      const userId = 2;
+      const workspaceId = 99;
       const updateData = { title: 'Updated Title' };
 
-      const mockExistingSession: ChatSessionWithMessages = {
-        id: 1,
-        title: 'Old Title',
-        userId: 1,
-        workspaceId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        messages: [],
-      };
+      mockPrisma.chatSession.updateMany.mockResolvedValue({ count: 0 });
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(mockExistingSession);
-
-      await expect(ChatService.updateSession(sessionId, userId, updateData)).rejects.toThrow(
-        new AuthenticationError('Access denied to update this session')
+      await expect(ChatService.updateSession(sessionId, workspaceId, updateData)).rejects.toThrow(
+        new NotFoundError('Session not found')
       );
     });
   });
 
   describe('deleteSession', () => {
-    it('should delete session successfully when user owns it', async () => {
+    it('should delete session successfully when it belongs to the workspace', async () => {
       const sessionId = 1;
-      const userId = 1;
-
-      const mockExistingSession: ChatSessionWithMessages = {
-        id: 1,
-        title: 'Test Session',
-        userId: 1,
-        workspaceId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        messages: [],
-      };
+      const workspaceId = 25;
 
       const mockDeletedSession: SelectedChatSession = {
         id: 1,
@@ -316,47 +279,40 @@ describe('ChatService', () => {
         updatedAt: new Date(),
       };
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(mockExistingSession);
-      mockPrisma.chatSession.delete.mockResolvedValue(mockDeletedSession);
+      mockPrisma.chatSession.findFirst.mockResolvedValue(mockDeletedSession);
+      mockPrisma.chatSession.deleteMany.mockResolvedValue({ count: 1 });
 
-      const result = await ChatService.deleteSession(sessionId, userId);
+      const result = await ChatService.deleteSession(sessionId, workspaceId);
 
       expect(result).toEqual(mockDeletedSession);
-      expect(mockPrisma.chatSession.delete).toHaveBeenCalledWith({
-        where: { id: sessionId },
+      expect(mockPrisma.chatSession.findFirst).toHaveBeenCalledWith({
+        where: { id: sessionId, workspaceId },
         select: SelectedChatSessionFields,
+      });
+      expect(mockPrisma.chatSession.deleteMany).toHaveBeenCalledWith({
+        where: { id: sessionId, workspaceId },
       });
     });
 
     it('should throw NotFoundError when session does not exist', async () => {
       const sessionId = 999;
-      const userId = 1;
+      const workspaceId = 25;
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(null);
+      mockPrisma.chatSession.findFirst.mockResolvedValue(null);
 
-      await expect(ChatService.deleteSession(sessionId, userId)).rejects.toThrow(
+      await expect(ChatService.deleteSession(sessionId, workspaceId)).rejects.toThrow(
         new NotFoundError('Session not found')
       );
     });
 
-    it('should throw AuthenticationError when user does not own the session', async () => {
+    it('should throw NotFoundError when the session is outside the workspace', async () => {
       const sessionId = 1;
-      const userId = 2;
+      const workspaceId = 99;
 
-      const mockExistingSession: ChatSessionWithMessages = {
-        id: 1,
-        title: 'Test Session',
-        userId: 1,
-        workspaceId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        messages: [],
-      };
+      mockPrisma.chatSession.findFirst.mockResolvedValue(null);
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(mockExistingSession);
-
-      await expect(ChatService.deleteSession(sessionId, userId)).rejects.toThrow(
-        new AuthenticationError('Access denied to delete this session')
+      await expect(ChatService.deleteSession(sessionId, workspaceId)).rejects.toThrow(
+        new NotFoundError('Session not found')
       );
     });
   });
@@ -379,14 +335,14 @@ describe('ChatService', () => {
         createdAt: new Date(),
       };
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
       mockPrisma.chatMessage.create.mockResolvedValue(mockResult);
 
       const result = await ChatService.createMessage(inputData, 1);
 
       expect(result).toEqual(mockResult);
-      expect(mockPrisma.chatSession.findUnique).toHaveBeenCalledWith({
-        where: { id: inputData.sessionId },
+      expect(mockPrisma.chatSession.findFirst).toHaveBeenCalledWith({
+        where: { id: inputData.sessionId, workspaceId: 1 },
         select: ChatSessionWithMessagesFields,
       });
       expect(mockPrisma.chatMessage.create).toHaveBeenCalledWith({
@@ -411,7 +367,7 @@ describe('ChatService', () => {
         createdAt: new Date(),
       };
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
       mockPrisma.chatMessage.create.mockResolvedValue(mockResult);
 
       const result = await ChatService.createMessage(inputData, 1);
@@ -420,7 +376,7 @@ describe('ChatService', () => {
     });
 
     it('should not create a message when the session does not exist', async () => {
-      mockPrisma.chatSession.findUnique.mockResolvedValue(null);
+      mockPrisma.chatSession.findFirst.mockResolvedValue(null);
 
       await expect(ChatService.createMessage({
         content: 'Hello',
@@ -431,14 +387,14 @@ describe('ChatService', () => {
       expect(mockPrisma.chatMessage.create).not.toHaveBeenCalled();
     });
 
-    it('should not create a message when the user does not own the session', async () => {
-      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession({ userId: 2 }));
+    it('should not create a message when the session is outside the workspace', async () => {
+      mockPrisma.chatSession.findFirst.mockResolvedValue(null);
 
       await expect(ChatService.createMessage({
         content: 'Hello',
         author: 'USER',
         sessionId: 1,
-      }, 1)).rejects.toThrow(new AuthenticationError('Access denied to this session'));
+      }, 99)).rejects.toThrow(new NotFoundError('Session not found'));
 
       expect(mockPrisma.chatMessage.create).not.toHaveBeenCalled();
     });
@@ -471,7 +427,7 @@ describe('ChatService', () => {
         createdAt: new Date(),
       };
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession({
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession({
         messages: [
           {
             id: 10,
@@ -496,7 +452,7 @@ describe('ChatService', () => {
 
       const result = await ChatService.generateAssistantResponse({
         sessionId: 1,
-        userId: 1,
+        workspaceId: 25,
         content: 'Hello',
         temperature: 0.2,
         requestId: 'req-chat-complete',
@@ -550,7 +506,7 @@ describe('ChatService', () => {
     });
 
     it('should resolve an explicit provider and model', async () => {
-      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
       mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider({ id: 2, defaultModel: TEST_MODEL_ID }));
       mockPrisma.chatMessage.create
         .mockResolvedValueOnce({
@@ -576,7 +532,7 @@ describe('ChatService', () => {
 
       await ChatService.generateAssistantResponse({
         sessionId: 1,
-        userId: 1,
+        workspaceId: 25,
         content: 'Hello',
         providerId: 2,
         model: EXPLICIT_TEST_MODEL_ID,
@@ -598,7 +554,7 @@ describe('ChatService', () => {
           stopSequences: ['END'],
         },
       });
-      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
       mockPrisma.llmProviderConfig.findMany.mockResolvedValue([provider]);
       mockPrisma.chatMessage.create
         .mockResolvedValueOnce({
@@ -624,7 +580,7 @@ describe('ChatService', () => {
 
       await ChatService.generateAssistantResponse({
         sessionId: 1,
-        userId: 1,
+        workspaceId: 25,
         content: 'Hello',
         temperature: 0.2,
       });
@@ -651,12 +607,12 @@ describe('ChatService', () => {
     });
 
     it('should not persist the user message when provider resolution fails', async () => {
-      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
       mockPrisma.llmProviderConfig.findMany.mockResolvedValue([]);
 
       await expect(ChatService.generateAssistantResponse({
         sessionId: 1,
-        userId: 1,
+        workspaceId: 25,
         content: 'Hello',
       })).rejects.toThrow('LLM provider config not found');
 
@@ -664,12 +620,12 @@ describe('ChatService', () => {
     });
 
     it('should reject disabled explicit providers before persisting the user message', async () => {
-      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
       mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider({ enabled: false }));
 
       await expect(ChatService.generateAssistantResponse({
         sessionId: 1,
-        userId: 1,
+        workspaceId: 25,
         content: 'Hello',
         providerId: 1,
       })).rejects.toThrow('LLM provider is disabled');
@@ -678,12 +634,12 @@ describe('ChatService', () => {
     });
 
     it('should reject deleted explicit providers before persisting the user message', async () => {
-      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
       mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider({ deletedAt: new Date() }));
 
       await expect(ChatService.generateAssistantResponse({
         sessionId: 1,
-        userId: 1,
+        workspaceId: 25,
         content: 'Hello',
         providerId: 1,
       })).rejects.toThrow('LLM provider config not found');
@@ -692,7 +648,7 @@ describe('ChatService', () => {
     });
 
     it('should not persist an assistant message when the provider fails', async () => {
-      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
       mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
       mockPrisma.chatMessage.create.mockResolvedValueOnce({
         id: 1,
@@ -706,7 +662,7 @@ describe('ChatService', () => {
 
       await expect(ChatService.generateAssistantResponse({
         sessionId: 1,
-        userId: 1,
+        workspaceId: 25,
         content: 'Hello',
         requestId: 'req-chat-error',
       })).rejects.toThrow('provider offline');
@@ -752,7 +708,7 @@ describe('ChatService', () => {
         createdAt: new Date(),
       };
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
       mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
       mockPrisma.chatMessage.create
         .mockResolvedValueOnce(userMessage)
@@ -762,7 +718,7 @@ describe('ChatService', () => {
       const events = [];
       for await (const event of ChatService.streamAssistantResponse({
         sessionId: 1,
-        userId: 1,
+        workspaceId: 25,
         content: 'Hello',
         requestId: 'req-chat-stream',
       })) {
@@ -835,7 +791,7 @@ describe('ChatService', () => {
         createdAt: new Date(),
       };
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
       mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
       mockPrisma.chatMessage.create
         .mockResolvedValueOnce(userMessage)
@@ -847,7 +803,7 @@ describe('ChatService', () => {
       try {
         for await (const event of ChatService.streamAssistantResponse({
           sessionId: 1,
-          userId: 1,
+          workspaceId: 25,
           content: 'Hello',
           requestId: 'req-chat-stream-error',
         })) {
@@ -917,7 +873,7 @@ describe('ChatService', () => {
         createdAt: new Date(),
       };
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
       mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
       mockPrisma.chatMessage.create
         .mockResolvedValueOnce(userMessage)
@@ -926,7 +882,7 @@ describe('ChatService', () => {
 
       const stream = ChatService.streamAssistantResponse({
         sessionId: 1,
-        userId: 1,
+        workspaceId: 25,
         content: 'Hello',
       });
       while (!(await stream[Symbol.asyncIterator]().next()).done) {
@@ -970,7 +926,7 @@ describe('ChatService', () => {
         createdAt: new Date(),
       };
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(createSession());
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
       mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
       mockPrisma.chatMessage.create
         .mockResolvedValueOnce(userMessage)
@@ -979,7 +935,7 @@ describe('ChatService', () => {
 
       const stream = ChatService.streamAssistantResponse({
         sessionId: 1,
-        userId: 1,
+        workspaceId: 25,
         content: 'Hello',
         requestId: 'req-chat-stream-abort',
       })[Symbol.asyncIterator]();
@@ -1013,9 +969,9 @@ describe('ChatService', () => {
   });
 
   describe('getMessagesBySessionId', () => {
-    it('should return messages when user has access to session', async () => {
+    it('should return messages when the session belongs to the workspace', async () => {
       const sessionId = 1;
-      const userId = 1;
+      const workspaceId = 25;
 
       const mockSession: ChatSessionWithMessages = {
         id: 1,
@@ -1046,47 +1002,49 @@ describe('ChatService', () => {
         },
       ];
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(mockSession);
+      mockPrisma.chatSession.findFirst.mockResolvedValue(mockSession);
       mockPrisma.chatMessage.findMany.mockResolvedValue(mockMessages);
 
-      const result = await ChatService.getMessagesBySessionId(sessionId, userId);
+      const result = await ChatService.getMessagesBySessionId(sessionId, workspaceId);
 
       expect(result).toEqual(mockMessages);
-      expect(mockPrisma.chatSession.findUnique).toHaveBeenCalledWith({
-        where: { id: sessionId },
+      expect(mockPrisma.chatSession.findFirst).toHaveBeenCalledWith({
+        where: { id: sessionId, workspaceId },
         select: ChatSessionWithMessagesFields,
+      });
+      expect(mockPrisma.chatMessage.findMany).toHaveBeenCalledWith({
+        where: {
+          sessionId,
+          session: {
+            workspaceId,
+          },
+        },
+        orderBy: {
+          createdAt: 'asc',
+        },
+        select: SelectedChatMessageFields,
       });
     });
 
     it('should throw NotFoundError when session does not exist', async () => {
       const sessionId = 999;
-      const userId = 1;
+      const workspaceId = 25;
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(null);
+      mockPrisma.chatSession.findFirst.mockResolvedValue(null);
 
-      await expect(ChatService.getMessagesBySessionId(sessionId, userId)).rejects.toThrow(
+      await expect(ChatService.getMessagesBySessionId(sessionId, workspaceId)).rejects.toThrow(
         new NotFoundError('Session not found')
       );
     });
 
-    it('should throw AuthenticationError when user does not own the session', async () => {
+    it('should throw NotFoundError when the session is outside the workspace', async () => {
       const sessionId = 1;
-      const userId = 2;
+      const workspaceId = 99;
 
-      const mockSession: ChatSessionWithMessages = {
-        id: 1,
-        title: 'Test Session',
-        userId: 1,
-        workspaceId: null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        messages: [],
-      };
+      mockPrisma.chatSession.findFirst.mockResolvedValue(null);
 
-      mockPrisma.chatSession.findUnique.mockResolvedValue(mockSession);
-
-      await expect(ChatService.getMessagesBySessionId(sessionId, userId)).rejects.toThrow(
-        new AuthenticationError('Access denied to this session')
+      await expect(ChatService.getMessagesBySessionId(sessionId, workspaceId)).rejects.toThrow(
+        new NotFoundError('Session not found')
       );
     });
   });
