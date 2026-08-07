@@ -3,12 +3,14 @@ import { jest } from '@jest/globals';
 import { SelectedUser } from '../modules/user/user.model';
 import { SelectedChatSession, SelectedChatMessage } from '../modules/chat/chat.model';
 import { SelectedLlmProviderConfig } from '../modules/llm/llmProviderConfig.model';
+import { SelectedJob } from '../modules/job/job.model';
 
 process.env.OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? `test-${Date.now()}`;
 
 type UserCreateResult = Awaited<ReturnType<PrismaClient['user']['create']>>;
 type chatSessionResult = Awaited<ReturnType<PrismaClient['chatSession']['create']>>;
 type chatMessageResult = Awaited<ReturnType<PrismaClient['chatMessage']['create']>>;
+type jobResult = SelectedJob;
 
 const mockPrisma = {
   $queryRaw: jest.fn<() => Promise<unknown>>(),
@@ -56,6 +58,14 @@ const mockPrisma = {
     findFirst: jest.fn<() => Promise<unknown>>(),
     findUnique: jest.fn<() => Promise<unknown>>(),
     update: jest.fn<() => Promise<unknown>>(),
+    count: jest.fn<() => Promise<number>>(),
+  },
+  job: {
+    create: jest.fn<() => Promise<jobResult>>(),
+    findUnique: jest.fn<() => Promise<jobResult | null>>(),
+    findFirst: jest.fn<() => Promise<jobResult | null>>(),
+    findMany: jest.fn<() => Promise<jobResult[]>>(),
+    update: jest.fn<() => Promise<jobResult>>(),
     count: jest.fn<() => Promise<number>>(),
   },
 };
@@ -128,6 +138,14 @@ jest.mock('@prisma/client', () => ({
     OLLAMA: 'OLLAMA',
     OPENAI_COMPATIBLE: 'OPENAI_COMPATIBLE',
   },
+  JobStatus: {
+    QUEUED: 'QUEUED',
+    RUNNING: 'RUNNING',
+    CANCEL_REQUESTED: 'CANCEL_REQUESTED',
+    CANCELLED: 'CANCELLED',
+    SUCCEEDED: 'SUCCEEDED',
+    FAILED: 'FAILED',
+  },
   Prisma: {
     PrismaClientKnownRequestError: MockPrismaClientKnownRequestError,
   },
@@ -186,6 +204,12 @@ beforeEach(() => {
     mockPrisma.workspaceMembership.findUnique.mockClear();
     mockPrisma.workspaceMembership.update.mockClear();
     mockPrisma.workspaceMembership.count.mockClear();
+    mockPrisma.job.create.mockClear();
+    mockPrisma.job.findUnique.mockClear();
+    mockPrisma.job.findFirst.mockClear();
+    mockPrisma.job.findMany.mockClear();
+    mockPrisma.job.update.mockClear();
+    mockPrisma.job.count.mockClear();
 });
 
 export { mockPrisma };

@@ -20,6 +20,7 @@ model User {
   chatSessions         ChatSession[]
   ownedWorkspaces      Workspace[]           @relation("WorkspaceOwner")
   workspaceMemberships WorkspaceMembership[]
+  createdJobs          Job[]                 @relation("JobCreator")
   @@map("users")
 }
 
@@ -79,6 +80,7 @@ model Workspace {
   owner       User                  @relation("WorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
   memberships WorkspaceMembership[]
   chatSessions ChatSession[]
+  jobs         Job[]
   createdAt   DateTime              @default(now())
   updatedAt   DateTime              @updatedAt
 
@@ -105,6 +107,37 @@ model WorkspaceMembership {
   @@index([role])
   @@index([status])
   @@map("workspace_memberships")
+}
+
+model Job {
+  id                 Int       @id @default(autoincrement())
+  workspaceId        Int
+  type               String
+  status             JobStatus @default(QUEUED)
+  progress           Int       @default(0)
+  stage              String    @default("queued")
+  payload            Json      @default("{}")
+  result             Json?
+  errorCode          String?
+  sanitizedError     String?   @db.Text
+  attempts           Int       @default(0)
+  maxAttempts        Int       @default(1)
+  queueMessageId     String?
+  createdByUserId    Int
+  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  createdByUser      User      @relation("JobCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdAt          DateTime  @default(now())
+  startedAt          DateTime?
+  completedAt        DateTime?
+  heartbeatAt        DateTime?
+  cancelRequestedAt  DateTime?
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, createdAt])
+  @@index([status])
+  @@index([createdByUserId])
+  @@unique([queueMessageId])
+  @@map("jobs")
 }
 
 enum LlmProviderConfigType {
@@ -148,4 +181,13 @@ enum WorkspaceMembershipRole {
 enum WorkspaceMembershipStatus {
   ACTIVE
   INACTIVE
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  CANCEL_REQUESTED
+  CANCELLED
+  SUCCEEDED
+  FAILED
 }
