@@ -6,7 +6,6 @@ import {
   LlmAuthenticationError,
   LlmProviderConfig,
   LlmRateLimitError,
-  LlmStreamingError,
 } from '../../modules/llm/llm.types';
 
 jest.mock('node-fetch', () => jest.fn());
@@ -56,6 +55,20 @@ function mockResponse(response?: Partial<Response>): Response {
   } as unknown as Response;
 }
 
+function streamFromText(text: string): NodeJS.ReadableStream {
+  return (async function* textStream() {
+    yield Buffer.from(text);
+  })() as unknown as NodeJS.ReadableStream;
+}
+
+function streamFromChunks(chunks: string[]): NodeJS.ReadableStream {
+  return (async function* textStream() {
+    for (const chunk of chunks) {
+      yield Buffer.from(chunk);
+    }
+  })() as unknown as NodeJS.ReadableStream;
+}
+
 function getFetchOptions(index = 0): {
   method?: string;
   headers?: Record<string, string>;
@@ -86,7 +99,7 @@ describe('OpenAiCompatibleProvider completion', () => {
   it('reports non-streaming OpenAI-compatible capabilities', () => {
     expect(createProvider().capabilities).toEqual({
       completion: true,
-      streaming: false,
+      streaming: true,
       reasoning: true,
       modelListing: false,
       modelPulling: false,
@@ -329,14 +342,148 @@ describe('OpenAiCompatibleProvider completion', () => {
     });
   });
 
-  it('throws unsupported errors for streaming and model listing', async () => {
-    const provider = createProvider();
-    const chunks = provider.streamComplete({
+  it('streams standard chat completion SSE chunks', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      body: streamFromChunks([
+        ': keep-alive\n\n',
+        '\n',
+        'data: {"choices":[{"delta":{"reasoning_content":"Step 1. "}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"lo"}}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}\n\n',
+        'data: {"choices":[{"delta":{"reasoning":"Step 2."},"finish_reason":"stop"}]}\n\n',
+        'data: [DONE]\n\n',
+      ]),
+    }));
+
+    const chunks = [];
+    for await (const chunk of createProvider({
+      apiKey: 'secret-token',
+      extraHeaders: {
+        Authorization: 'Bearer wrong-token',
+        'X-Provider': 'openai-compatible',
+      },
+    }).streamComplete({
+      model: TEST_MODEL_ID,
+      messages: [{ role: 'user', content: 'Private user prompt' }],
+      temperature: 0.2,
+      topP: 0.8,
+      maxTokens: 128,
+      stopSequences: ['END'],
+    })) {
+      chunks.push(chunk);
+    }
+
+    expect(mockedFetch).toHaveBeenCalledWith(
+      'https://api.example.com/v1/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(getFetchOptions().headers).toEqual({
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer secret-token',
+      'X-Provider': 'openai-compatible',
+    });
+    expect(JSON.parse(getFetchOptions().body ?? '{}')).toEqual({
+      model: TEST_MODEL_ID,
+      messages: [{ role: 'user', content: 'Private user prompt' }],
+      stream: true,
+      temperature: 0.2,
+      top_p: 0.8,
+      max_tokens: 128,
+      stop: ['END'],
+    });
+    expect(chunks).toEqual([
+      { content: undefined, reasoning: 'Step 1. ', done: false, finishReason: undefined, usage: undefined },
+      { content: 'Hel', reasoning: undefined, done: false, finishReason: undefined, usage: undefined },
+      {
+        content: 'lo',
+        reasoning: undefined,
+        done: false,
+        finishReason: undefined,
+        usage: { promptTokens: 2, completionTokens: 3, totalTokens: 5 },
+      },
+      { content: undefined, reasoning: 'Step 2.', done: true, finishReason: 'stop', usage: undefined },
+    ]);
+    expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'cloud-openai-compatible',
+      providerType: 'openai-compatible',
+      model: TEST_MODEL_ID,
+      operation: 'provider.stream',
+      status: 'success',
+      latencyMs: expect.any(Number),
+    }), 'provider.stream.success');
+    expect(loggedText()).not.toContain('secret-token');
+    expect(loggedText()).not.toContain('Private user prompt');
+    expect(loggedText()).not.toContain('Step 1.');
+    expect(loggedText()).not.toContain('Hello');
+  });
+
+  it('maps malformed stream chunks to streaming errors', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      body: streamFromText('data: {"choices":[{"delta":{"content":"partial"}}]}\n\ndata: not-json\n\n'),
+    }));
+
+    const chunks = createProvider().streamComplete({
+      model: TEST_MODEL_ID,
+      messages: [{ role: 'user', content: 'Hi' }],
+    });
+    const iterator = chunks[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: { content: 'partial', reasoning: undefined, done: false, finishReason: undefined, usage: undefined },
+    });
+    await expect(iterator.next()).rejects.toMatchObject({
+      providerId: 'cloud-openai-compatible',
+      code: 'MALFORMED_STREAM_CHUNK',
+      message: 'OpenAI-compatible stream chunk was malformed',
+    });
+  });
+
+  it('maps upstream streaming HTTP failures to streaming errors', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      ok: false,
+      status: 502,
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        error: { message: 'bad gateway' },
+      }),
+    }));
+
+    const chunks = createProvider().streamComplete({
       model: TEST_MODEL_ID,
       messages: [{ role: 'user', content: 'Hi' }],
     });
 
-    await expect(chunks[Symbol.asyncIterator]().next()).rejects.toBeInstanceOf(LlmStreamingError);
+    await expect(chunks[Symbol.asyncIterator]().next()).rejects.toMatchObject({
+      providerId: 'cloud-openai-compatible',
+      code: 'HTTP_502',
+      statusCode: 502,
+      message: 'OpenAI-compatible streaming failed with status 502: bad gateway',
+    });
+  });
+
+  it('maps streaming aborts to timeout errors', async () => {
+    const abortError = new Error('The operation was aborted');
+    abortError.name = 'AbortError';
+    mockedFetch.mockRejectedValue(abortError);
+
+    const chunks = createProvider().streamComplete({
+      model: TEST_MODEL_ID,
+      messages: [{ role: 'user', content: 'Hi' }],
+    });
+
+    await expect(chunks[Symbol.asyncIterator]().next()).rejects.toMatchObject({
+      providerId: 'cloud-openai-compatible',
+      code: 'REQUEST_TIMEOUT',
+      message: 'OpenAI-compatible stream timed out or was aborted',
+    });
+  });
+
+  it('throws unsupported errors for model listing', async () => {
+    const provider = createProvider();
+
     await expect(provider.listModels()).rejects.toMatchObject({
       providerId: 'cloud-openai-compatible',
       code: 'MODEL_LISTING_UNSUPPORTED',

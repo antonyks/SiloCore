@@ -23,7 +23,7 @@ import { getLlmErrorCode, logLlmEvent } from '../llm.logging';
 interface OpenAiCompatibleChatRequest {
   model: string;
   messages: LlmMessage[];
-  stream: false;
+  stream: boolean;
   temperature?: number;
   top_p?: number;
   max_tokens?: number;
@@ -47,8 +47,24 @@ interface OpenAiCompatibleChatResponse {
   };
 }
 
+interface OpenAiCompatibleStreamResponse {
+  choices?: Array<{
+    finish_reason?: string | null;
+    delta?: {
+      content?: string | null;
+      reasoning?: string;
+      reasoning_content?: string;
+    };
+  }>;
+  usage?: OpenAiCompatibleChatResponse['usage'];
+}
+
 type OpenAiCompatibleMessage = NonNullable<
   NonNullable<OpenAiCompatibleChatResponse['choices']>[number]['message']
+>;
+
+type OpenAiCompatibleDelta = NonNullable<
+  NonNullable<OpenAiCompatibleStreamResponse['choices']>[number]['delta']
 >;
 
 function buildChatCompletionsUrl(baseUrl: string): string {
@@ -80,6 +96,10 @@ function extractReasoning(message: OpenAiCompatibleMessage | undefined): string 
   return message?.reasoning ?? message?.reasoning_content;
 }
 
+function extractDeltaReasoning(delta: OpenAiCompatibleDelta | undefined): string | undefined {
+  return delta?.reasoning ?? delta?.reasoning_content;
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
@@ -105,7 +125,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
   constructor(config: LlmProviderConfig) {
     super(config, {
       completion: true,
-      streaming: false,
+      streaming: true,
       reasoning: true,
       modelListing: false,
       modelPulling: false,
@@ -186,19 +206,82 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
     return completion;
   }
 
-  streamComplete(request: LlmCompletionRequest): AsyncIterable<LlmStreamChunk> {
-    void request;
-    const error = new LlmStreamingError(
-      'OpenAI-compatible streaming is not implemented',
-      this.id,
-      'STREAMING_UNSUPPORTED',
-    );
-
-    return {
-      [Symbol.asyncIterator]: () => ({
-        next: async () => Promise.reject(error),
-      }),
+  async *streamComplete(request: LlmCompletionRequest): AsyncIterable<LlmStreamChunk> {
+    const enriched = this.enrichRequest({ ...request, stream: true });
+    const body: OpenAiCompatibleChatRequest = {
+      model: enriched.model,
+      messages: enriched.messages,
+      stream: true,
+      temperature: enriched.temperature,
+      top_p: enriched.topP,
+      max_tokens: enriched.maxTokens,
+      stop: enriched.stopSequences,
     };
+    const startedAt = Date.now();
+    let completed = false;
+    let failed = false;
+
+    logLlmEvent({
+      providerId: this.id,
+      providerType: this.config.type,
+      model: enriched.model,
+      operation: 'provider.stream',
+      status: 'started',
+    });
+
+    try {
+      const res = await fetch(buildChatCompletionsUrl(this.config.baseUrl), {
+        method: 'POST',
+        headers: this.buildRequestHeaders({
+          'Content-Type': 'application/json',
+        }),
+        body: JSON.stringify(body),
+        signal: this.buildAbortSignal(),
+      });
+
+      if (!res.ok) {
+        await this.throwStreamingHttpError(res);
+      }
+
+      const reader = res.body as NodeJS.ReadableStream;
+      for await (const chunk of this.readStreamChunks(reader)) {
+        yield chunk;
+      }
+
+      completed = true;
+      logLlmEvent({
+        providerId: this.id,
+        providerType: this.config.type,
+        model: enriched.model,
+        operation: 'provider.stream',
+        latencyMs: Date.now() - startedAt,
+        status: 'success',
+      });
+    } catch (error) {
+      failed = true;
+      const normalizedError = this.normalizeStreamingError(error);
+      logLlmEvent({
+        providerId: this.id,
+        providerType: this.config.type,
+        model: enriched.model,
+        operation: 'provider.stream',
+        latencyMs: Date.now() - startedAt,
+        status: 'error',
+        errorCode: getLlmErrorCode(normalizedError),
+      });
+      throw normalizedError;
+    } finally {
+      if (!completed && !failed) {
+        logLlmEvent({
+          providerId: this.id,
+          providerType: this.config.type,
+          model: enriched.model,
+          operation: 'provider.stream',
+          latencyMs: Date.now() - startedAt,
+          status: 'aborted',
+        });
+      }
+    }
   }
 
   async listModels(): Promise<LlmProviderListedModel[]> {
@@ -239,6 +322,18 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
     );
   }
 
+  private async throwStreamingHttpError(res: Response): Promise<never> {
+    const detail = await readProviderErrorMessage(res);
+    const suffix = detail ? `: ${detail}` : '';
+
+    throw new LlmStreamingError(
+      `OpenAI-compatible streaming failed with status ${res.status}${suffix}`,
+      this.id,
+      `HTTP_${res.status}`,
+      res.status,
+    );
+  }
+
   private normalizeCompletionError(error: unknown): Error {
     if (error instanceof LlmProviderError) {
       return error;
@@ -264,6 +359,38 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
       'OpenAI-compatible completion failed',
       this.id,
       'UPSTREAM_ERROR',
+    );
+  }
+
+  private normalizeStreamingError(error: unknown): Error {
+    if (error instanceof LlmStreamingError) {
+      return error;
+    }
+
+    if (error instanceof LlmProviderError) {
+      return new LlmStreamingError(error.message, this.id, error.code, error.statusCode);
+    }
+
+    if (isAbortError(error)) {
+      return new LlmStreamingError(
+        'OpenAI-compatible stream timed out or was aborted',
+        this.id,
+        'REQUEST_TIMEOUT',
+      );
+    }
+
+    if (error instanceof Error) {
+      return new LlmStreamingError(
+        `OpenAI-compatible stream failed: ${error.message}`,
+        this.id,
+        'UPSTREAM_STREAM_ERROR',
+      );
+    }
+
+    return new LlmStreamingError(
+      'OpenAI-compatible stream failed',
+      this.id,
+      'UPSTREAM_STREAM_ERROR',
     );
   }
 
@@ -295,5 +422,98 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
       this.id,
       'MALFORMED_RESPONSE',
     );
+  }
+
+  private createMalformedStreamChunkError(): LlmStreamingError {
+    return new LlmStreamingError(
+      'OpenAI-compatible stream chunk was malformed',
+      this.id,
+      'MALFORMED_STREAM_CHUNK',
+    );
+  }
+
+  private async *readStreamChunks(reader: NodeJS.ReadableStream): AsyncIterable<LlmStreamChunk> {
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    for await (const rawChunk of reader) {
+      buffer += typeof rawChunk === 'string'
+        ? rawChunk
+        : decoder.decode(rawChunk, { stream: true });
+      buffer = buffer.replace(/\r\n/g, '\n');
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop() ?? '';
+
+      for (const frame of frames) {
+        const chunk = this.parseStreamFrame(frame);
+        if (chunk === 'done') {
+          return;
+        }
+        if (chunk) {
+          yield chunk;
+        }
+      }
+    }
+
+    if (buffer.trim()) {
+      const chunk = this.parseStreamFrame(buffer);
+      if (chunk !== 'done' && chunk) {
+        yield chunk;
+      }
+    }
+  }
+
+  private parseStreamFrame(frame: string): LlmStreamChunk | 'done' | undefined {
+    const dataLines = frame
+      .split('\n')
+      .map((line) => line.trimEnd())
+      .filter((line) => line.trim() && !line.trimStart().startsWith(':'))
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice('data:'.length).trimStart());
+
+    if (dataLines.length === 0) {
+      return undefined;
+    }
+
+    const data = dataLines.join('\n');
+    if (data.trim() === '[DONE]') {
+      return 'done';
+    }
+
+    let parsed: OpenAiCompatibleStreamResponse;
+    try {
+      parsed = JSON.parse(data) as OpenAiCompatibleStreamResponse;
+    } catch {
+      throw this.createMalformedStreamChunkError();
+    }
+
+    return this.normalizeStreamResponse(parsed);
+  }
+
+  private normalizeStreamResponse(raw: OpenAiCompatibleStreamResponse): LlmStreamChunk | undefined {
+    const usage = normalizeUsage(raw.usage);
+    const choice = raw.choices?.[0];
+
+    if (!choice) {
+      if (usage) {
+        return { usage };
+      }
+      throw this.createMalformedStreamChunkError();
+    }
+
+    const content = choice.delta?.content;
+    const reasoning = extractDeltaReasoning(choice.delta);
+
+    if (content !== undefined && content !== null && typeof content !== 'string') {
+      throw this.createMalformedStreamChunkError();
+    }
+
+    return {
+      content: content ?? undefined,
+      reasoning,
+      done: Boolean(choice.finish_reason),
+      finishReason: choice.finish_reason ?? undefined,
+      usage,
+    };
   }
 }

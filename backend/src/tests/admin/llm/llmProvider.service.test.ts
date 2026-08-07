@@ -36,7 +36,7 @@ const OLLAMA_CAPABILITIES = {
 
 const OPENAI_COMPATIBLE_CAPABILITIES = {
   completion: true,
-  streaming: false,
+  streaming: true,
   reasoning: true,
   modelListing: false,
   modelPulling: false,

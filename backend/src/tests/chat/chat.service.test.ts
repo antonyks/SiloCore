@@ -914,6 +914,81 @@ describe('ChatService', () => {
       expect(JSON.stringify(loggedPayloads())).not.toContain('Think first.');
     });
 
+    it('should stream through an OpenAI-compatible provider and persist metadata', async () => {
+      async function* openAiCompatibleChunks() {
+        yield { reasoning: 'Cloud reasoning. ' };
+        yield { content: 'Cloud' };
+        yield { content: ' answer', usage: { promptTokens: 2, completionTokens: 3, totalTokens: 5 } };
+        yield { done: true, finishReason: 'stop' };
+      }
+      const userMessage: SelectedChatMessage = {
+        id: 1,
+        content: 'Hello',
+        author: 'USER',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      };
+      const assistantMessage: SelectedChatMessage = {
+        id: 2,
+        content: 'Cloud answer',
+        author: 'ASSISTANT',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      };
+
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider({
+        id: 3,
+        name: 'OpenAI Compatible',
+        type: 'OPENAI_COMPATIBLE',
+        baseUrl: 'https://api.example.com/v1',
+        apiKey: 'secret-key',
+      }));
+      mockPrisma.chatMessage.create
+        .mockResolvedValueOnce(userMessage)
+        .mockResolvedValueOnce(assistantMessage);
+      jest.spyOn(OpenAiCompatibleProvider.prototype, 'streamComplete').mockReturnValue(openAiCompatibleChunks());
+
+      const events = [];
+      for await (const event of ChatService.streamAssistantResponse({
+        sessionId: 1,
+        content: 'Hello',
+        providerId: 3,
+        requestId: 'req-openai-stream',
+      }, createWorkspaceContextFor(25))) {
+        events.push(event);
+      }
+
+      expect(events).toEqual([
+        { event: 'user_message', data: userMessage },
+        { event: 'delta', data: { reasoning: 'Cloud reasoning. ' } },
+        { event: 'delta', data: { content: 'Cloud' } },
+        { event: 'delta', data: { content: ' answer' } },
+        { event: 'assistant_message', data: assistantMessage },
+        { event: 'done', data: { done: true } },
+      ]);
+      expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, {
+        data: expect.objectContaining({
+          content: 'Cloud answer',
+          author: 'ASSISTANT',
+          metadata: expect.objectContaining({
+            providerId: '3',
+            providerName: 'OpenAI Compatible',
+            providerType: 'openai-compatible',
+            reasoning: 'Cloud reasoning. ',
+            finishReason: 'stop',
+            usage: { promptTokens: 2, completionTokens: 3, totalTokens: 5 },
+          }),
+        }),
+        select: SelectedChatMessageFields,
+      });
+      expect(JSON.stringify(loggedPayloads())).not.toContain('secret-key');
+      expect(JSON.stringify(loggedPayloads())).not.toContain('Cloud answer');
+      expect(JSON.stringify(loggedPayloads())).not.toContain('Cloud reasoning');
+    });
+
     it('should persist partial assistant output when streaming fails after deltas', async () => {
       async function* failingChunks() {
         yield { content: 'Partial answer ' };
@@ -990,6 +1065,80 @@ describe('ChatService', () => {
       }), 'chat.stream.error');
       expect(JSON.stringify(loggedPayloads())).not.toContain('Partial answer');
       expect(JSON.stringify(loggedPayloads())).not.toContain('Partial reasoning');
+    });
+
+    it('should persist OpenAI-compatible partial assistant output when upstream streaming fails', async () => {
+      async function* failingOpenAiCompatibleChunks() {
+        yield { content: 'Cloud partial ' };
+        yield { reasoning: 'Cloud partial reasoning.' };
+        throw new Error('provider stream failed');
+      }
+      const userMessage: SelectedChatMessage = {
+        id: 1,
+        content: 'Hello',
+        author: 'USER',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      };
+      const assistantMessage: SelectedChatMessage = {
+        id: 2,
+        content: 'Cloud partial ',
+        author: 'ASSISTANT',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      };
+
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider({
+        id: 3,
+        name: 'OpenAI Compatible',
+        type: 'OPENAI_COMPATIBLE',
+      }));
+      mockPrisma.chatMessage.create
+        .mockResolvedValueOnce(userMessage)
+        .mockResolvedValueOnce(assistantMessage);
+      jest.spyOn(OpenAiCompatibleProvider.prototype, 'streamComplete').mockReturnValue(failingOpenAiCompatibleChunks());
+
+      const events = [];
+      let caughtError: unknown;
+      try {
+        for await (const event of ChatService.streamAssistantResponse({
+          sessionId: 1,
+          content: 'Hello',
+          providerId: 3,
+          requestId: 'req-openai-stream-error',
+        }, createWorkspaceContextFor(25))) {
+          events.push(event);
+        }
+      } catch (error) {
+        caughtError = error;
+      }
+
+      expect(caughtError).toEqual(new Error('provider stream failed'));
+      expect(events).toEqual([
+        { event: 'user_message', data: userMessage },
+        { event: 'delta', data: { content: 'Cloud partial ' } },
+        { event: 'delta', data: { reasoning: 'Cloud partial reasoning.' } },
+        { event: 'assistant_message', data: assistantMessage },
+      ]);
+      expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, {
+        data: expect.objectContaining({
+          content: 'Cloud partial ',
+          author: 'ASSISTANT',
+          metadata: expect.objectContaining({
+            providerId: '3',
+            providerType: 'openai-compatible',
+            reasoning: 'Cloud partial reasoning.',
+            finishReason: 'error',
+            incomplete: true,
+            errorMessage: 'provider stream failed',
+          }),
+        }),
+        select: SelectedChatMessageFields,
+      });
+      expect(JSON.stringify(loggedPayloads())).not.toContain('Cloud partial');
     });
 
     it('should mark reasoning-only length finishes as incomplete', async () => {
@@ -1108,6 +1257,75 @@ describe('ChatService', () => {
         latencyMs: expect.any(Number),
       }), 'chat.stream.aborted');
       expect(JSON.stringify(loggedPayloads())).not.toContain('Partial answer');
+    });
+
+    it('should persist OpenAI-compatible partial assistant output when the client aborts', async () => {
+      async function* abortableOpenAiCompatibleChunks() {
+        yield { content: 'Cloud partial' };
+        yield { content: 'This chunk should not be consumed' };
+      }
+      const userMessage: SelectedChatMessage = {
+        id: 1,
+        content: 'Hello',
+        author: 'USER',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      };
+      const assistantMessage: SelectedChatMessage = {
+        id: 2,
+        content: 'Cloud partial',
+        author: 'ASSISTANT',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      };
+
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider({
+        id: 3,
+        name: 'OpenAI Compatible',
+        type: 'OPENAI_COMPATIBLE',
+      }));
+      mockPrisma.chatMessage.create
+        .mockResolvedValueOnce(userMessage)
+        .mockResolvedValueOnce(assistantMessage);
+      jest.spyOn(OpenAiCompatibleProvider.prototype, 'streamComplete').mockReturnValue(abortableOpenAiCompatibleChunks());
+
+      const stream = ChatService.streamAssistantResponse({
+        sessionId: 1,
+        content: 'Hello',
+        providerId: 3,
+        requestId: 'req-openai-stream-abort',
+      }, createWorkspaceContextFor(25))[Symbol.asyncIterator]();
+
+      await expect(stream.next()).resolves.toEqual({ done: false, value: { event: 'user_message', data: userMessage } });
+      await expect(stream.next()).resolves.toEqual({ done: false, value: { event: 'delta', data: { content: 'Cloud partial' } } });
+      await stream.return?.();
+
+      expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, {
+        data: expect.objectContaining({
+          content: 'Cloud partial',
+          author: 'ASSISTANT',
+          metadata: expect.objectContaining({
+            providerId: '3',
+            providerType: 'openai-compatible',
+            finishReason: 'aborted',
+            incomplete: true,
+          }),
+        }),
+        select: SelectedChatMessageFields,
+      });
+      expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: 'req-openai-stream-abort',
+        providerId: '3',
+        providerType: 'openai-compatible',
+        model: TEST_MODEL_ID,
+        operation: 'chat.stream',
+        status: 'aborted',
+        latencyMs: expect.any(Number),
+      }), 'chat.stream.aborted');
+      expect(JSON.stringify(loggedPayloads())).not.toContain('Cloud partial');
     });
   });
 
