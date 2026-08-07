@@ -10,6 +10,22 @@ jest.mock('node-fetch', () => jest.fn());
 
 const TEST_MODEL_ID = process.env.OLLAMA_MODEL as string;
 
+function createListedModel(modelName: string) {
+  return {
+    modelId: modelName,
+    modelName,
+    capabilities: {
+      completion: 'UNKNOWN' as const,
+      streaming: 'UNKNOWN' as const,
+      reasoning: 'UNKNOWN' as const,
+      embeddings: 'UNKNOWN' as const,
+      toolCalling: 'UNKNOWN' as const,
+      structuredOutput: 'UNKNOWN' as const,
+      tokenCounting: 'UNKNOWN' as const,
+    },
+  };
+}
+
 function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): SelectedLlmProviderConfig {
   return {
     id: 1,
@@ -36,7 +52,7 @@ describe('LlmController', () => {
 
   it('returns common model listing without provider secrets or config-only fields', async () => {
     jest.spyOn(OllamaProvider.prototype, 'listModels')
-      .mockResolvedValue([TEST_MODEL_ID]);
+      .mockResolvedValue([createListedModel(TEST_MODEL_ID)]);
     const provider = createProvider();
     mockPrisma.llmProviderConfig.count.mockResolvedValue(1);
     mockPrisma.llmProviderConfig.findMany.mockResolvedValue([provider]);
@@ -72,7 +88,7 @@ describe('LlmController', () => {
 
   it('returns provider-specific model listing without provider secrets or config-only fields', async () => {
     jest.spyOn(OllamaProvider.prototype, 'listModels')
-      .mockResolvedValue([TEST_MODEL_ID]);
+      .mockResolvedValue([createListedModel(TEST_MODEL_ID)]);
     const provider = createProvider();
     mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(provider);
     const res = createMockResponse();

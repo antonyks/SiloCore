@@ -18,6 +18,22 @@ jest.mock('node-fetch', () => jest.fn());
 
 const TEST_MODEL_ID = process.env.OLLAMA_MODEL as string;
 
+function createListedModel(modelName: string) {
+  return {
+    modelId: modelName,
+    modelName,
+    capabilities: {
+      completion: 'UNKNOWN' as const,
+      streaming: 'UNKNOWN' as const,
+      reasoning: 'UNKNOWN' as const,
+      embeddings: 'UNKNOWN' as const,
+      toolCalling: 'UNKNOWN' as const,
+      structuredOutput: 'UNKNOWN' as const,
+      tokenCounting: 'UNKNOWN' as const,
+    },
+  };
+}
+
 function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): SelectedLlmProviderConfig {
   return {
     id: 1,
@@ -70,7 +86,7 @@ describe('LLM route authorization boundary', () => {
 
   it('allows authenticated USER requests to common model listing', async () => {
     jest.spyOn(OllamaProvider.prototype, 'listModels')
-      .mockResolvedValue([TEST_MODEL_ID]);
+      .mockResolvedValue([createListedModel(TEST_MODEL_ID)]);
     (jwt.verify as jest.Mock).mockReturnValue({
       id: 1,
       email: 'user@example.com',
@@ -101,7 +117,7 @@ describe('LLM route authorization boundary', () => {
 
   it('allows authenticated USER requests to provider-specific model listing', async () => {
     jest.spyOn(OllamaProvider.prototype, 'listModels')
-      .mockResolvedValue([TEST_MODEL_ID]);
+      .mockResolvedValue([createListedModel(TEST_MODEL_ID)]);
     (jwt.verify as jest.Mock).mockReturnValue({
       id: 1,
       email: 'user@example.com',

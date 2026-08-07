@@ -6,14 +6,20 @@ import {
   LlmCompletionResponse,
   LlmProviderCapabilities,
   LlmProviderConfig,
+  LlmProviderListedModel,
   LlmStreamChunk,
 } from '../../modules/llm/llm.types';
 
 const DEFAULT_CAPABILITIES: LlmProviderCapabilities = {
-  supportsStreaming: true,
-  supportsSystemMessages: true,
-  supportsToolCalls: false,
-  supportsVision: false,
+  completion: true,
+  streaming: true,
+  reasoning: false,
+  modelListing: true,
+  modelPulling: false,
+  embeddings: false,
+  toolCalling: false,
+  structuredOutput: false,
+  tokenCounting: false,
 };
 const TEST_MODEL_ID = process.env.OLLAMA_MODEL as string;
 const SECOND_TEST_MODEL_ID = `${TEST_MODEL_ID}-secondary`;
@@ -22,7 +28,7 @@ const DISABLED_TEST_MODEL_ID = `${TEST_MODEL_ID}-disabled`;
 
 function createProvider(
   config: Partial<LlmProviderConfig> & Pick<LlmProviderConfig, 'id' | 'name' | 'type'>,
-  listModels: jest.Mock<() => Promise<string[]>>,
+  listModels: jest.Mock<() => Promise<LlmProviderListedModel[]>>,
 ): ILlmProvider {
   const fullConfig: LlmProviderConfig = {
     enabled: true,
@@ -45,10 +51,31 @@ function createProvider(
   };
 }
 
+function createListedModel(modelName: string): LlmProviderListedModel {
+  return {
+    modelId: modelName,
+    modelName,
+    capabilities: {
+      completion: 'UNKNOWN',
+      streaming: 'UNKNOWN',
+      reasoning: 'UNKNOWN',
+      embeddings: 'UNKNOWN',
+      toolCalling: 'UNKNOWN',
+      structuredOutput: 'UNKNOWN',
+      tokenCounting: 'UNKNOWN',
+    },
+  };
+}
+
 describe('LlmRegistryService', () => {
   it('aggregates provider-qualified models from multiple enabled providers', async () => {
-    const ollamaListModels = jest.fn<() => Promise<string[]>>().mockResolvedValue([TEST_MODEL_ID, SECOND_TEST_MODEL_ID]);
-    const cloudListModels = jest.fn<() => Promise<string[]>>().mockResolvedValue([CLOUD_TEST_MODEL_ID]);
+    const ollamaListModels = jest.fn<() => Promise<LlmProviderListedModel[]>>().mockResolvedValue([
+      createListedModel(TEST_MODEL_ID),
+      createListedModel(SECOND_TEST_MODEL_ID),
+    ]);
+    const cloudListModels = jest.fn<() => Promise<LlmProviderListedModel[]>>().mockResolvedValue([
+      createListedModel(CLOUD_TEST_MODEL_ID),
+    ]);
     const service = new LlmRegistryService([
       createProvider({ id: 'ollama', name: 'Local Ollama', type: 'ollama' }, ollamaListModels),
       createProvider({ id: 'cloud', name: 'Cloud Provider', type: 'openai-compatible' }, cloudListModels),
@@ -100,7 +127,9 @@ describe('LlmRegistryService', () => {
   });
 
   it('skips disabled providers without calling listModels', async () => {
-    const disabledListModels = jest.fn<() => Promise<string[]>>().mockResolvedValue([DISABLED_TEST_MODEL_ID]);
+    const disabledListModels = jest.fn<() => Promise<LlmProviderListedModel[]>>().mockResolvedValue([
+      createListedModel(DISABLED_TEST_MODEL_ID),
+    ]);
     const service = new LlmRegistryService([
       createProvider(
         { id: 'disabled', name: 'Disabled Provider', type: 'ollama', enabled: false },
@@ -127,8 +156,10 @@ describe('LlmRegistryService', () => {
   });
 
   it('returns partial model results when one provider fails', async () => {
-    const successfulListModels = jest.fn<() => Promise<string[]>>().mockResolvedValue([TEST_MODEL_ID]);
-    const failingListModels = jest.fn<() => Promise<string[]>>().mockRejectedValue(new Error('provider offline'));
+    const successfulListModels = jest.fn<() => Promise<LlmProviderListedModel[]>>().mockResolvedValue([
+      createListedModel(TEST_MODEL_ID),
+    ]);
+    const failingListModels = jest.fn<() => Promise<LlmProviderListedModel[]>>().mockRejectedValue(new Error('provider offline'));
     const service = new LlmRegistryService([
       createProvider({ id: 'ollama', name: 'Local Ollama', type: 'ollama' }, successfulListModels),
       createProvider({ id: 'broken', name: 'Broken Provider', type: 'openai-compatible' }, failingListModels),
@@ -167,7 +198,7 @@ describe('LlmRegistryService', () => {
   });
 
   it('returns an empty model list when no enabled provider succeeds', async () => {
-    const failingListModels = jest.fn<() => Promise<string[]>>().mockRejectedValue('offline');
+    const failingListModels = jest.fn<() => Promise<LlmProviderListedModel[]>>().mockRejectedValue('offline');
     const service = new LlmRegistryService([
       createProvider({ id: 'broken', name: 'Broken Provider', type: 'ollama' }, failingListModels),
     ]);

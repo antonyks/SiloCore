@@ -154,14 +154,37 @@ export type LlmProviderType = (typeof SUPPORTED_LLM_PROVIDER_TYPES)[number];
 export type LlmProviderConfigTypeValue = 'OLLAMA' | 'OPENAI_COMPATIBLE';
 
 // ---------------------------------------------------------------------------
-// Provider Capability Flags
+// Provider and Model Capabilities
 // ---------------------------------------------------------------------------
 
 export interface LlmProviderCapabilities {
-  supportsStreaming: boolean;
-  supportsSystemMessages: boolean;
-  supportsToolCalls: boolean;   // Reserved for future expansion
-  supportsVision: boolean;      // Reserved for future expansion
+  completion: boolean;
+  streaming: boolean;
+  reasoning: boolean;
+  modelListing: boolean;
+  modelPulling: boolean;
+  embeddings: boolean;
+  toolCalling: boolean;
+  structuredOutput: boolean;
+  tokenCounting: boolean;
+}
+
+export type LlmModelCapabilityStatus = 'SUPPORTED' | 'UNSUPPORTED' | 'UNKNOWN';
+
+export interface LlmModelCapabilities {
+  completion: LlmModelCapabilityStatus;
+  streaming: LlmModelCapabilityStatus;
+  reasoning: LlmModelCapabilityStatus;
+  embeddings: LlmModelCapabilityStatus;
+  toolCalling: LlmModelCapabilityStatus;
+  structuredOutput: LlmModelCapabilityStatus;
+  tokenCounting: LlmModelCapabilityStatus;
+}
+
+export interface LlmProviderListedModel {
+  modelId: string;
+  modelName: string;
+  capabilities: LlmModelCapabilities;
 }
 
 // ---------------------------------------------------------------------------

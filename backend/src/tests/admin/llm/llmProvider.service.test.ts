@@ -22,6 +22,22 @@ const mockedLogger = logger as unknown as {
   error: jest.Mock;
 };
 
+function createListedModel(modelName: string) {
+  return {
+    modelId: modelName,
+    modelName,
+    capabilities: {
+      completion: 'UNKNOWN' as const,
+      streaming: 'UNKNOWN' as const,
+      reasoning: 'UNKNOWN' as const,
+      embeddings: 'UNKNOWN' as const,
+      toolCalling: 'UNKNOWN' as const,
+      structuredOutput: 'UNKNOWN' as const,
+      tokenCounting: 'UNKNOWN' as const,
+    },
+  };
+}
+
 function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): SelectedLlmProviderConfig {
   return {
     id: 1,
@@ -171,7 +187,10 @@ describe('LlmProviderService', () => {
 
     it('lists models for Ollama providers without leaking secrets', async () => {
       const listModels = jest.spyOn(OllamaProvider.prototype, 'listModels')
-        .mockResolvedValue([TEST_MODEL_ID, SECOND_TEST_MODEL_ID]);
+        .mockResolvedValue([
+          createListedModel(TEST_MODEL_ID),
+          createListedModel(SECOND_TEST_MODEL_ID),
+        ]);
       const provider = createProvider();
 
       mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(provider);

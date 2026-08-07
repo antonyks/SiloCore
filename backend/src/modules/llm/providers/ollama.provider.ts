@@ -12,6 +12,9 @@ import {
     LlmMessage,
     TokenUsage,
     LlmStreamingError,
+    LlmModelCapabilities,
+    LlmProviderConfig,
+    LlmProviderListedModel,
 } from '../llm.types';
 import { getLlmErrorCode, logLlmEvent } from '../llm.logging';
 
@@ -44,7 +47,31 @@ function extractReasoning(message: OllamaGenerateResponse['message']): string | 
     return message?.thinking ?? message?.reasoning ?? message?.reasoning_content;
 }
 
+const UNKNOWN_MODEL_CAPABILITIES: LlmModelCapabilities = {
+    completion: 'UNKNOWN',
+    streaming: 'UNKNOWN',
+    reasoning: 'UNKNOWN',
+    embeddings: 'UNKNOWN',
+    toolCalling: 'UNKNOWN',
+    structuredOutput: 'UNKNOWN',
+    tokenCounting: 'UNKNOWN',
+};
+
 export class OllamaProvider extends AbstractLlmProvider {
+    constructor(config: LlmProviderConfig) {
+        super(config, {
+            completion: true,
+            streaming: true,
+            reasoning: true,
+            modelListing: true,
+            modelPulling: true,
+            embeddings: false,
+            toolCalling: false,
+            structuredOutput: false,
+            tokenCounting: false,
+        });
+    }
+
     async initialise(): Promise<void> {
         if (!this.isEnabled) return;
         const startedAt = Date.now();
@@ -302,7 +329,7 @@ export class OllamaProvider extends AbstractLlmProvider {
         }
     }
 
-    async listModels(): Promise<string[]> {
+    async listModels(): Promise<LlmProviderListedModel[]> {
         const startedAt = Date.now();
         logLlmEvent({
             providerId: this.id,
@@ -319,7 +346,11 @@ export class OllamaProvider extends AbstractLlmProvider {
                 this.throwProviderError(`Failed to list Ollama models`, 'LIST_MODELS_FAILED', res.status);
             }
             const json = (await res.json()) as { models?: Array<{ name: string }> };
-            const models = json.models?.map((m) => m.name) ?? [];
+            const models = json.models?.map((m) => ({
+                modelId: m.name,
+                modelName: m.name,
+                capabilities: { ...UNKNOWN_MODEL_CAPABILITIES },
+            })) ?? [];
             logLlmEvent({
                 providerId: this.id,
                 providerType: this.config.type,

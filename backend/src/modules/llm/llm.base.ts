@@ -11,14 +11,20 @@ import {
   LlmProviderCapabilities,
   LlmProviderConfig,
   LlmProviderError,
+  LlmProviderListedModel,
 } from './llm.types';
 
 /** Default capabilities assumed if a child class doesn't override them. */
 const DEFAULT_CAPABILITIES: LlmProviderCapabilities = {
-  supportsStreaming: true,
-  supportsSystemMessages: true,
-  supportsToolCalls: false,
-  supportsVision: false,
+  completion: false,
+  streaming: false,
+  reasoning: false,
+  modelListing: false,
+  modelPulling: false,
+  embeddings: false,
+  toolCalling: false,
+  structuredOutput: false,
+  tokenCounting: false,
 };
 
 export abstract class AbstractLlmProvider implements ILlmProvider {
@@ -54,7 +60,7 @@ export abstract class AbstractLlmProvider implements ILlmProvider {
 
   abstract complete(request: LlmCompletionRequest): Promise<LlmCompletionResponse>;
   abstract streamComplete(request: LlmCompletionRequest): AsyncIterable<LlmStreamChunk>;
-  abstract listModels(): Promise<string[]>;
+  abstract listModels(): Promise<LlmProviderListedModel[]>;
 
   // ------------------------------------------------------------------------
   // Shared Helpers

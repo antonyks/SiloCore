@@ -49,11 +49,11 @@ export class LlmRegistryService {
     }
 
     try {
-      const modelNames = await provider.listModels();
-      const models = modelNames.map((modelName) => ({
+      const listedModels = await provider.listModels();
+      const models = listedModels.map((model) => ({
         ...baseModelResult,
-        modelId: modelName,
-        modelName,
+        modelId: model.modelId,
+        modelName: model.modelName,
       }));
 
       return {

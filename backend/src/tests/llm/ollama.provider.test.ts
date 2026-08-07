@@ -298,6 +298,51 @@ describe('OllamaProvider headers', () => {
   });
 });
 
+describe('OllamaProvider capabilities', () => {
+  beforeEach(() => {
+    mockedFetch.mockReset();
+    jest.clearAllMocks();
+  });
+
+  it('reports adapter capabilities for implemented Ollama operations', () => {
+    expect(createProvider().capabilities).toEqual({
+      completion: true,
+      streaming: true,
+      reasoning: true,
+      modelListing: true,
+      modelPulling: true,
+      embeddings: false,
+      toolCalling: false,
+      structuredOutput: false,
+      tokenCounting: false,
+    });
+  });
+
+  it('reports listed model capabilities as UNKNOWN when Ollama tags omit metadata', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        models: [{ name: TEST_MODEL_ID }],
+      }),
+    }));
+
+    await expect(createProvider().listModels()).resolves.toEqual([
+      {
+        modelId: TEST_MODEL_ID,
+        modelName: TEST_MODEL_ID,
+        capabilities: {
+          completion: 'UNKNOWN',
+          streaming: 'UNKNOWN',
+          reasoning: 'UNKNOWN',
+          embeddings: 'UNKNOWN',
+          toolCalling: 'UNKNOWN',
+          structuredOutput: 'UNKNOWN',
+          tokenCounting: 'UNKNOWN',
+        },
+      },
+    ]);
+  });
+});
+
 describe('OllamaProvider streaming errors', () => {
   beforeEach(() => {
     mockedFetch.mockReset();

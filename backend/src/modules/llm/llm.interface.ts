@@ -9,6 +9,7 @@ import {
   LlmStreamChunk,
   LlmProviderCapabilities,
   LlmProviderConfig,
+  LlmProviderListedModel,
 } from './llm.types';
 
 /**
@@ -64,7 +65,7 @@ export interface ILlmProvider {
    * List available models from the upstream service.
    * Returns an empty array if not supported.
    */
-  listModels(): Promise<string[]>;
+  listModels(): Promise<LlmProviderListedModel[]>;
 
   /**
    * Pull / ensure a model exists on the remote side.

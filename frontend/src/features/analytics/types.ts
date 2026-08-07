@@ -3,12 +3,35 @@ import type { UserRole } from "../../types/user";
 export type LlmProviderType = "ollama" | "openai-compatible";
 export type UserStatus = "ACTIVE" | "BANNED" | "DELETED";
 export type LlmProviderModelListStatus = "success" | "error" | "skipped";
+export type LlmModelCapabilityStatus = "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
 
 export interface GenerationDefaults {
   temperature?: number;
   topP?: number;
   maxTokens?: number;
   stopSequences?: string[];
+}
+
+export interface LlmProviderCapabilities {
+  completion: boolean;
+  streaming: boolean;
+  reasoning: boolean;
+  modelListing: boolean;
+  modelPulling: boolean;
+  embeddings: boolean;
+  toolCalling: boolean;
+  structuredOutput: boolean;
+  tokenCounting: boolean;
+}
+
+export interface LlmModelCapabilities {
+  completion: LlmModelCapabilityStatus;
+  streaming: LlmModelCapabilityStatus;
+  reasoning: LlmModelCapabilityStatus;
+  embeddings: LlmModelCapabilityStatus;
+  toolCalling: LlmModelCapabilityStatus;
+  structuredOutput: LlmModelCapabilityStatus;
+  tokenCounting: LlmModelCapabilityStatus;
 }
 
 export interface SanitizedLlmProviderConfig {
