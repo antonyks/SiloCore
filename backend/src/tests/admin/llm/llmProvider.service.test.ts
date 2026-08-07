@@ -1,3 +1,4 @@
+import fetch, { Response } from 'node-fetch';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import { logger } from '../../../config/logger';
 import { NotFoundError } from '../../../errors';
@@ -21,6 +22,7 @@ const mockedLogger = logger as unknown as {
   info: jest.Mock;
   error: jest.Mock;
 };
+const mockedFetch = fetch as jest.MockedFunction<typeof fetch>;
 
 const OLLAMA_CAPABILITIES = {
   completion: true,
@@ -38,7 +40,7 @@ const OPENAI_COMPATIBLE_CAPABILITIES = {
   completion: true,
   streaming: true,
   reasoning: true,
-  modelListing: false,
+  modelListing: true,
   modelPulling: false,
   embeddings: false,
   toolCalling: false,
@@ -60,6 +62,19 @@ function createListedModel(modelName: string) {
       tokenCounting: 'UNKNOWN' as const,
     },
   };
+}
+
+function mockResponse(response?: Partial<Response>): Response {
+  return {
+    ok: true,
+    status: 200,
+    json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+      object: 'list',
+      data: [],
+    }),
+    text: jest.fn<() => Promise<string>>().mockResolvedValue(''),
+    ...response,
+  } as unknown as Response;
 }
 
 function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): SelectedLlmProviderConfig {
@@ -85,6 +100,7 @@ describe('LlmProviderService', () => {
   afterEach(() => {
     jest.clearAllMocks();
     jest.restoreAllMocks();
+    mockedFetch.mockReset();
   });
 
   describe('listProviders', () => {
@@ -207,6 +223,7 @@ describe('LlmProviderService', () => {
 
   describe('provider operations', () => {
     it('tests openai-compatible providers without leaking secrets', async () => {
+      mockedFetch.mockResolvedValue(mockResponse());
       mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider({
         type: 'OPENAI_COMPATIBLE',
         name: 'OpenAI Compatible',
@@ -226,10 +243,47 @@ describe('LlmProviderService', () => {
         operation: 'provider.test',
         status: 'success',
       }), 'provider.test.success');
+      expect(mockedFetch).toHaveBeenCalledWith(
+        'http://localhost:11434/models',
+        expect.objectContaining({
+          headers: { Authorization: 'Bearer secret-key' },
+        }),
+      );
       expect(JSON.stringify([
         ...mockedLogger.info.mock.calls,
         ...mockedLogger.error.mock.calls,
       ])).not.toContain('secret-key');
+    });
+
+    it('returns normalized errors when openai-compatible provider health listing is unsupported', async () => {
+      mockedFetch.mockResolvedValue(mockResponse({
+        ok: false,
+        status: 404,
+        json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+          error: { message: 'missing endpoint' },
+        }),
+      }));
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider({
+        type: 'OPENAI_COMPATIBLE',
+        name: 'OpenAI Compatible',
+      }));
+
+      const result = await LlmProviderService.testProvider(1);
+
+      expect(result).toEqual({
+        providerId: '1',
+        providerName: 'OpenAI Compatible',
+        providerType: 'openai-compatible',
+        status: 'error',
+        errorMessage: 'OpenAI-compatible model listing is unsupported: missing endpoint',
+      });
+      expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+        providerId: '1',
+        providerType: 'openai-compatible',
+        operation: 'provider.test',
+        status: 'error',
+        errorCode: 'MODEL_LISTING_UNSUPPORTED',
+      }), 'provider.test.error');
     });
 
     it('lists models for Ollama providers without leaking secrets', async () => {
@@ -265,6 +319,86 @@ describe('LlmProviderService', () => {
           capabilities: OLLAMA_CAPABILITIES,
         }),
       ]);
+    });
+
+    it('lists models for OpenAI-compatible providers without leaking secrets', async () => {
+      mockedFetch.mockResolvedValue(mockResponse({
+        json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+          object: 'list',
+          data: [
+            { id: TEST_MODEL_ID },
+            { id: SECOND_TEST_MODEL_ID },
+          ],
+        }),
+      }));
+      const provider = createProvider({
+        type: 'OPENAI_COMPATIBLE',
+        name: 'OpenAI Compatible',
+      });
+
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(provider);
+
+      const result = await LlmRuntimeService.listProviderModels(provider.id);
+
+      expect(result.models).toEqual([
+        expect.objectContaining({
+          providerId: '1',
+          providerType: 'openai-compatible',
+          modelId: TEST_MODEL_ID,
+          capabilities: createListedModel(TEST_MODEL_ID).capabilities,
+        }),
+        expect.objectContaining({
+          providerId: '1',
+          providerType: 'openai-compatible',
+          modelId: SECOND_TEST_MODEL_ID,
+          capabilities: createListedModel(SECOND_TEST_MODEL_ID).capabilities,
+        }),
+      ]);
+      expect(result.providers).toEqual([
+        expect.objectContaining({
+          providerId: '1',
+          providerType: 'openai-compatible',
+          status: 'success',
+          modelCount: 2,
+          capabilities: OPENAI_COMPATIBLE_CAPABILITIES,
+        }),
+      ]);
+      expect(JSON.stringify([
+        ...mockedLogger.info.mock.calls,
+        ...mockedLogger.error.mock.calls,
+      ])).not.toContain('secret-key');
+    });
+
+    it('returns provider error status when OpenAI-compatible listing is unsupported', async () => {
+      mockedFetch.mockResolvedValue(mockResponse({
+        ok: false,
+        status: 405,
+        json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+          error: { message: 'method not allowed' },
+        }),
+      }));
+      const provider = createProvider({
+        type: 'OPENAI_COMPATIBLE',
+        name: 'OpenAI Compatible',
+      });
+
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(provider);
+
+      const result = await LlmRuntimeService.listProviderModels(provider.id);
+
+      expect(result).toEqual({
+        models: [],
+        providers: [
+          expect.objectContaining({
+            providerId: '1',
+            providerType: 'openai-compatible',
+            status: 'error',
+            modelCount: 0,
+            capabilities: OPENAI_COMPATIBLE_CAPABILITIES,
+            errorMessage: 'OpenAI-compatible model listing is unsupported: method not allowed',
+          }),
+        ],
+      });
     });
 
     it('delegates model pull to Ollama providers', async () => {

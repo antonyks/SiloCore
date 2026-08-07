@@ -10,6 +10,7 @@ import {
   LlmCompletionRequest,
   LlmCompletionResponse,
   LlmMessage,
+  LlmModelCapabilities,
   LlmProviderConfig,
   LlmProviderError,
   LlmProviderListedModel,
@@ -59,6 +60,12 @@ interface OpenAiCompatibleStreamResponse {
   usage?: OpenAiCompatibleChatResponse['usage'];
 }
 
+interface OpenAiCompatibleModelListResponse {
+  data?: Array<{
+    id?: unknown;
+  }>;
+}
+
 type OpenAiCompatibleMessage = NonNullable<
   NonNullable<OpenAiCompatibleChatResponse['choices']>[number]['message']
 >;
@@ -71,9 +78,23 @@ function buildChatCompletionsUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
 }
 
+function buildModelsUrl(baseUrl: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}/models`;
+}
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
+
+const UNKNOWN_MODEL_CAPABILITIES: LlmModelCapabilities = {
+  completion: 'UNKNOWN',
+  streaming: 'UNKNOWN',
+  reasoning: 'UNKNOWN',
+  embeddings: 'UNKNOWN',
+  toolCalling: 'UNKNOWN',
+  structuredOutput: 'UNKNOWN',
+  tokenCounting: 'UNKNOWN',
+};
 
 function normalizeUsage(usage: OpenAiCompatibleChatResponse['usage']): TokenUsage | undefined {
   if (
@@ -127,13 +148,48 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
       completion: true,
       streaming: true,
       reasoning: true,
-      modelListing: false,
+      modelListing: true,
       modelPulling: false,
       embeddings: false,
       toolCalling: false,
       structuredOutput: false,
       tokenCounting: false,
     });
+  }
+
+  async initialise(): Promise<void> {
+    if (!this.isEnabled) return;
+    const startedAt = Date.now();
+
+    logLlmEvent({
+      providerId: this.id,
+      providerType: this.config.type,
+      operation: 'provider.initialise',
+      status: 'started',
+    });
+
+    try {
+      const raw = await this.fetchModelList(this.config.timeoutMs ?? 5000);
+      this.normalizeModelListResponse(raw);
+      logLlmEvent({
+        providerId: this.id,
+        providerType: this.config.type,
+        operation: 'provider.initialise',
+        latencyMs: Date.now() - startedAt,
+        status: 'success',
+      });
+    } catch (error) {
+      const normalizedError = this.normalizeModelListError(error);
+      logLlmEvent({
+        providerId: this.id,
+        providerType: this.config.type,
+        operation: 'provider.initialise',
+        latencyMs: Date.now() - startedAt,
+        status: 'error',
+        errorCode: getLlmErrorCode(normalizedError),
+      });
+      throw normalizedError;
+    }
   }
 
   async complete(request: LlmCompletionRequest): Promise<LlmCompletionResponse> {
@@ -285,11 +341,40 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
   }
 
   async listModels(): Promise<LlmProviderListedModel[]> {
-    throw new LlmProviderError(
-      'OpenAI-compatible model listing is not implemented',
-      this.id,
-      'MODEL_LISTING_UNSUPPORTED',
-    );
+    const startedAt = Date.now();
+
+    logLlmEvent({
+      providerId: this.id,
+      providerType: this.config.type,
+      operation: 'provider.listModels',
+      status: 'started',
+    });
+
+    try {
+      const raw = await this.fetchModelList();
+      const models = this.normalizeModelListResponse(raw);
+
+      logLlmEvent({
+        providerId: this.id,
+        providerType: this.config.type,
+        operation: 'provider.listModels',
+        latencyMs: Date.now() - startedAt,
+        status: 'success',
+      });
+
+      return models;
+    } catch (error) {
+      const normalizedError = this.normalizeModelListError(error);
+      logLlmEvent({
+        providerId: this.id,
+        providerType: this.config.type,
+        operation: 'provider.listModels',
+        latencyMs: Date.now() - startedAt,
+        status: 'error',
+        errorCode: getLlmErrorCode(normalizedError),
+      });
+      throw normalizedError;
+    }
   }
 
   private async throwHttpError(res: Response): Promise<never> {
@@ -316,6 +401,45 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
 
     throw new LlmProviderError(
       `OpenAI-compatible completion failed with status ${res.status}${suffix}`,
+      this.id,
+      `HTTP_${res.status}`,
+      res.status,
+    );
+  }
+
+  private async throwModelListHttpError(res: Response): Promise<never> {
+    const detail = await readProviderErrorMessage(res);
+    const suffix = detail ? `: ${detail}` : '';
+
+    if (res.status === 401 || res.status === 403) {
+      throw new LlmAuthenticationError(
+        `OpenAI-compatible authentication failed${suffix}`,
+        this.id,
+        'AUTHENTICATION_ERROR',
+        res.status,
+      );
+    }
+
+    if (res.status === 429) {
+      throw new LlmRateLimitError(
+        `OpenAI-compatible rate limit exceeded${suffix}`,
+        this.id,
+        'RATE_LIMITED',
+        res.status,
+      );
+    }
+
+    if (res.status === 404 || res.status === 405) {
+      throw new LlmProviderError(
+        `OpenAI-compatible model listing is unsupported${suffix}`,
+        this.id,
+        'MODEL_LISTING_UNSUPPORTED',
+        res.status,
+      );
+    }
+
+    throw new LlmProviderError(
+      `OpenAI-compatible model listing failed with status ${res.status}${suffix}`,
       this.id,
       `HTTP_${res.status}`,
       res.status,
@@ -394,6 +518,34 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
     );
   }
 
+  private normalizeModelListError(error: unknown): Error {
+    if (error instanceof LlmProviderError) {
+      return error;
+    }
+
+    if (isAbortError(error)) {
+      return new LlmProviderError(
+        'OpenAI-compatible model listing timed out or was aborted',
+        this.id,
+        'REQUEST_TIMEOUT',
+      );
+    }
+
+    if (error instanceof Error) {
+      return new LlmProviderError(
+        `OpenAI-compatible model listing failed: ${error.message}`,
+        this.id,
+        'LIST_MODELS_FAILED',
+      );
+    }
+
+    return new LlmProviderError(
+      'OpenAI-compatible model listing failed',
+      this.id,
+      'LIST_MODELS_FAILED',
+    );
+  }
+
   private normalizeCompletionResponse(
     raw: OpenAiCompatibleChatResponse,
     fallbackModel: string,
@@ -430,6 +582,45 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
       this.id,
       'MALFORMED_STREAM_CHUNK',
     );
+  }
+
+  private createMalformedModelListError(): LlmProviderError {
+    return new LlmProviderError(
+      'OpenAI-compatible model list response was malformed',
+      this.id,
+      'MALFORMED_MODEL_LIST',
+    );
+  }
+
+  private async fetchModelList(timeoutMs?: number): Promise<OpenAiCompatibleModelListResponse> {
+    const res = await fetch(buildModelsUrl(this.config.baseUrl), {
+      headers: this.buildRequestHeaders(),
+      signal: this.buildAbortSignal(timeoutMs),
+    });
+
+    if (!res.ok) {
+      await this.throwModelListHttpError(res);
+    }
+
+    try {
+      return (await res.json()) as OpenAiCompatibleModelListResponse;
+    } catch {
+      throw this.createMalformedModelListError();
+    }
+  }
+
+  private normalizeModelListResponse(raw: OpenAiCompatibleModelListResponse): LlmProviderListedModel[] {
+    if (!Array.isArray(raw.data)) {
+      throw this.createMalformedModelListError();
+    }
+
+    return raw.data
+      .filter((model): model is { id: string } => typeof model.id === 'string' && model.id.trim().length > 0)
+      .map((model) => ({
+        modelId: model.id,
+        modelName: model.id,
+        capabilities: { ...UNKNOWN_MODEL_CAPABILITIES },
+      }));
   }
 
   private async *readStreamChunks(reader: NodeJS.ReadableStream): AsyncIterable<LlmStreamChunk> {

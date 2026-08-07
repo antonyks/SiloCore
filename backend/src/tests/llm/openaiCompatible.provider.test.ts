@@ -101,7 +101,7 @@ describe('OpenAiCompatibleProvider completion', () => {
       completion: true,
       streaming: true,
       reasoning: true,
-      modelListing: false,
+      modelListing: true,
       modelPulling: false,
       embeddings: false,
       toolCalling: false,
@@ -481,12 +481,244 @@ describe('OpenAiCompatibleProvider completion', () => {
     });
   });
 
-  it('throws unsupported errors for model listing', async () => {
-    const provider = createProvider();
+  it('lists models from the standard OpenAI-compatible endpoint', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        object: 'list',
+        data: [
+          { id: 'gpt-compatible-1', object: 'model' },
+          { id: 'gpt-compatible-2', object: 'model' },
+          { id: 42, object: 'model' },
+        ],
+      }),
+    }));
 
-    await expect(provider.listModels()).rejects.toMatchObject({
+    const result = await createProvider({
+      apiKey: 'secret-token',
+      extraHeaders: {
+        Authorization: 'Bearer wrong-token',
+        'X-Provider': 'openai-compatible',
+      },
+    }).listModels();
+
+    expect(mockedFetch).toHaveBeenCalledWith(
+      'https://api.example.com/v1/models',
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer secret-token',
+          'X-Provider': 'openai-compatible',
+        },
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(result).toEqual([
+      {
+        modelId: 'gpt-compatible-1',
+        modelName: 'gpt-compatible-1',
+        capabilities: {
+          completion: 'UNKNOWN',
+          streaming: 'UNKNOWN',
+          reasoning: 'UNKNOWN',
+          embeddings: 'UNKNOWN',
+          toolCalling: 'UNKNOWN',
+          structuredOutput: 'UNKNOWN',
+          tokenCounting: 'UNKNOWN',
+        },
+      },
+      {
+        modelId: 'gpt-compatible-2',
+        modelName: 'gpt-compatible-2',
+        capabilities: {
+          completion: 'UNKNOWN',
+          streaming: 'UNKNOWN',
+          reasoning: 'UNKNOWN',
+          embeddings: 'UNKNOWN',
+          toolCalling: 'UNKNOWN',
+          structuredOutput: 'UNKNOWN',
+          tokenCounting: 'UNKNOWN',
+        },
+      },
+    ]);
+    expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'cloud-openai-compatible',
+      providerType: 'openai-compatible',
+      operation: 'provider.listModels',
+      status: 'success',
+      latencyMs: expect.any(Number),
+    }), 'provider.listModels.success');
+    expect(loggedText()).not.toContain('secret-token');
+  });
+
+  it.each([404, 405])('maps %s model-list endpoints to unsupported listing errors', async (status) => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      ok: false,
+      status,
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        error: { message: 'not found' },
+      }),
+    }));
+
+    await expect(createProvider().listModels()).rejects.toMatchObject({
       providerId: 'cloud-openai-compatible',
       code: 'MODEL_LISTING_UNSUPPORTED',
+      statusCode: status,
+      message: 'OpenAI-compatible model listing is unsupported: not found',
+    });
+  });
+
+  it('maps malformed model-list payloads to provider errors', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({ object: 'list' }),
+    }));
+
+    await expect(createProvider().listModels()).rejects.toMatchObject({
+      providerId: 'cloud-openai-compatible',
+      code: 'MALFORMED_MODEL_LIST',
+      message: 'OpenAI-compatible model list response was malformed',
+    });
+  });
+
+  it('maps invalid JSON model-list payloads to provider errors', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      json: jest.fn<() => Promise<unknown>>().mockRejectedValue(new SyntaxError('Unexpected token')),
+    }));
+
+    await expect(createProvider().listModels()).rejects.toMatchObject({
+      providerId: 'cloud-openai-compatible',
+      code: 'MALFORMED_MODEL_LIST',
+      message: 'OpenAI-compatible model list response was malformed',
+    });
+  });
+
+  it.each([
+    [401, LlmAuthenticationError, 'AUTHENTICATION_ERROR'],
+    [403, LlmAuthenticationError, 'AUTHENTICATION_ERROR'],
+  ])('maps %s model-list responses to authentication errors', async (status, errorType, code) => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      ok: false,
+      status,
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        error: { message: 'invalid api key' },
+      }),
+    }));
+
+    await expect(createProvider().listModels()).rejects.toBeInstanceOf(errorType);
+    await expect(createProvider().listModels()).rejects.toMatchObject({
+      providerId: 'cloud-openai-compatible',
+      code,
+      statusCode: status,
+      message: 'OpenAI-compatible authentication failed: invalid api key',
+    });
+  });
+
+  it('maps model-list rate-limit responses to rate-limit errors', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      ok: false,
+      status: 429,
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        error: { message: 'too many requests' },
+      }),
+    }));
+
+    await expect(createProvider().listModels()).rejects.toBeInstanceOf(LlmRateLimitError);
+    await expect(createProvider().listModels()).rejects.toMatchObject({
+      providerId: 'cloud-openai-compatible',
+      code: 'RATE_LIMITED',
+      statusCode: 429,
+      message: 'OpenAI-compatible rate limit exceeded: too many requests',
+    });
+  });
+
+  it('maps generic model-list HTTP failures to provider errors', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      ok: false,
+      status: 502,
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        error: { message: 'bad gateway' },
+      }),
+    }));
+
+    await expect(createProvider().listModels()).rejects.toMatchObject({
+      providerId: 'cloud-openai-compatible',
+      code: 'HTTP_502',
+      statusCode: 502,
+      message: 'OpenAI-compatible model listing failed with status 502: bad gateway',
+    });
+  });
+
+  it('maps model-list aborts to timeout provider errors', async () => {
+    const abortError = new Error('The operation was aborted');
+    abortError.name = 'AbortError';
+    mockedFetch.mockRejectedValue(abortError);
+
+    await expect(createProvider().listModels()).rejects.toMatchObject({
+      providerId: 'cloud-openai-compatible',
+      code: 'REQUEST_TIMEOUT',
+      message: 'OpenAI-compatible model listing timed out or was aborted',
+    });
+  });
+
+  it('maps generic model-list failures to provider errors', async () => {
+    mockedFetch.mockRejectedValue(new Error('connection reset'));
+
+    await expect(createProvider().listModels()).rejects.toMatchObject({
+      providerId: 'cloud-openai-compatible',
+      code: 'LIST_MODELS_FAILED',
+      message: 'OpenAI-compatible model listing failed: connection reset',
+    });
+  });
+
+  it('uses model listing as provider health', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        object: 'list',
+        data: [{ id: TEST_MODEL_ID }],
+      }),
+    }));
+    const timeoutSpy = jest.spyOn(AbortSignal, 'timeout');
+
+    await createProvider({ timeoutMs: undefined }).initialise();
+
+    expect(timeoutSpy).toHaveBeenCalledWith(5000);
+    expect(mockedFetch).toHaveBeenCalledWith(
+      'https://api.example.com/v1/models',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'cloud-openai-compatible',
+      providerType: 'openai-compatible',
+      operation: 'provider.initialise',
+      status: 'success',
+      latencyMs: expect.any(Number),
+    }), 'provider.initialise.success');
+    timeoutSpy.mockRestore();
+  });
+
+  it('fails provider health when model listing is unsupported', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      ok: false,
+      status: 404,
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        error: { message: 'not found' },
+      }),
+    }));
+
+    await expect(createProvider().initialise()).rejects.toMatchObject({
+      providerId: 'cloud-openai-compatible',
+      code: 'MODEL_LISTING_UNSUPPORTED',
+      statusCode: 404,
+    });
+  });
+
+  it('fails provider health when model-list payload is malformed', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({ object: 'list' }),
+    }));
+
+    await expect(createProvider().initialise()).rejects.toMatchObject({
+      providerId: 'cloud-openai-compatible',
+      code: 'MALFORMED_MODEL_LIST',
+      message: 'OpenAI-compatible model list response was malformed',
     });
   });
 });
