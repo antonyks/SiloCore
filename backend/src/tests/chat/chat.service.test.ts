@@ -7,6 +7,7 @@ import { NotFoundError } from '../../errors';
 import { SelectedChatSession, ChatSessionWithMessages, SelectedChatMessage, SelectedChatSessionFields, ChatSessionWithMessagesFields, SelectedChatMessageFields } from '../../modules/chat/chat.model';
 import { SelectedLlmProviderConfig } from '../../modules/llm/llmProviderConfig.model';
 import { OllamaProvider } from '../../modules/llm/providers/ollama.provider';
+import { OpenAiCompatibleProvider } from '../../modules/llm/providers/openaiCompatible.provider';
 import { IChatWorkspaceContext } from '../../modules/chat/chat.types';
 
 jest.mock('node-fetch', () => jest.fn());
@@ -629,6 +630,71 @@ describe('ChatService', () => {
         select: expect.any(Object),
       });
       expect(complete).toHaveBeenCalledWith(expect.objectContaining({ model: EXPLICIT_TEST_MODEL_ID }));
+    });
+
+    it('should complete through an OpenAI-compatible provider', async () => {
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider({
+        id: 3,
+        name: 'OpenAI Compatible',
+        type: 'OPENAI_COMPATIBLE',
+        baseUrl: 'https://api.example.com/v1',
+        apiKey: 'secret-key',
+        defaultModel: TEST_MODEL_ID,
+      }));
+      mockPrisma.chatMessage.create
+        .mockResolvedValueOnce({
+          id: 1,
+          content: 'Hello',
+          author: 'USER',
+          sessionId: 1,
+          metadata: null,
+          createdAt: new Date(),
+        })
+        .mockResolvedValueOnce({
+          id: 2,
+          content: 'Cloud response',
+          author: 'ASSISTANT',
+          sessionId: 1,
+          metadata: null,
+          createdAt: new Date(),
+        });
+      const complete = jest.spyOn(OpenAiCompatibleProvider.prototype, 'complete').mockResolvedValue({
+        content: 'Cloud response',
+        reasoning: 'Provider reasoning',
+        model: TEST_MODEL_ID,
+        finishReason: 'stop',
+        latencyMs: 14,
+      });
+
+      await ChatService.generateAssistantResponse({
+        sessionId: 1,
+        content: 'Hello',
+        providerId: 3,
+      }, createWorkspaceContextFor(25));
+
+      expect(complete).toHaveBeenCalledWith(expect.objectContaining({
+        model: TEST_MODEL_ID,
+        messages: [{ role: 'user', content: 'Hello' }],
+      }));
+      expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, {
+        data: expect.objectContaining({
+          content: 'Cloud response',
+          author: 'ASSISTANT',
+          sessionId: 1,
+          metadata: expect.objectContaining({
+            providerId: '3',
+            providerName: 'OpenAI Compatible',
+            providerType: 'openai-compatible',
+            model: TEST_MODEL_ID,
+            reasoning: 'Provider reasoning',
+            finishReason: 'stop',
+            latencyMs: 14,
+          }),
+        }),
+        select: SelectedChatMessageFields,
+      });
+      expect(JSON.stringify(loggedPayloads())).not.toContain('secret-key');
     });
 
     it('should apply provider generation defaults before user overrides', async () => {

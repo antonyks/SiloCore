@@ -34,10 +34,10 @@ const OLLAMA_CAPABILITIES = {
   tokenCounting: false,
 };
 
-const UNSUPPORTED_CAPABILITIES = {
-  completion: false,
+const OPENAI_COMPATIBLE_CAPABILITIES = {
+  completion: true,
   streaming: false,
-  reasoning: false,
+  reasoning: true,
   modelListing: false,
   modelPulling: false,
   embeddings: false,
@@ -135,7 +135,7 @@ describe('LlmProviderService', () => {
       expect(result[0]).not.toHaveProperty('apiKey');
     });
 
-    it('returns all-false capabilities for providers without an adapter', async () => {
+    it('returns OpenAI-compatible adapter capabilities', async () => {
       const provider = createProvider({
         type: 'OPENAI_COMPATIBLE',
         name: 'OpenAI Compatible',
@@ -148,7 +148,7 @@ describe('LlmProviderService', () => {
 
       expect(result[0]).toEqual(expect.objectContaining({
         type: 'openai-compatible',
-        capabilities: UNSUPPORTED_CAPABILITIES,
+        capabilities: OPENAI_COMPATIBLE_CAPABILITIES,
       }));
       expect(result[0]).not.toHaveProperty('apiKey');
     });
@@ -206,7 +206,7 @@ describe('LlmProviderService', () => {
   });
 
   describe('provider operations', () => {
-    it('returns adapter unavailable for openai-compatible provider operations', async () => {
+    it('tests openai-compatible providers without leaking secrets', async () => {
       mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider({
         type: 'OPENAI_COMPATIBLE',
         name: 'OpenAI Compatible',
@@ -218,17 +218,18 @@ describe('LlmProviderService', () => {
         providerId: '1',
         providerName: 'OpenAI Compatible',
         providerType: 'openai-compatible',
-        status: 'error',
-        errorMessage: 'No adapter is available for provider type openai-compatible',
+        status: 'success',
       });
-      expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+      expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
         providerId: '1',
         providerType: 'openai-compatible',
-        operation: 'provider.adapterUnavailable',
-        status: 'error',
-        errorCode: 'ADAPTER_UNAVAILABLE',
-      }), 'provider.adapterUnavailable.error');
-      expect(JSON.stringify(mockedLogger.error.mock.calls)).not.toContain('secret-key');
+        operation: 'provider.test',
+        status: 'success',
+      }), 'provider.test.success');
+      expect(JSON.stringify([
+        ...mockedLogger.info.mock.calls,
+        ...mockedLogger.error.mock.calls,
+      ])).not.toContain('secret-key');
     });
 
     it('lists models for Ollama providers without leaking secrets', async () => {

@@ -15,6 +15,7 @@ import {
   UNSUPPORTED_LLM_PROVIDER_CAPABILITIES,
 } from './llm.types';
 import { OllamaProvider } from './providers/ollama.provider';
+import { OpenAiCompatibleProvider } from './providers/openaiCompatible.provider';
 import { getLlmErrorCode, logLlmEvent } from './llm.logging';
 
 function getErrorMessage(error: unknown): string {
@@ -88,6 +89,10 @@ function toProviderConfig(provider: SelectedLlmProviderConfig): LlmProviderConfi
 function createAdapter(config: LlmProviderConfig): ILlmProvider | null {
   if (config.type === 'ollama') {
     return new OllamaProvider(config);
+  }
+
+  if (config.type === 'openai-compatible') {
+    return new OpenAiCompatibleProvider(config);
   }
 
   return null;
