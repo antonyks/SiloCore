@@ -12,6 +12,7 @@ import {
   LlmProviderOperationResult,
   LlmStreamChunk,
   LlmProviderType,
+  UNSUPPORTED_LLM_PROVIDER_CAPABILITIES,
 } from './llm.types';
 import { OllamaProvider } from './providers/ollama.provider';
 import { getLlmErrorCode, logLlmEvent } from './llm.logging';
@@ -118,6 +119,7 @@ function toProviderModelListResult(result: LlmProviderOperationResult) {
     generationDefaults: {},
     status: result.status,
     modelCount: 0,
+    capabilities: UNSUPPORTED_LLM_PROVIDER_CAPABILITIES,
     errorMessage: result.errorMessage,
   };
 }
@@ -176,17 +178,7 @@ export const LlmRuntimeService = {
         id: config.id,
         type: config.type,
         isEnabled: config.enabled,
-        capabilities: {
-          completion: false,
-          streaming: false,
-          reasoning: false,
-          modelListing: false,
-          modelPulling: false,
-          embeddings: false,
-          toolCalling: false,
-          structuredOutput: false,
-          tokenCounting: false,
-        },
+        capabilities: UNSUPPORTED_LLM_PROVIDER_CAPABILITIES,
         config,
         initialise: async () => undefined,
         destroy: async () => undefined,

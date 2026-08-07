@@ -126,6 +126,7 @@ export interface LlmListedModel {
   providerType: LlmProviderType;
   modelId: string;
   modelName: string;
+  capabilities: LlmModelCapabilities;
 }
 
 export interface LlmProviderModelListResult {
@@ -135,6 +136,7 @@ export interface LlmProviderModelListResult {
   generationDefaults?: GenerationDefaults;
   status: LlmProviderModelListStatus;
   modelCount: number;
+  capabilities: LlmProviderCapabilities;
   errorMessage?: string;
 }
 

@@ -16,6 +16,18 @@ jest.mock('../../../modules/llm/llmRuntime.service', () => ({
   },
 }));
 
+const providerCapabilities = {
+  completion: false,
+  streaming: false,
+  reasoning: false,
+  modelListing: false,
+  modelPulling: false,
+  embeddings: false,
+  toolCalling: false,
+  structuredOutput: false,
+  tokenCounting: false,
+};
+
 describe('AdminSystemService', () => {
   const mockListAvailableModels = jest.mocked(LlmRuntimeService.listAvailableModels);
   const mockLoggerError = jest.mocked(logger.error);
@@ -71,6 +83,7 @@ describe('AdminSystemService', () => {
             providerType: 'ollama',
             status: 'success',
             modelCount: 2,
+            capabilities: providerCapabilities,
           },
           {
             providerId: '2',
@@ -78,6 +91,7 @@ describe('AdminSystemService', () => {
             providerType: 'ollama',
             status: 'skipped',
             modelCount: 0,
+            capabilities: providerCapabilities,
           },
         ],
       });
@@ -127,6 +141,7 @@ describe('AdminSystemService', () => {
             providerType: 'ollama',
             status: 'success',
             modelCount: 2,
+            capabilities: providerCapabilities,
           },
           {
             providerId: '2',
@@ -134,6 +149,7 @@ describe('AdminSystemService', () => {
             providerType: 'ollama',
             status: 'error',
             modelCount: 0,
+            capabilities: providerCapabilities,
             errorMessage: 'provider offline',
           },
         ],
@@ -160,6 +176,7 @@ describe('AdminSystemService', () => {
             providerType: 'ollama',
             status: 'skipped',
             modelCount: 0,
+            capabilities: providerCapabilities,
           },
         ],
       });

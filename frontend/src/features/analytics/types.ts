@@ -43,6 +43,7 @@ export interface SanitizedLlmProviderConfig {
   defaultModel: string;
   timeoutMs: number | null;
   generationDefaults: GenerationDefaults;
+  capabilities: LlmProviderCapabilities;
   extraHeaders: Record<string, string>;
   hasApiKey: boolean;
   deletedAt: string | null;
@@ -68,6 +69,7 @@ export interface LlmListedModel {
   providerType: LlmProviderType;
   modelId: string;
   modelName: string;
+  capabilities: LlmModelCapabilities;
 }
 
 export interface LlmProviderModelListResult {
@@ -77,6 +79,7 @@ export interface LlmProviderModelListResult {
   generationDefaults?: GenerationDefaults;
   status: LlmProviderModelListStatus;
   modelCount: number;
+  capabilities: LlmProviderCapabilities;
   errorMessage?: string;
 }
 

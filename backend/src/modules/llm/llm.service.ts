@@ -44,6 +44,7 @@ export class LlmRegistryService {
           ...baseProviderResult,
           status: 'skipped',
           modelCount: 0,
+          capabilities: provider.capabilities,
         },
       };
     }
@@ -54,6 +55,7 @@ export class LlmRegistryService {
         ...baseModelResult,
         modelId: model.modelId,
         modelName: model.modelName,
+        capabilities: model.capabilities,
       }));
 
       return {
@@ -62,6 +64,7 @@ export class LlmRegistryService {
           ...baseProviderResult,
           status: 'success',
           modelCount: models.length,
+          capabilities: provider.capabilities,
         },
       };
     } catch (error) {
@@ -71,6 +74,7 @@ export class LlmRegistryService {
           ...baseProviderResult,
           status: 'error',
           modelCount: 0,
+          capabilities: provider.capabilities,
           errorMessage: getErrorMessage(error),
         },
       };

@@ -169,6 +169,18 @@ export interface LlmProviderCapabilities {
   tokenCounting: boolean;
 }
 
+export const UNSUPPORTED_LLM_PROVIDER_CAPABILITIES: LlmProviderCapabilities = {
+  completion: false,
+  streaming: false,
+  reasoning: false,
+  modelListing: false,
+  modelPulling: false,
+  embeddings: false,
+  toolCalling: false,
+  structuredOutput: false,
+  tokenCounting: false,
+};
+
 export type LlmModelCapabilityStatus = 'SUPPORTED' | 'UNSUPPORTED' | 'UNKNOWN';
 
 export interface LlmModelCapabilities {
@@ -197,6 +209,7 @@ export interface LlmListedModel {
   providerType: LlmProviderType;
   modelId: string;
   modelName: string;
+  capabilities: LlmModelCapabilities;
 }
 
 export type LlmProviderModelListStatus = 'success' | 'error' | 'skipped';
@@ -208,6 +221,7 @@ export interface LlmProviderModelListResult {
   generationDefaults?: LlmGenerationDefaults;
   status: LlmProviderModelListStatus;
   modelCount: number;
+  capabilities: LlmProviderCapabilities;
   errorMessage?: string;
 }
 

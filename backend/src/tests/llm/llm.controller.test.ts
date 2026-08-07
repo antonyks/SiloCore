@@ -10,6 +10,18 @@ jest.mock('node-fetch', () => jest.fn());
 
 const TEST_MODEL_ID = process.env.OLLAMA_MODEL as string;
 
+const OLLAMA_CAPABILITIES = {
+  completion: true,
+  streaming: true,
+  reasoning: true,
+  modelListing: true,
+  modelPulling: true,
+  embeddings: false,
+  toolCalling: false,
+  structuredOutput: false,
+  tokenCounting: false,
+};
+
 function createListedModel(modelName: string) {
   return {
     modelId: modelName,
@@ -68,6 +80,7 @@ describe('LlmController', () => {
             providerId: '1',
             providerType: 'ollama',
             modelId: TEST_MODEL_ID,
+            capabilities: createListedModel(TEST_MODEL_ID).capabilities,
           }),
         ],
         providers: [
@@ -76,6 +89,7 @@ describe('LlmController', () => {
             providerType: 'ollama',
             status: 'success',
             modelCount: 1,
+            capabilities: OLLAMA_CAPABILITIES,
           }),
         ],
       },
@@ -109,6 +123,7 @@ describe('LlmController', () => {
             providerId: '1',
             providerType: 'ollama',
             modelId: TEST_MODEL_ID,
+            capabilities: createListedModel(TEST_MODEL_ID).capabilities,
           }),
         ],
         providers: [
@@ -117,6 +132,7 @@ describe('LlmController', () => {
             providerType: 'ollama',
             status: 'success',
             modelCount: 1,
+            capabilities: OLLAMA_CAPABILITIES,
           }),
         ],
       },

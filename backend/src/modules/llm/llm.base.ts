@@ -12,20 +12,11 @@ import {
   LlmProviderConfig,
   LlmProviderError,
   LlmProviderListedModel,
+  UNSUPPORTED_LLM_PROVIDER_CAPABILITIES,
 } from './llm.types';
 
 /** Default capabilities assumed if a child class doesn't override them. */
-const DEFAULT_CAPABILITIES: LlmProviderCapabilities = {
-  completion: false,
-  streaming: false,
-  reasoning: false,
-  modelListing: false,
-  modelPulling: false,
-  embeddings: false,
-  toolCalling: false,
-  structuredOutput: false,
-  tokenCounting: false,
-};
+const DEFAULT_CAPABILITIES: LlmProviderCapabilities = UNSUPPORTED_LLM_PROVIDER_CAPABILITIES;
 
 export abstract class AbstractLlmProvider implements ILlmProvider {
   readonly id: string;

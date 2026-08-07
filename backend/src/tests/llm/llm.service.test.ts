@@ -90,6 +90,7 @@ describe('LlmRegistryService', () => {
         providerType: 'ollama',
         modelId: TEST_MODEL_ID,
         modelName: TEST_MODEL_ID,
+        capabilities: createListedModel(TEST_MODEL_ID).capabilities,
       },
       {
         providerId: 'ollama',
@@ -97,6 +98,7 @@ describe('LlmRegistryService', () => {
         providerType: 'ollama',
         modelId: SECOND_TEST_MODEL_ID,
         modelName: SECOND_TEST_MODEL_ID,
+        capabilities: createListedModel(SECOND_TEST_MODEL_ID).capabilities,
       },
       {
         providerId: 'cloud',
@@ -104,6 +106,7 @@ describe('LlmRegistryService', () => {
         providerType: 'openai-compatible',
         modelId: CLOUD_TEST_MODEL_ID,
         modelName: CLOUD_TEST_MODEL_ID,
+        capabilities: createListedModel(CLOUD_TEST_MODEL_ID).capabilities,
       },
     ]);
     expect(result.providers).toEqual([
@@ -114,6 +117,7 @@ describe('LlmRegistryService', () => {
         generationDefaults: {},
         status: 'success',
         modelCount: 2,
+        capabilities: DEFAULT_CAPABILITIES,
       },
       {
         providerId: 'cloud',
@@ -122,6 +126,7 @@ describe('LlmRegistryService', () => {
         generationDefaults: {},
         status: 'success',
         modelCount: 1,
+        capabilities: DEFAULT_CAPABILITIES,
       },
     ]);
   });
@@ -150,6 +155,7 @@ describe('LlmRegistryService', () => {
           generationDefaults: {},
           status: 'skipped',
           modelCount: 0,
+          capabilities: DEFAULT_CAPABILITIES,
         },
       ],
     });
@@ -174,6 +180,7 @@ describe('LlmRegistryService', () => {
         providerType: 'ollama',
         modelId: TEST_MODEL_ID,
         modelName: TEST_MODEL_ID,
+        capabilities: createListedModel(TEST_MODEL_ID).capabilities,
       },
     ]);
     expect(result.providers).toEqual([
@@ -184,6 +191,7 @@ describe('LlmRegistryService', () => {
         generationDefaults: {},
         status: 'success',
         modelCount: 1,
+        capabilities: DEFAULT_CAPABILITIES,
       },
       {
         providerId: 'broken',
@@ -192,6 +200,7 @@ describe('LlmRegistryService', () => {
         generationDefaults: {},
         status: 'error',
         modelCount: 0,
+        capabilities: DEFAULT_CAPABILITIES,
         errorMessage: 'provider offline',
       },
     ]);
@@ -215,6 +224,7 @@ describe('LlmRegistryService', () => {
           generationDefaults: {},
           status: 'error',
           modelCount: 0,
+          capabilities: DEFAULT_CAPABILITIES,
           errorMessage: 'Unknown provider error',
         },
       ],

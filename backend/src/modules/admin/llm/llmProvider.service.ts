@@ -2,6 +2,7 @@ import { LlmRuntimeService } from '../../llm/llmRuntime.service';
 import { SelectedLlmProviderConfig } from '../../llm/llmProviderConfig.model';
 import { LlmProviderConfigRepository } from '../../llm/llmProviderConfig.repository';
 import { fromDbProviderType } from '../../llm/llmProviderConfig.types';
+import { UNSUPPORTED_LLM_PROVIDER_CAPABILITIES } from '../../llm/llm.types';
 import {
   LlmProviderCreateInput,
   LlmProviderUpdateInput,
@@ -9,6 +10,8 @@ import {
 } from './llmProvider.types';
 
 function sanitizeProvider(provider: SelectedLlmProviderConfig): SanitizedLlmProviderConfig {
+  const adapter = LlmRuntimeService.createProvider(provider);
+
   return {
     id: provider.id,
     name: provider.name,
@@ -18,6 +21,7 @@ function sanitizeProvider(provider: SelectedLlmProviderConfig): SanitizedLlmProv
     defaultModel: provider.defaultModel,
     timeoutMs: provider.timeoutMs,
     generationDefaults: LlmRuntimeService.normalizeGenerationDefaults(provider.generationDefaults),
+    capabilities: adapter?.capabilities ?? UNSUPPORTED_LLM_PROVIDER_CAPABILITIES,
     extraHeaders: LlmRuntimeService.normalizeExtraHeaders(provider.extraHeaders),
     hasApiKey: Boolean(provider.apiKey),
     deletedAt: provider.deletedAt,

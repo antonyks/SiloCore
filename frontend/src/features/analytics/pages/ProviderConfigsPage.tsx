@@ -20,6 +20,7 @@ import {
   useTestProviderConfig,
   useUpdateProviderConfig,
 } from "../hooks/useProviderConfigs";
+import { canPullProviderModel } from "../lib/providerCapabilities";
 import type {
   LlmProviderConfigInput,
   LlmProviderOperationResult,
@@ -203,6 +204,10 @@ const ProviderConfigsPage: React.FC = () => {
   };
 
   const openPullPanel = (provider: SanitizedLlmProviderConfig) => {
+    if (!canPullProviderModel(provider)) {
+      return;
+    }
+
     setSuccessMessage(null);
     setActionMessage(null);
     setIsFormOpen(false);
@@ -481,8 +486,8 @@ const ProviderConfigsPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => openPullPanel(provider)}
-                        disabled={pullingProviderId === provider.id}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 px-2 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-wait disabled:text-slate-400"
+                        disabled={pullingProviderId === provider.id || !canPullProviderModel(provider)}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 px-2 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
                       >
                         <Download className="h-3.5 w-3.5" aria-hidden="true" />
                         Pull

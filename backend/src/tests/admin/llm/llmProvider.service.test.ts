@@ -22,6 +22,30 @@ const mockedLogger = logger as unknown as {
   error: jest.Mock;
 };
 
+const OLLAMA_CAPABILITIES = {
+  completion: true,
+  streaming: true,
+  reasoning: true,
+  modelListing: true,
+  modelPulling: true,
+  embeddings: false,
+  toolCalling: false,
+  structuredOutput: false,
+  tokenCounting: false,
+};
+
+const UNSUPPORTED_CAPABILITIES = {
+  completion: false,
+  streaming: false,
+  reasoning: false,
+  modelListing: false,
+  modelPulling: false,
+  embeddings: false,
+  toolCalling: false,
+  structuredOutput: false,
+  tokenCounting: false,
+};
+
 function createListedModel(modelName: string) {
   return {
     modelId: modelName,
@@ -92,6 +116,7 @@ describe('LlmProviderService', () => {
           id: provider.id,
           type: 'ollama',
           hasApiKey: false,
+          capabilities: OLLAMA_CAPABILITIES,
         }),
       ]);
       expect(result[0]).not.toHaveProperty('apiKey');
@@ -106,6 +131,25 @@ describe('LlmProviderService', () => {
       const result = await LlmProviderService.listProviders();
 
       expect(result[0]).toEqual(expect.objectContaining({ hasApiKey: true }));
+      expect(result[0]).toEqual(expect.objectContaining({ capabilities: OLLAMA_CAPABILITIES }));
+      expect(result[0]).not.toHaveProperty('apiKey');
+    });
+
+    it('returns all-false capabilities for providers without an adapter', async () => {
+      const provider = createProvider({
+        type: 'OPENAI_COMPATIBLE',
+        name: 'OpenAI Compatible',
+      });
+
+      mockPrisma.llmProviderConfig.count.mockResolvedValue(1);
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([provider]);
+
+      const result = await LlmProviderService.listProviders();
+
+      expect(result[0]).toEqual(expect.objectContaining({
+        type: 'openai-compatible',
+        capabilities: UNSUPPORTED_CAPABILITIES,
+      }));
       expect(result[0]).not.toHaveProperty('apiKey');
     });
   });
@@ -126,6 +170,7 @@ describe('LlmProviderService', () => {
         select: expect.any(Object),
       });
       expect(result.hasApiKey).toBe(false);
+      expect(result.capabilities).toEqual(OLLAMA_CAPABILITIES);
     });
   });
 
@@ -150,6 +195,7 @@ describe('LlmProviderService', () => {
       });
       expect(result.enabled).toBe(false);
       expect(result.deletedAt).toBe(deletedAt);
+      expect(result.capabilities).toEqual(OLLAMA_CAPABILITIES);
     });
 
     it('rejects deleted providers as not found', async () => {
@@ -199,14 +245,23 @@ describe('LlmProviderService', () => {
 
       expect(listModels).toHaveBeenCalledTimes(1);
       expect(result.models).toEqual([
-        expect.objectContaining({ providerId: '1', modelId: TEST_MODEL_ID }),
-        expect.objectContaining({ providerId: '1', modelId: SECOND_TEST_MODEL_ID }),
+        expect.objectContaining({
+          providerId: '1',
+          modelId: TEST_MODEL_ID,
+          capabilities: createListedModel(TEST_MODEL_ID).capabilities,
+        }),
+        expect.objectContaining({
+          providerId: '1',
+          modelId: SECOND_TEST_MODEL_ID,
+          capabilities: createListedModel(SECOND_TEST_MODEL_ID).capabilities,
+        }),
       ]);
       expect(result.providers).toEqual([
         expect.objectContaining({
           providerId: '1',
           status: 'success',
           modelCount: 2,
+          capabilities: OLLAMA_CAPABILITIES,
         }),
       ]);
     });

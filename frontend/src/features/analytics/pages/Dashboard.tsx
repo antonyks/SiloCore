@@ -13,6 +13,7 @@ import {
   TestTube2,
 } from "lucide-react";
 import { useAdminDashboard } from "../hooks/useAdminDashboard";
+import { getModelProviderCapabilities } from "../lib/providerCapabilities";
 import type {
   AdminAnalyticsSummary,
   AdminUserPreview,
@@ -329,6 +330,11 @@ const Dashboard: React.FC = () => {
                 {modelsQuery.isLoading && <LoadingRows rows={3} columns={5} />}
                 {modelRegistry?.models.map((model) => {
                   const providerStatus = getModelProviderStatus(model, modelRegistry.providers);
+                  const providerCapabilities = getModelProviderCapabilities(
+                    model.providerId,
+                    modelRegistry.providers,
+                  );
+                  const actionLabel = providerCapabilities.modelPulling ? "Pull" : "Manage";
 
                   return (
                     <tr key={`${model.providerId}-${model.modelId}`} className="hover:bg-slate-50">
@@ -347,8 +353,12 @@ const Dashboard: React.FC = () => {
                           to="/admin/llm/providers"
                           className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs text-slate-700 hover:bg-slate-100"
                         >
-                          <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                          Pull
+                          {providerCapabilities.modelPulling ? (
+                            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                          ) : (
+                            <ServerCog className="h-3.5 w-3.5" aria-hidden="true" />
+                          )}
+                          {actionLabel}
                         </Link>
                       </td>
                     </tr>

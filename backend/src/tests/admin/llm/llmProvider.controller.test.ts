@@ -9,6 +9,18 @@ jest.mock('node-fetch', () => jest.fn());
 
 const TEST_MODEL_ID = process.env.OLLAMA_MODEL as string;
 
+const OLLAMA_CAPABILITIES = {
+  completion: true,
+  streaming: true,
+  reasoning: true,
+  modelListing: true,
+  modelPulling: true,
+  embeddings: false,
+  toolCalling: false,
+  structuredOutput: false,
+  tokenCounting: false,
+};
+
 function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): SelectedLlmProviderConfig {
   return {
     id: 1,
@@ -52,6 +64,7 @@ describe('LlmProviderController', () => {
       data: expect.objectContaining({
         id: provider.id,
         hasApiKey: true,
+        capabilities: OLLAMA_CAPABILITIES,
       }),
     });
     const responseBody = res.json.mock.calls[0][0] as { data: Record<string, unknown> };
@@ -70,7 +83,11 @@ describe('LlmProviderController', () => {
     expect(mockPrisma.llmProviderConfig.create).toHaveBeenCalledTimes(1);
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({
-      data: [expect.objectContaining({ id: provider.id, hasApiKey: false })],
+      data: [expect.objectContaining({
+        id: provider.id,
+        hasApiKey: false,
+        capabilities: OLLAMA_CAPABILITIES,
+      })],
     });
   });
 
@@ -91,7 +108,10 @@ describe('LlmProviderController', () => {
 
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({
-      data: expect.objectContaining({ name: 'Renamed Ollama' }),
+      data: expect.objectContaining({
+        name: 'Renamed Ollama',
+        capabilities: OLLAMA_CAPABILITIES,
+      }),
     });
   });
 
