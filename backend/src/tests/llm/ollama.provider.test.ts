@@ -576,11 +576,11 @@ describe('OllamaProvider reasoning output', () => {
     }
 
     expect(chunks).toEqual([
-      { content: '', reasoning: 'Step 1. ', done: false, usage: undefined },
+      { content: undefined, reasoning: 'Step 1. ', done: false, usage: undefined },
       { content: 'Final', reasoning: undefined, done: false, usage: undefined },
-      { content: '', reasoning: 'Step 2.', done: false, usage: undefined },
+      { content: undefined, reasoning: 'Step 2.', done: false, usage: undefined },
       {
-        content: '',
+        content: undefined,
         reasoning: undefined,
         done: true,
         finishReason: 'length',

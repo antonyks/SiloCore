@@ -345,7 +345,7 @@ export class OllamaProvider extends AbstractLlmProvider {
                     try {
                         const parsed = JSON.parse(line) as OllamaGenerateResponse;
                         yield {
-                            content: parsed.message?.content ?? '',
+                            content: parsed.message?.content || undefined,
                             reasoning: extractReasoning(parsed.message),
                             done: parsed.done ?? false,
                             finishReason: parsed.done_reason,
@@ -369,7 +369,7 @@ export class OllamaProvider extends AbstractLlmProvider {
                 try {
                     const parsed = JSON.parse(buffer) as OllamaGenerateResponse;
                     yield {
-                        content: parsed.message?.content ?? '',
+                        content: parsed.message?.content || undefined,
                         reasoning: extractReasoning(parsed.message),
                         done: parsed.done ?? false,
                         finishReason: parsed.done_reason,
@@ -397,6 +397,7 @@ export class OllamaProvider extends AbstractLlmProvider {
             });
         } catch (error) {
             failed = true;
+            const normalizedError = this.normalizeStreamingError(error);
             logLlmEvent({
                 providerId: this.id,
                 providerType: this.config.type,
@@ -404,9 +405,9 @@ export class OllamaProvider extends AbstractLlmProvider {
                 operation: 'provider.stream',
                 latencyMs: Date.now() - startedAt,
                 status: 'error',
-                errorCode: getLlmErrorCode(error),
+                errorCode: getLlmErrorCode(normalizedError),
             });
-            throw error;
+            throw normalizedError;
         } finally {
             if (!completed && !failed) {
                 logLlmEvent({
@@ -563,6 +564,38 @@ export class OllamaProvider extends AbstractLlmProvider {
             'Ollama embedding failed',
             this.id,
             'EMBEDDINGS_FAILED',
+        );
+    }
+
+    private normalizeStreamingError(error: unknown): Error {
+        if (error instanceof LlmStreamingError) {
+            return error;
+        }
+
+        if (error instanceof LlmProviderError) {
+            return new LlmStreamingError(error.message, this.id, error.code, error.statusCode);
+        }
+
+        if (isAbortError(error)) {
+            return new LlmStreamingError(
+                'Ollama stream timed out or was aborted',
+                this.id,
+                'REQUEST_TIMEOUT',
+            );
+        }
+
+        if (error instanceof Error) {
+            return new LlmStreamingError(
+                `Ollama stream failed: ${error.message}`,
+                this.id,
+                'UPSTREAM_STREAM_ERROR',
+            );
+        }
+
+        return new LlmStreamingError(
+            'Ollama stream failed',
+            this.id,
+            'UPSTREAM_STREAM_ERROR',
         );
     }
 }
