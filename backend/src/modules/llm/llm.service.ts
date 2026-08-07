@@ -1,4 +1,5 @@
 import { ILlmProvider } from './llm.interface';
+import { ensureLlmProviderCapability } from './llm.capabilities';
 import {
   LlmListedModel,
   LlmModelListResult,
@@ -7,6 +8,14 @@ import {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown provider error';
+}
+
+function getErrorCode(error: unknown): string | undefined {
+  if (typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string') {
+    return error.code;
+  }
+
+  return undefined;
 }
 
 export class LlmRegistryService {
@@ -50,6 +59,7 @@ export class LlmRegistryService {
     }
 
     try {
+      ensureLlmProviderCapability(provider, 'modelListing');
       const listedModels = await provider.listModels();
       const models = listedModels.map((model) => ({
         ...baseModelResult,
@@ -76,6 +86,7 @@ export class LlmRegistryService {
           modelCount: 0,
           capabilities: provider.capabilities,
           errorMessage: getErrorMessage(error),
+          errorCode: getErrorCode(error),
         },
       };
     }

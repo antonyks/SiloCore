@@ -67,6 +67,20 @@ describe('errorHandler', () => {
     });
   });
 
+  it('should preserve custom InvalidInputError codes', () => {
+    const error = new InvalidInputError('Unsupported provider operation', 'LLM_PROVIDER_CAPABILITY_UNSUPPORTED');
+    const mockRes = createMockResponse();
+
+    errorHandler(error, createMockRequest({ requestId: 'req-123' }), mockRes, createMockNext());
+
+    expect(mockRes.status).toHaveBeenCalledWith(400);
+    expect(mockRes.json).toHaveBeenCalledWith({
+      message: 'Unsupported provider operation',
+      code: 'LLM_PROVIDER_CAPABILITY_UNSUPPORTED',
+      requestId: 'req-123',
+    });
+  });
+
   it('should handle generic error', () => {
     const error = new Error('Internal server error');
     const mockRes = createMockResponse();

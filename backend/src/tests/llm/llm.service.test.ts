@@ -29,6 +29,7 @@ const DISABLED_TEST_MODEL_ID = `${TEST_MODEL_ID}-disabled`;
 function createProvider(
   config: Partial<LlmProviderConfig> & Pick<LlmProviderConfig, 'id' | 'name' | 'type'>,
   listModels: jest.Mock<() => Promise<LlmProviderListedModel[]>>,
+  capabilities: LlmProviderCapabilities = DEFAULT_CAPABILITIES,
 ): ILlmProvider {
   const fullConfig: LlmProviderConfig = {
     enabled: true,
@@ -41,7 +42,7 @@ function createProvider(
     id: fullConfig.id,
     type: fullConfig.type,
     isEnabled: fullConfig.enabled,
-    capabilities: DEFAULT_CAPABILITIES,
+    capabilities,
     config: fullConfig,
     initialise: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     destroy: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
@@ -204,6 +205,43 @@ describe('LlmRegistryService', () => {
         errorMessage: 'provider offline',
       },
     ]);
+  });
+
+  it('fails unsupported model listing before calling the provider', async () => {
+    const unsupportedCapabilities = {
+      ...DEFAULT_CAPABILITIES,
+      modelListing: false,
+    };
+    const listModels = jest.fn<() => Promise<LlmProviderListedModel[]>>().mockResolvedValue([
+      createListedModel(TEST_MODEL_ID),
+    ]);
+    const service = new LlmRegistryService([
+      createProvider(
+        { id: 'cloud', name: 'Cloud Provider', type: 'openai-compatible' },
+        listModels,
+        unsupportedCapabilities,
+      ),
+    ]);
+
+    const result = await service.listAvailableModels();
+
+    expect(listModels).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      models: [],
+      providers: [
+        {
+          providerId: 'cloud',
+          providerName: 'Cloud Provider',
+          providerType: 'openai-compatible',
+          generationDefaults: {},
+          status: 'error',
+          modelCount: 0,
+          capabilities: unsupportedCapabilities,
+          errorMessage: 'Provider type openai-compatible does not support model listing.',
+          errorCode: 'LLM_PROVIDER_CAPABILITY_UNSUPPORTED',
+        },
+      ],
+    });
   });
 
   it('returns an empty model list when no enabled provider succeeds', async () => {

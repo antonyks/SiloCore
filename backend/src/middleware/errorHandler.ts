@@ -41,7 +41,7 @@ export function errorHandler(err: unknown, _req: Request, res: Response, next: N
         case (err instanceof InvalidInputError):
             res.status(400).json({
                 message: err.message,
-                code: ErrorCode.INVALID_INPUT,
+                code: err.code ?? ErrorCode.INVALID_INPUT,
                 requestId,
             });
             return;

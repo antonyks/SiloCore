@@ -3,9 +3,11 @@ import { UserRole, WorkspaceStatus, WorkspaceType } from '@prisma/client';
 import { logger } from '../../config/logger';
 import { ChatService } from '../../modules/chat/chat.service';
 import { mockPrisma } from '../setup';
-import { NotFoundError } from '../../errors';
+import { InvalidInputError, NotFoundError } from '../../errors';
 import { SelectedChatSession, ChatSessionWithMessages, SelectedChatMessage, SelectedChatSessionFields, ChatSessionWithMessagesFields, SelectedChatMessageFields } from '../../modules/chat/chat.model';
 import { SelectedLlmProviderConfig } from '../../modules/llm/llmProviderConfig.model';
+import { LLM_PROVIDER_CAPABILITY_UNSUPPORTED_CODE } from '../../modules/llm/llm.capabilities';
+import { LlmRuntimeService } from '../../modules/llm/llmRuntime.service';
 import { OllamaProvider } from '../../modules/llm/providers/ollama.provider';
 import { OpenAiCompatibleProvider } from '../../modules/llm/providers/openaiCompatible.provider';
 import { IChatWorkspaceContext } from '../../modules/chat/chat.types';
@@ -769,6 +771,41 @@ describe('ChatService', () => {
       expect(mockPrisma.chatMessage.create).not.toHaveBeenCalled();
     });
 
+    it('should reject unsupported completion before persisting the user message', async () => {
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+      const ollamaComplete = jest.spyOn(OllamaProvider.prototype, 'complete').mockResolvedValue({
+        content: 'unused',
+        model: TEST_MODEL_ID,
+      });
+      const openAiComplete = jest.spyOn(OpenAiCompatibleProvider.prototype, 'complete').mockResolvedValue({
+        content: 'unused',
+        model: TEST_MODEL_ID,
+      });
+      const error = new InvalidInputError(
+        'Provider type openai-compatible does not support completion.',
+        LLM_PROVIDER_CAPABILITY_UNSUPPORTED_CODE,
+      );
+      const resolveProvider = jest.spyOn(LlmRuntimeService, 'resolveGenerationProvider').mockRejectedValue(error);
+
+      await expect(ChatService.generateAssistantResponse({
+        sessionId: 1,
+        content: 'Hello',
+        providerId: 3,
+        model: EXPLICIT_TEST_MODEL_ID,
+      }, createWorkspaceContextFor(25))).rejects.toMatchObject({
+        code: LLM_PROVIDER_CAPABILITY_UNSUPPORTED_CODE,
+      });
+
+      expect(resolveProvider).toHaveBeenCalledWith({
+        providerId: 3,
+        model: EXPLICIT_TEST_MODEL_ID,
+        operation: 'completion',
+      });
+      expect(mockPrisma.chatMessage.create).not.toHaveBeenCalled();
+      expect(ollamaComplete).not.toHaveBeenCalled();
+      expect(openAiComplete).not.toHaveBeenCalled();
+    });
+
     it('should reject disabled explicit providers before persisting the user message', async () => {
       mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
       mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider({ enabled: false }));
@@ -912,6 +949,37 @@ describe('ChatService', () => {
       expect(JSON.stringify(loggedPayloads())).not.toContain('Hello');
       expect(JSON.stringify(loggedPayloads())).not.toContain('Hi there');
       expect(JSON.stringify(loggedPayloads())).not.toContain('Think first.');
+    });
+
+    it('should reject unsupported streaming before persisting the user message or opening upstream', async () => {
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+      const ollamaStream = jest.spyOn(OllamaProvider.prototype, 'streamComplete').mockReturnValue((async function* emptyStream() {})());
+      const openAiStream = jest.spyOn(OpenAiCompatibleProvider.prototype, 'streamComplete').mockReturnValue((async function* emptyStream() {})());
+      const error = new InvalidInputError(
+        'Provider type openai-compatible does not support streaming.',
+        LLM_PROVIDER_CAPABILITY_UNSUPPORTED_CODE,
+      );
+      const resolveProvider = jest.spyOn(LlmRuntimeService, 'resolveGenerationProvider').mockRejectedValue(error);
+
+      const stream = ChatService.streamAssistantResponse({
+        sessionId: 1,
+        content: 'Hello',
+        providerId: 3,
+        model: EXPLICIT_TEST_MODEL_ID,
+      }, createWorkspaceContextFor(25))[Symbol.asyncIterator]();
+
+      await expect(stream.next()).rejects.toMatchObject({
+        code: LLM_PROVIDER_CAPABILITY_UNSUPPORTED_CODE,
+      });
+
+      expect(resolveProvider).toHaveBeenCalledWith({
+        providerId: 3,
+        model: EXPLICIT_TEST_MODEL_ID,
+        operation: 'streaming',
+      });
+      expect(mockPrisma.chatMessage.create).not.toHaveBeenCalled();
+      expect(ollamaStream).not.toHaveBeenCalled();
+      expect(openAiStream).not.toHaveBeenCalled();
     });
 
     it('should stream through an OpenAI-compatible provider and persist metadata', async () => {

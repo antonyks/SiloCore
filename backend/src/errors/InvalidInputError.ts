@@ -1,9 +1,11 @@
 export class InvalidInputError extends Error {
   public statusCode: number = 400;
+  public readonly code?: string;
 
-  constructor(message: string = 'Invalid input provided.') {
+  constructor(message: string = 'Invalid input provided.', code?: string) {
     super(message);
     this.name = 'InvalidInputError';
-    Object.setPrototypeOf(this, InvalidInputError.prototype); 
+    this.code = code;
+    Object.setPrototypeOf(this, InvalidInputError.prototype);
   }
 }

@@ -6,6 +6,10 @@ import { fromDbProviderType } from './llmProviderConfig.types';
 import { SelectedLlmProviderConfig } from './llmProviderConfig.model';
 import { LlmRegistryService } from './llm.service';
 import {
+  ensureLlmProviderCapability,
+  LlmProviderCapability,
+} from './llm.capabilities';
+import {
   LlmModelListResult,
   LlmGenerationDefaults,
   LlmProviderConfig,
@@ -20,6 +24,14 @@ import { getLlmErrorCode, logLlmEvent } from './llm.logging';
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown provider error';
+}
+
+function getErrorCode(error: unknown): string | undefined {
+  if (typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string') {
+    return error.code;
+  }
+
+  return undefined;
 }
 
 function normalizeExtraHeaders(value: unknown): Record<string, string> {
@@ -126,6 +138,7 @@ function toProviderModelListResult(result: LlmProviderOperationResult) {
     modelCount: 0,
     capabilities: UNSUPPORTED_LLM_PROVIDER_CAPABILITIES,
     errorMessage: result.errorMessage,
+    errorCode: result.errorCode,
   };
 }
 
@@ -265,6 +278,7 @@ export const LlmRuntimeService = {
         providerType: adapter.config.type,
         status: 'error',
         errorMessage: getErrorMessage(error),
+        errorCode: getErrorCode(error),
       };
     }
   },
@@ -277,6 +291,19 @@ export const LlmRuntimeService = {
 
     if (!adapter) {
       return adapterUnavailable(config);
+    }
+
+    try {
+      ensureLlmProviderCapability(adapter, 'modelPulling');
+    } catch (error) {
+      return {
+        providerId: adapter.id,
+        providerName: adapter.config.name,
+        providerType: adapter.config.type,
+        status: 'error',
+        errorMessage: getErrorMessage(error),
+        errorCode: getErrorCode(error),
+      };
     }
 
     if (!adapter.pullModel) {
@@ -333,7 +360,11 @@ export const LlmRuntimeService = {
     }
   },
 
-  async resolveGenerationProvider(params: { providerId?: number; model?: string }): Promise<{
+  async resolveGenerationProvider(params: {
+    providerId?: number;
+    model?: string;
+    operation?: Extract<LlmProviderCapability, 'completion' | 'streaming'>;
+  }): Promise<{
     providerConfig: SelectedLlmProviderConfig;
     provider: ILlmProvider;
     model: string;
@@ -355,6 +386,9 @@ export const LlmRuntimeService = {
     if (!provider) {
       throw new InvalidInputError(`No adapter is available for provider type ${fromDbProviderType(providerConfig.type)}`);
     }
+
+    const operation = params.operation ?? 'completion';
+    ensureLlmProviderCapability(provider, operation);
 
     return {
       providerConfig,

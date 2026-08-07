@@ -223,6 +223,7 @@ export interface LlmProviderModelListResult {
   modelCount: number;
   capabilities: LlmProviderCapabilities;
   errorMessage?: string;
+  errorCode?: string;
 }
 
 export interface LlmModelListResult {
@@ -236,6 +237,7 @@ export interface LlmProviderOperationResult {
   providerType: LlmProviderType;
   status: LlmProviderModelListStatus;
   errorMessage?: string;
+  errorCode?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -276,6 +276,7 @@ describe('LlmProviderService', () => {
         providerType: 'openai-compatible',
         status: 'error',
         errorMessage: 'OpenAI-compatible model listing is unsupported: missing endpoint',
+        errorCode: 'MODEL_LISTING_UNSUPPORTED',
       });
       expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
         providerId: '1',
@@ -415,6 +416,27 @@ describe('LlmProviderService', () => {
         providerId: String(provider.id),
         status: 'success',
       }));
+    });
+
+    it('rejects unsupported model pull before provider-specific work starts', async () => {
+      const provider = createProvider({
+        type: 'OPENAI_COMPATIBLE',
+        name: 'OpenAI Compatible',
+      });
+
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(provider);
+
+      const result = await LlmProviderService.pullProviderModel(provider.id, TEST_MODEL_ID);
+
+      expect(result).toEqual({
+        providerId: String(provider.id),
+        providerName: 'OpenAI Compatible',
+        providerType: 'openai-compatible',
+        status: 'error',
+        errorMessage: 'Provider type openai-compatible does not support model pulling.',
+        errorCode: 'LLM_PROVIDER_CAPABILITY_UNSUPPORTED',
+      });
+      expect(mockedFetch).not.toHaveBeenCalled();
     });
   });
 });

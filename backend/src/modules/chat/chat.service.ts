@@ -19,6 +19,8 @@ import { LlmCompletionRequest, LlmMessage, TokenUsage } from '../llm/llm.types';
 import { getLlmErrorCode, logLlmEvent } from '../llm/llm.logging';
 import { CoreSingleOwnerWorkspaceAuthorizationPolicy, WorkspaceAction } from '../workspace';
 
+type ChatGenerationOperation = 'completion' | 'streaming';
+
 type PreparedGeneration = {
   provider: ILlmProvider;
   providerMetadata: {
@@ -239,7 +241,7 @@ export const ChatService = {
     context: IChatWorkspaceContext,
   ): Promise<IChatGenerationResult> {
     ensureAuthorizedWorkspace(context, WorkspaceAction.CREATE_RESOURCE);
-    const prepared = await this.prepareGeneration(input, context);
+    const prepared = await this.prepareGeneration(input, context, 'completion');
     logLlmEvent({
       requestId: input.requestId,
       providerId: prepared.providerMetadata.providerId,
@@ -304,7 +306,7 @@ export const ChatService = {
     context: IChatWorkspaceContext,
   ): AsyncIterable<ChatGenerationStreamEvent> {
     ensureAuthorizedWorkspace(context, WorkspaceAction.CREATE_RESOURCE);
-    const prepared = await this.prepareGeneration(input, context);
+    const prepared = await this.prepareGeneration(input, context, 'streaming');
     logLlmEvent({
       requestId: input.requestId,
       providerId: prepared.providerMetadata.providerId,
@@ -446,12 +448,14 @@ export const ChatService = {
   async prepareGeneration(
     input: IChatGenerationServiceInput,
     context: IChatWorkspaceContext,
+    operation: ChatGenerationOperation = 'completion',
   ): Promise<PreparedGeneration> {
     const workspaceId = ensureAuthorizedWorkspace(context, WorkspaceAction.READ_WORKSPACE);
     const session = await this.ensureSessionInWorkspace(input.sessionId, workspaceId);
     const resolved = await LlmRuntimeService.resolveGenerationProvider({
       providerId: input.providerId,
       model: input.model,
+      operation,
     });
 
     const userMessage = await ChatRepository.createMessage({
