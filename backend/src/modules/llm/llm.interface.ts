@@ -6,6 +6,8 @@
 import {
   LlmCompletionRequest,
   LlmCompletionResponse,
+  LlmEmbeddingRequest,
+  LlmEmbeddingResponse,
   LlmStreamChunk,
   LlmProviderCapabilities,
   LlmProviderConfig,
@@ -56,6 +58,11 @@ export interface ILlmProvider {
   streamComplete(
     request: LlmCompletionRequest,
   ): AsyncIterable<LlmStreamChunk>;
+
+  /**
+   * Generate vector embeddings for one or more text inputs.
+   */
+  embed(request: LlmEmbeddingRequest): Promise<LlmEmbeddingResponse>;
 
   // ------------------------------------------------------------------------
   // Model Management (optional but recommended)

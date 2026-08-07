@@ -7,6 +7,8 @@ import { ILlmProvider } from '../../modules/llm/llm.interface';
 import {
   LlmCompletionRequest,
   LlmCompletionResponse,
+  LlmEmbeddingRequest,
+  LlmEmbeddingResponse,
   LlmProviderCapabilities,
   LlmProviderConfig,
   LlmStreamChunk,
@@ -45,6 +47,7 @@ function createProvider(capabilities: LlmProviderCapabilities = CAPABILITIES): I
     destroy: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     complete: jest.fn<(request: LlmCompletionRequest) => Promise<LlmCompletionResponse>>(),
     streamComplete: jest.fn<(request: LlmCompletionRequest) => AsyncIterable<LlmStreamChunk>>(),
+    embed: jest.fn<(request: LlmEmbeddingRequest) => Promise<LlmEmbeddingResponse>>(),
     listModels: jest.fn<() => Promise<[]>>().mockResolvedValue([]),
     pullModel: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
   };

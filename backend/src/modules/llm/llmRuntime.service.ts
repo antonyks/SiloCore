@@ -11,6 +11,8 @@ import {
 } from './llm.capabilities';
 import {
   LlmModelListResult,
+  LlmEmbeddingRequest,
+  LlmEmbeddingResponse,
   LlmGenerationDefaults,
   LlmProviderConfig,
   LlmProviderOperationResult,
@@ -206,6 +208,9 @@ export const LlmRuntimeService = {
         streamComplete: () => createFailingStream(
           new Error(`No adapter is available for provider type ${config.type}`),
         ),
+        embed: async () => {
+          throw new Error(`No adapter is available for provider type ${config.type}`);
+        },
         listModels: async () => {
           throw new Error(`No adapter is available for provider type ${config.type}`);
         },
@@ -358,6 +363,26 @@ export const LlmRuntimeService = {
         errorMessage: getErrorMessage(error),
       };
     }
+  },
+
+  async embedWithProvider(params: {
+    providerId: number;
+    request: LlmEmbeddingRequest;
+  }): Promise<LlmEmbeddingResponse> {
+    const providerConfig = await this.getProviderConfigById(params.providerId);
+
+    if (!providerConfig.enabled) {
+      throw new InvalidInputError('LLM provider is disabled');
+    }
+
+    const provider = this.createProvider(providerConfig);
+    if (!provider) {
+      throw new InvalidInputError(`No adapter is available for provider type ${fromDbProviderType(providerConfig.type)}`);
+    }
+
+    ensureLlmProviderCapability(provider, 'embeddings');
+
+    return provider.embed(params.request);
   },
 
   async resolveGenerationProvider(params: {

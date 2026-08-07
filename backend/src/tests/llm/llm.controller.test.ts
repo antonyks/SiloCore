@@ -16,7 +16,7 @@ const OLLAMA_CAPABILITIES = {
   reasoning: true,
   modelListing: true,
   modelPulling: true,
-  embeddings: false,
+  embeddings: true,
   toolCalling: false,
   structuredOutput: false,
   tokenCounting: false,

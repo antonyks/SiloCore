@@ -9,6 +9,8 @@ import {
   LlmAuthenticationError,
   LlmCompletionRequest,
   LlmCompletionResponse,
+  LlmEmbeddingRequest,
+  LlmEmbeddingResponse,
   LlmMessage,
   LlmModelCapabilities,
   LlmProviderConfig,
@@ -29,6 +31,12 @@ interface OpenAiCompatibleChatRequest {
   top_p?: number;
   max_tokens?: number;
   stop?: string[];
+}
+
+interface OpenAiCompatibleEmbeddingRequest {
+  model: string;
+  input: string | string[];
+  dimensions?: number;
 }
 
 interface OpenAiCompatibleChatResponse {
@@ -66,6 +74,18 @@ interface OpenAiCompatibleModelListResponse {
   }>;
 }
 
+interface OpenAiCompatibleEmbeddingResponse {
+  model?: string;
+  data?: Array<{
+    embedding?: unknown;
+    index?: unknown;
+  }>;
+  usage?: {
+    prompt_tokens?: number;
+    total_tokens?: number;
+  };
+}
+
 type OpenAiCompatibleMessage = NonNullable<
   NonNullable<OpenAiCompatibleChatResponse['choices']>[number]['message']
 >;
@@ -82,8 +102,16 @@ function buildModelsUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, '')}/models`;
 }
 
+function buildEmbeddingsUrl(baseUrl: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}/embeddings`;
+}
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isEmbeddingVector(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every(isFiniteNumber);
 }
 
 const UNKNOWN_MODEL_CAPABILITIES: LlmModelCapabilities = {
@@ -150,7 +178,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
       reasoning: true,
       modelListing: true,
       modelPulling: false,
-      embeddings: false,
+      embeddings: true,
       toolCalling: false,
       structuredOutput: false,
       tokenCounting: false,
@@ -190,6 +218,71 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
       });
       throw normalizedError;
     }
+  }
+
+  async embed(request: LlmEmbeddingRequest): Promise<LlmEmbeddingResponse> {
+    const body: OpenAiCompatibleEmbeddingRequest = {
+      model: request.model,
+      input: request.input,
+      dimensions: request.dimensions,
+    };
+    const startedAt = Date.now();
+
+    logLlmEvent({
+      providerId: this.id,
+      providerType: this.config.type,
+      model: request.model,
+      operation: 'provider.embed',
+      status: 'started',
+    });
+
+    let result: { value: OpenAiCompatibleEmbeddingResponse; latencyMs: number };
+    try {
+      result = await this.withLatency(async () => {
+        const res = await fetch(buildEmbeddingsUrl(this.config.baseUrl), {
+          method: 'POST',
+          headers: this.buildRequestHeaders({
+            'Content-Type': 'application/json',
+          }),
+          body: JSON.stringify(body),
+          signal: this.buildAbortSignal(),
+        });
+
+        if (!res.ok) {
+          await this.throwEmbeddingHttpError(res);
+        }
+
+        try {
+          return (await res.json()) as OpenAiCompatibleEmbeddingResponse;
+        } catch {
+          throw this.createMalformedEmbeddingResponseError();
+        }
+      });
+    } catch (error) {
+      const normalizedError = this.normalizeEmbeddingError(error);
+      logLlmEvent({
+        providerId: this.id,
+        providerType: this.config.type,
+        model: request.model,
+        operation: 'provider.embed',
+        latencyMs: Date.now() - startedAt,
+        status: 'error',
+        errorCode: getLlmErrorCode(normalizedError),
+      });
+      throw normalizedError;
+    }
+
+    const response = this.normalizeEmbeddingResponse(result.value, request.model, result.latencyMs);
+    logLlmEvent({
+      providerId: this.id,
+      providerType: this.config.type,
+      model: response.model,
+      operation: 'provider.embed',
+      latencyMs: result.latencyMs,
+      status: 'success',
+    });
+
+    return response;
   }
 
   async complete(request: LlmCompletionRequest): Promise<LlmCompletionResponse> {
@@ -446,6 +539,36 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
     );
   }
 
+  private async throwEmbeddingHttpError(res: Response): Promise<never> {
+    const detail = await readProviderErrorMessage(res);
+    const suffix = detail ? `: ${detail}` : '';
+
+    if (res.status === 401 || res.status === 403) {
+      throw new LlmAuthenticationError(
+        `OpenAI-compatible authentication failed${suffix}`,
+        this.id,
+        'AUTHENTICATION_ERROR',
+        res.status,
+      );
+    }
+
+    if (res.status === 429) {
+      throw new LlmRateLimitError(
+        `OpenAI-compatible rate limit exceeded${suffix}`,
+        this.id,
+        'RATE_LIMITED',
+        res.status,
+      );
+    }
+
+    throw new LlmProviderError(
+      `OpenAI-compatible embedding failed with status ${res.status}${suffix}`,
+      this.id,
+      `HTTP_${res.status}`,
+      res.status,
+    );
+  }
+
   private async throwStreamingHttpError(res: Response): Promise<never> {
     const detail = await readProviderErrorMessage(res);
     const suffix = detail ? `: ${detail}` : '';
@@ -546,6 +669,34 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
     );
   }
 
+  private normalizeEmbeddingError(error: unknown): Error {
+    if (error instanceof LlmProviderError) {
+      return error;
+    }
+
+    if (isAbortError(error)) {
+      return new LlmProviderError(
+        'OpenAI-compatible embedding timed out or was aborted',
+        this.id,
+        'REQUEST_TIMEOUT',
+      );
+    }
+
+    if (error instanceof Error) {
+      return new LlmProviderError(
+        `OpenAI-compatible embedding failed: ${error.message}`,
+        this.id,
+        'EMBEDDINGS_FAILED',
+      );
+    }
+
+    return new LlmProviderError(
+      'OpenAI-compatible embedding failed',
+      this.id,
+      'EMBEDDINGS_FAILED',
+    );
+  }
+
   private normalizeCompletionResponse(
     raw: OpenAiCompatibleChatResponse,
     fallbackModel: string,
@@ -592,6 +743,14 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
     );
   }
 
+  private createMalformedEmbeddingResponseError(): LlmProviderError {
+    return new LlmProviderError(
+      'OpenAI-compatible embedding response was malformed',
+      this.id,
+      'MALFORMED_EMBEDDING_RESPONSE',
+    );
+  }
+
   private async fetchModelList(timeoutMs?: number): Promise<OpenAiCompatibleModelListResponse> {
     const res = await fetch(buildModelsUrl(this.config.baseUrl), {
       headers: this.buildRequestHeaders(),
@@ -621,6 +780,49 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
         modelName: model.id,
         capabilities: { ...UNKNOWN_MODEL_CAPABILITIES },
       }));
+  }
+
+  private normalizeEmbeddingResponse(
+    raw: OpenAiCompatibleEmbeddingResponse,
+    fallbackModel: string,
+    latencyMs: number,
+  ): LlmEmbeddingResponse {
+    if (!Array.isArray(raw.data)) {
+      throw this.createMalformedEmbeddingResponseError();
+    }
+
+    const embeddings = raw.data.map((item) => {
+      if (!isEmbeddingVector(item.embedding) || !isFiniteNumber(item.index)) {
+        throw this.createMalformedEmbeddingResponseError();
+      }
+
+      return {
+        embedding: item.embedding,
+        index: item.index,
+      };
+    }).sort((left, right) => left.index - right.index);
+
+    const promptTokens = isFiniteNumber(raw.usage?.prompt_tokens)
+      ? raw.usage.prompt_tokens
+      : undefined;
+    const totalTokens = isFiniteNumber(raw.usage?.total_tokens)
+      ? raw.usage.total_tokens
+      : undefined;
+
+    return {
+      providerId: this.id,
+      providerName: this.config.name,
+      providerType: this.config.type,
+      model: raw.model ?? fallbackModel,
+      embeddings,
+      usage: promptTokens === undefined || totalTokens === undefined
+        ? undefined
+        : {
+          promptTokens,
+          totalTokens,
+        },
+      latencyMs,
+    };
   }
 
   private async *readStreamChunks(reader: NodeJS.ReadableStream): AsyncIterable<LlmStreamChunk> {

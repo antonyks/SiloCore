@@ -103,7 +103,7 @@ describe('OpenAiCompatibleProvider completion', () => {
       reasoning: true,
       modelListing: true,
       modelPulling: false,
-      embeddings: false,
+      embeddings: true,
       toolCalling: false,
       structuredOutput: false,
       tokenCounting: false,
@@ -175,6 +175,84 @@ describe('OpenAiCompatibleProvider completion', () => {
       usage: { promptTokens: 5, completionTokens: 7, totalTokens: 12 },
       latencyMs: expect.any(Number),
     });
+  });
+
+  it('sends a standard embedding request and normalizes the response', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        object: 'list',
+        model: 'embedding-model',
+        data: [
+          { object: 'embedding', index: 1, embedding: [0.3, 0.4] },
+          { object: 'embedding', index: 0, embedding: [0.1, 0.2] },
+        ],
+        usage: {
+          prompt_tokens: 6,
+          total_tokens: 6,
+        },
+      }),
+    }));
+
+    const result = await createProvider({
+      apiKey: 'secret-token',
+      extraHeaders: {
+        Authorization: 'Bearer wrong-token',
+        'X-Provider': 'openai-compatible',
+      },
+    }).embed({
+      model: TEST_MODEL_ID,
+      input: ['Private first', 'Private second'],
+      dimensions: 2,
+      truncate: false,
+    });
+
+    expect(mockedFetch).toHaveBeenCalledWith(
+      'https://api.example.com/v1/embeddings',
+      expect.objectContaining({
+        method: 'POST',
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(getFetchOptions().headers).toEqual({
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer secret-token',
+      'X-Provider': 'openai-compatible',
+    });
+    expect(JSON.parse(getFetchOptions().body ?? '{}')).toEqual({
+      model: TEST_MODEL_ID,
+      input: ['Private first', 'Private second'],
+      dimensions: 2,
+    });
+    expect(result).toEqual({
+      providerId: 'cloud-openai-compatible',
+      providerName: 'OpenAI Compatible',
+      providerType: 'openai-compatible',
+      model: 'embedding-model',
+      embeddings: [
+        { embedding: [0.1, 0.2], index: 0 },
+        { embedding: [0.3, 0.4], index: 1 },
+      ],
+      usage: { promptTokens: 6, totalTokens: 6 },
+      latencyMs: expect.any(Number),
+    });
+    expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'cloud-openai-compatible',
+      providerType: 'openai-compatible',
+      model: TEST_MODEL_ID,
+      operation: 'provider.embed',
+      status: 'started',
+    }), 'provider.embed.started');
+    expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'cloud-openai-compatible',
+      providerType: 'openai-compatible',
+      model: 'embedding-model',
+      operation: 'provider.embed',
+      status: 'success',
+      latencyMs: expect.any(Number),
+    }), 'provider.embed.success');
+    expect(loggedText()).not.toContain('secret-token');
+    expect(loggedText()).not.toContain('Private first');
+    expect(loggedText()).not.toContain('Private second');
   });
 
   it('logs lifecycle fields without secrets, headers, prompts, assistant content, or reasoning', async () => {
@@ -339,6 +417,110 @@ describe('OpenAiCompatibleProvider completion', () => {
       providerId: 'cloud-openai-compatible',
       code: 'MALFORMED_RESPONSE',
       message: 'OpenAI-compatible completion response was malformed',
+    });
+  });
+
+  it.each([
+    [401, LlmAuthenticationError, 'AUTHENTICATION_ERROR'],
+    [403, LlmAuthenticationError, 'AUTHENTICATION_ERROR'],
+  ])('maps %s embedding responses to authentication errors', async (status, errorType, code) => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      ok: false,
+      status,
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        error: { message: 'invalid api key' },
+      }),
+    }));
+
+    await expect(createProvider().embed({
+      model: TEST_MODEL_ID,
+      input: 'Hi',
+    })).rejects.toBeInstanceOf(errorType);
+    await expect(createProvider().embed({
+      model: TEST_MODEL_ID,
+      input: 'Hi',
+    })).rejects.toMatchObject({
+      providerId: 'cloud-openai-compatible',
+      code,
+      statusCode: status,
+      message: 'OpenAI-compatible authentication failed: invalid api key',
+    });
+  });
+
+  it('maps embedding rate-limit responses to rate-limit errors', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      ok: false,
+      status: 429,
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        error: { message: 'too many requests' },
+      }),
+    }));
+
+    await expect(createProvider().embed({
+      model: TEST_MODEL_ID,
+      input: 'Hi',
+    })).rejects.toBeInstanceOf(LlmRateLimitError);
+    await expect(createProvider().embed({
+      model: TEST_MODEL_ID,
+      input: 'Hi',
+    })).rejects.toMatchObject({
+      providerId: 'cloud-openai-compatible',
+      code: 'RATE_LIMITED',
+      statusCode: 429,
+      message: 'OpenAI-compatible rate limit exceeded: too many requests',
+    });
+  });
+
+  it('maps generic embedding HTTP failures to provider errors', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      ok: false,
+      status: 500,
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        error: { message: 'upstream unavailable' },
+      }),
+    }));
+
+    await expect(createProvider().embed({
+      model: TEST_MODEL_ID,
+      input: 'Hi',
+    })).rejects.toMatchObject({
+      providerId: 'cloud-openai-compatible',
+      code: 'HTTP_500',
+      statusCode: 500,
+      message: 'OpenAI-compatible embedding failed with status 500: upstream unavailable',
+    });
+  });
+
+  it('maps embedding aborts to timeout provider errors', async () => {
+    const abortError = new Error('The operation was aborted');
+    abortError.name = 'AbortError';
+    mockedFetch.mockRejectedValue(abortError);
+
+    await expect(createProvider().embed({
+      model: TEST_MODEL_ID,
+      input: 'Hi',
+    })).rejects.toMatchObject({
+      providerId: 'cloud-openai-compatible',
+      code: 'REQUEST_TIMEOUT',
+      message: 'OpenAI-compatible embedding timed out or was aborted',
+    });
+  });
+
+  it('maps malformed embedding payloads to provider errors', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        model: TEST_MODEL_ID,
+        data: [{ index: 0, embedding: [0.1, 'bad'] }],
+      }),
+    }));
+
+    await expect(createProvider().embed({
+      model: TEST_MODEL_ID,
+      input: 'Hi',
+    })).rejects.toMatchObject({
+      providerId: 'cloud-openai-compatible',
+      code: 'MALFORMED_EMBEDDING_RESPONSE',
+      message: 'OpenAI-compatible embedding response was malformed',
     });
   });
 

@@ -4,6 +4,8 @@ import { LlmRegistryService } from '../../modules/llm/llm.service';
 import {
   LlmCompletionRequest,
   LlmCompletionResponse,
+  LlmEmbeddingRequest,
+  LlmEmbeddingResponse,
   LlmProviderCapabilities,
   LlmProviderConfig,
   LlmProviderListedModel,
@@ -48,6 +50,7 @@ function createProvider(
     destroy: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     complete: jest.fn<(request: LlmCompletionRequest) => Promise<LlmCompletionResponse>>(),
     streamComplete: jest.fn<(request: LlmCompletionRequest) => AsyncIterable<LlmStreamChunk>>(),
+    embed: jest.fn<(request: LlmEmbeddingRequest) => Promise<LlmEmbeddingResponse>>(),
     listModels,
   };
 }

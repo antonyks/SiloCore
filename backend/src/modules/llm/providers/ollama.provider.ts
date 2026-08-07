@@ -8,12 +8,15 @@ import { AbstractLlmProvider } from '../llm.base';
 import {
     LlmCompletionRequest,
     LlmCompletionResponse,
+    LlmEmbeddingRequest,
+    LlmEmbeddingResponse,
     LlmStreamChunk,
     LlmMessage,
     TokenUsage,
     LlmStreamingError,
     LlmModelCapabilities,
     LlmProviderConfig,
+    LlmProviderError,
     LlmProviderListedModel,
 } from '../llm.types';
 import { getLlmErrorCode, logLlmEvent } from '../llm.logging';
@@ -43,8 +46,31 @@ interface OllamaGenerateResponse {
     eval_count?: number;
 }
 
+interface OllamaEmbeddingRequest {
+    model: string;
+    input: string | string[];
+    truncate?: boolean;
+    dimensions?: number;
+}
+
+interface OllamaEmbeddingResponse {
+    model?: string;
+    embeddings?: unknown;
+    total_duration?: number;
+    load_duration?: number;
+    prompt_eval_count?: number;
+}
+
 function extractReasoning(message: OllamaGenerateResponse['message']): string | undefined {
     return message?.thinking ?? message?.reasoning ?? message?.reasoning_content;
+}
+
+function isAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === 'AbortError';
+}
+
+function isEmbeddingVector(value: unknown): value is number[] {
+    return Array.isArray(value) && value.every((entry) => typeof entry === 'number' && Number.isFinite(entry));
 }
 
 const UNKNOWN_MODEL_CAPABILITIES: LlmModelCapabilities = {
@@ -65,7 +91,7 @@ export class OllamaProvider extends AbstractLlmProvider {
             reasoning: true,
             modelListing: true,
             modelPulling: true,
-            embeddings: false,
+            embeddings: true,
             toolCalling: false,
             structuredOutput: false,
             tokenCounting: false,
@@ -107,6 +133,72 @@ export class OllamaProvider extends AbstractLlmProvider {
             });
             this.throwProviderError(`Ollama unreachable: ${(err as Error).message}`, 'CONNECTION_ERROR');
         }
+    }
+
+    async embed(request: LlmEmbeddingRequest): Promise<LlmEmbeddingResponse> {
+        const body: OllamaEmbeddingRequest = {
+            model: request.model,
+            input: request.input,
+            truncate: request.truncate,
+            dimensions: request.dimensions,
+        };
+        const startedAt = Date.now();
+        logLlmEvent({
+            providerId: this.id,
+            providerType: this.config.type,
+            model: request.model,
+            operation: 'provider.embed',
+            status: 'started',
+        });
+
+        let result: { value: OllamaEmbeddingResponse; latencyMs: number };
+        try {
+            result = await this.withLatency(async () => {
+                const res = await fetch(`${this.config.baseUrl}/api/embed`, {
+                    method: 'POST',
+                    headers: this.buildRequestHeaders({
+                        'Content-Type': 'application/json',
+                    }),
+                    body: JSON.stringify(body),
+                    signal: this.buildAbortSignal(),
+                });
+
+                if (!res.ok) {
+                    const text = await res.text().catch(() => '');
+                    this.throwProviderError(`Ollama embedding error: ${text}`, `HTTP_${res.status}`, res.status);
+                }
+
+                try {
+                    return (await res.json()) as OllamaEmbeddingResponse;
+                } catch {
+                    this.throwProviderError('Ollama embedding response was malformed', 'MALFORMED_EMBEDDING_RESPONSE');
+                }
+            });
+        } catch (error) {
+            const normalizedError = this.normalizeEmbeddingError(error);
+            logLlmEvent({
+                providerId: this.id,
+                providerType: this.config.type,
+                model: request.model,
+                operation: 'provider.embed',
+                latencyMs: Date.now() - startedAt,
+                status: 'error',
+                errorCode: getLlmErrorCode(normalizedError),
+            });
+            throw normalizedError;
+        }
+
+        const response = this.normalizeEmbeddingResponse(result.value, request.model, result.latencyMs);
+        logLlmEvent({
+            providerId: this.id,
+            providerType: this.config.type,
+            model: response.model,
+            operation: 'provider.embed',
+            latencyMs: result.latencyMs,
+            status: 'success',
+        });
+
+        return response;
     }
 
     async complete(request: LlmCompletionRequest): Promise<LlmCompletionResponse> {
@@ -411,5 +503,66 @@ export class OllamaProvider extends AbstractLlmProvider {
             });
             throw error;
         }
+    }
+
+    private normalizeEmbeddingResponse(
+        raw: OllamaEmbeddingResponse,
+        fallbackModel: string,
+        latencyMs: number,
+    ): LlmEmbeddingResponse {
+        if (!Array.isArray(raw.embeddings) || !raw.embeddings.every(isEmbeddingVector)) {
+            this.throwProviderError('Ollama embedding response was malformed', 'MALFORMED_EMBEDDING_RESPONSE');
+        }
+        const embeddings = raw.embeddings as number[][];
+
+        const promptTokens = typeof raw.prompt_eval_count === 'number' && Number.isFinite(raw.prompt_eval_count)
+            ? raw.prompt_eval_count
+            : undefined;
+
+        return {
+            providerId: this.id,
+            providerName: this.config.name,
+            providerType: this.config.type,
+            model: raw.model ?? fallbackModel,
+            embeddings: embeddings.map((embedding, index) => ({
+                embedding,
+                index,
+            })),
+            usage: promptTokens === undefined
+                ? undefined
+                : {
+                    promptTokens,
+                    totalTokens: promptTokens,
+                },
+            latencyMs,
+        };
+    }
+
+    private normalizeEmbeddingError(error: unknown): Error {
+        if (error instanceof LlmProviderError) {
+            return error;
+        }
+
+        if (isAbortError(error)) {
+            return new LlmProviderError(
+                'Ollama embedding timed out or was aborted',
+                this.id,
+                'REQUEST_TIMEOUT',
+            );
+        }
+
+        if (error instanceof Error) {
+            return new LlmProviderError(
+                `Ollama embedding failed: ${error.message}`,
+                this.id,
+                'EMBEDDINGS_FAILED',
+            );
+        }
+
+        return new LlmProviderError(
+            'Ollama embedding failed',
+            this.id,
+            'EMBEDDINGS_FAILED',
+        );
     }
 }

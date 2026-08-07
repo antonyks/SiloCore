@@ -107,6 +107,33 @@ export interface LlmCompletionResponse {
   latencyMs?: number;
 }
 
+export interface LlmEmbeddingRequest {
+  model: string;
+  input: string | string[];
+  dimensions?: number;
+  truncate?: boolean;
+}
+
+export interface LlmEmbeddingVector {
+  embedding: number[];
+  index: number;
+}
+
+export interface LlmEmbeddingUsage {
+  promptTokens: number;
+  totalTokens: number;
+}
+
+export interface LlmEmbeddingResponse {
+  providerId: string;
+  providerName: string;
+  providerType: LlmProviderType;
+  model: string;
+  embeddings: LlmEmbeddingVector[];
+  usage?: LlmEmbeddingUsage;
+  latencyMs?: number;
+}
+
 // ---------------------------------------------------------------------------
 // Configuration Types
 // ---------------------------------------------------------------------------

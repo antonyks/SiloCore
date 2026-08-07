@@ -148,6 +148,26 @@ describe('OllamaProvider timeouts', () => {
       expect.objectContaining({ signal }),
     );
   });
+
+  it('passes configured timeout signal to embedding requests', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        model: TEST_MODEL_ID,
+        embeddings: [[0.1, 0.2]],
+      }),
+    }));
+
+    await createProvider().embed({
+      model: TEST_MODEL_ID,
+      input: 'Hello',
+    });
+
+    expect(timeoutSpy).toHaveBeenCalledWith(30000);
+    expect(mockedFetch).toHaveBeenCalledWith(
+      `${TEST_BASE_URL}/api/embed`,
+      expect.objectContaining({ signal }),
+    );
+  });
 });
 
 describe('OllamaProvider headers', () => {
@@ -242,6 +262,37 @@ describe('OllamaProvider headers', () => {
     });
   });
 
+  it('passes api key, extra headers, and content type to embedding requests', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        model: TEST_MODEL_ID,
+        embeddings: [[0.1, 0.2]],
+      }),
+    }));
+
+    await createProvider({
+      apiKey: 'secret-token',
+      extraHeaders: { 'X-Provider': 'ollama' },
+    }).embed({
+      model: TEST_MODEL_ID,
+      input: ['Private first', 'Private second'],
+      dimensions: 2,
+      truncate: false,
+    });
+
+    expect(getFetchOptions().headers).toEqual({
+      'Content-Type': 'application/json',
+      'X-Provider': 'ollama',
+      Authorization: 'Bearer secret-token',
+    });
+    expect(JSON.parse((mockedFetch.mock.calls[0][1] as { body?: string }).body ?? '{}')).toEqual({
+      model: TEST_MODEL_ID,
+      input: ['Private first', 'Private second'],
+      dimensions: 2,
+      truncate: false,
+    });
+  });
+
   it('lets apiKey take precedence over Authorization from extra headers', async () => {
     mockedFetch.mockResolvedValue(mockResponse());
 
@@ -311,7 +362,7 @@ describe('OllamaProvider capabilities', () => {
       reasoning: true,
       modelListing: true,
       modelPulling: true,
-      embeddings: false,
+      embeddings: true,
       toolCalling: false,
       structuredOutput: false,
       tokenCounting: false,
@@ -340,6 +391,101 @@ describe('OllamaProvider capabilities', () => {
         },
       },
     ]);
+  });
+});
+
+describe('OllamaProvider embeddings', () => {
+  beforeEach(() => {
+    mockedFetch.mockReset();
+    jest.clearAllMocks();
+  });
+
+  it('normalizes successful embedding responses', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        model: 'embedding-model',
+        embeddings: [
+          [0.1, 0.2],
+          [0.3, 0.4],
+        ],
+        prompt_eval_count: 9,
+      }),
+    }));
+
+    const result = await createProvider().embed({
+      model: TEST_MODEL_ID,
+      input: ['Private first', 'Private second'],
+    });
+
+    expect(result).toEqual({
+      providerId: 'local-ollama',
+      providerName: 'Local Ollama',
+      providerType: 'ollama',
+      model: 'embedding-model',
+      embeddings: [
+        { embedding: [0.1, 0.2], index: 0 },
+        { embedding: [0.3, 0.4], index: 1 },
+      ],
+      usage: { promptTokens: 9, totalTokens: 9 },
+      latencyMs: expect.any(Number),
+    });
+    expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'local-ollama',
+      providerType: 'ollama',
+      model: TEST_MODEL_ID,
+      operation: 'provider.embed',
+      status: 'started',
+    }), 'provider.embed.started');
+    expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'local-ollama',
+      providerType: 'ollama',
+      model: 'embedding-model',
+      operation: 'provider.embed',
+      status: 'success',
+      latencyMs: expect.any(Number),
+    }), 'provider.embed.success');
+    const logText = JSON.stringify([
+      ...mockedLogger.info.mock.calls.map(([payload]) => payload),
+      ...mockedLogger.error.mock.calls.map(([payload]) => payload),
+    ]);
+    expect(logText).not.toContain('Private first');
+    expect(logText).not.toContain('Private second');
+  });
+
+  it('rejects malformed embedding responses', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        model: TEST_MODEL_ID,
+        embeddings: [[0.1, 'bad']],
+      }),
+    }));
+
+    await expect(createProvider().embed({
+      model: TEST_MODEL_ID,
+      input: 'Hello',
+    })).rejects.toMatchObject({
+      providerId: 'local-ollama',
+      code: 'MALFORMED_EMBEDDING_RESPONSE',
+      message: 'Ollama embedding response was malformed',
+    });
+  });
+
+  it('maps embedding HTTP failures to provider errors', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      ok: false,
+      status: 500,
+      text: jest.fn<() => Promise<string>>().mockResolvedValue('embedding failed'),
+    }));
+
+    await expect(createProvider().embed({
+      model: TEST_MODEL_ID,
+      input: 'Hello',
+    })).rejects.toMatchObject({
+      providerId: 'local-ollama',
+      code: 'HTTP_500',
+      statusCode: 500,
+      message: 'Ollama embedding error: embedding failed',
+    });
   });
 });
 

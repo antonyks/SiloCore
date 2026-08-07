@@ -7,6 +7,8 @@ import { ILlmProvider } from './llm.interface';
 import {
   LlmCompletionRequest,
   LlmCompletionResponse,
+  LlmEmbeddingRequest,
+  LlmEmbeddingResponse,
   LlmStreamChunk,
   LlmProviderCapabilities,
   LlmProviderConfig,
@@ -51,6 +53,7 @@ export abstract class AbstractLlmProvider implements ILlmProvider {
 
   abstract complete(request: LlmCompletionRequest): Promise<LlmCompletionResponse>;
   abstract streamComplete(request: LlmCompletionRequest): AsyncIterable<LlmStreamChunk>;
+  abstract embed(request: LlmEmbeddingRequest): Promise<LlmEmbeddingResponse>;
   abstract listModels(): Promise<LlmProviderListedModel[]>;
 
   // ------------------------------------------------------------------------
