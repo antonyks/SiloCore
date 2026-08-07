@@ -22,6 +22,31 @@ services:
     networks:
       - silocore-network
 
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: silocore-worker
+    command: ["npm", "run", "dev:worker"]
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/silocore
+      OLLAMA_HOST: http://host.docker.internal:11434
+      WORKER_CONCURRENCY: "1"
+      PISCINA_THREAD_COUNT: "1"
+      PGBOSS_SCHEMA: pgboss
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - silocore-network
+
   frontend:
     build:
       context: ./frontend

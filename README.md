@@ -58,7 +58,7 @@ The frontend is organized by features under `frontend/src/features`, with shared
 ## Prerequisites
 
 - Docker and Docker Compose
-- Node.js 20+ if running services outside Docker
+- Node.js 22.12+ if running backend services outside Docker
 - npm
 - Ollama if you want local model inference
 
@@ -93,7 +93,7 @@ You can use a different model as long as `OLLAMA_MODEL` matches it.
    docker compose up --build
    ```
 
-Docker Compose starts PostgreSQL, applies Prisma migrations, and seeds local demo users on startup. The frontend runs at `http://localhost:5173`, and the backend health check is available at `http://localhost:5000/health`.
+Docker Compose starts PostgreSQL, applies Prisma migrations, seeds local demo users, and runs the backend worker on startup. The worker manages the pg-boss queue schema automatically. The frontend runs at `http://localhost:5173`, and the backend health check is available at `http://localhost:5000/health`.
 
 ### Local Demo Accounts
 
@@ -160,6 +160,9 @@ Backend variables live in `backend/.env`:
 | `OLLAMA_HOST` | Ollama base URL |
 | `OLLAMA_MODEL` | Default model used when bootstrapping the local provider |
 | `EMBEDDING_MODEL` | Reserved for embedding-related work |
+| `WORKER_CONCURRENCY` | Worker handler concurrency, default `1` |
+| `PISCINA_THREAD_COUNT` | Reserved worker CPU pool size, default `1` |
+| `PGBOSS_SCHEMA` | PostgreSQL schema used by pg-boss, default `pgboss` |
 
 Frontend variables live in `frontend/.env`:
 
@@ -209,12 +212,18 @@ Backend commands are run from `backend/`:
 
 ```bash
 npm run dev
+npm run dev:worker
 npm run build
+npm run start:worker
 npm test
 npm run test:integration
 npm run lint
 npm run prisma:generate
 npm run prisma:migrate
+npm run pgboss:plans
+npm run pgboss:migrate
+npm run pgboss:version
+npm run pgboss:doctor
 ```
 
 Frontend commands are run from `frontend/`:

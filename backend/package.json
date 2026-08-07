@@ -5,13 +5,19 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "nodemon src/server.ts",
+    "dev:worker": "ts-node src/worker.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "start:worker": "node dist/worker.js",
     "lint": "eslint src --ext .ts",
     "test": "jest --runInBand --detectOpenHandles",
     "test:integration": "jest --config jest.integration.config.ts --runInBand --detectOpenHandles",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "pgboss:plans": "pg-boss plans migrate --schema ${PGBOSS_SCHEMA:-pgboss}",
+    "pgboss:migrate": "pg-boss migrate --schema ${PGBOSS_SCHEMA:-pgboss}",
+    "pgboss:version": "pg-boss version --schema ${PGBOSS_SCHEMA:-pgboss}",
+    "pgboss:doctor": "pg-boss doctor --schema ${PGBOSS_SCHEMA:-pgboss}"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"
@@ -38,6 +44,7 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "node-fetch": "^3.3.2",
+    "pg-boss": "^12.27.0",
     "pino": "^9.14.0",
     "pino-pretty": "^13.1.2",
     "uuid": "^13.0.0"
@@ -50,7 +57,7 @@
     "@types/jest": "^29.5.12",
     "@types/jsonwebtoken": "^9.0.5",
     "@types/morgan": "^1.9.6",
-    "@types/node": "^20.19.25",
+    "@types/node": "^22.20.1",
     "@types/pg": "^8.20.0",
     "eslint": "^9.39.1",
     "globals": "^16.5.0",

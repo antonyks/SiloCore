@@ -7,6 +7,18 @@ function ensureEnvVar(name: string): string {
   return value;
 }
 
+function positiveIntegerEnv(name: string, defaultValue: number): number {
+  const rawValue = process.env[name];
+  if (!rawValue) return defaultValue;
+
+  const value = Number(rawValue);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`Environment variable ${name} must be a positive integer.`);
+  }
+
+  return value;
+}
+
 export const ENV = {
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: Number(process.env.PORT) || 5000,
@@ -14,5 +26,8 @@ export const ENV = {
   JWT_SECRET: ensureEnvVar('JWT_SECRET'),
   LOG_LEVEL: process.env.LOG_LEVEL || 'info',
   OLLAMA_HOST: process.env.OLLAMA_HOST || 'http://host.docker.internal:11434',
-  OLLAMA_MODEL: ensureEnvVar('OLLAMA_MODEL')
+  OLLAMA_MODEL: ensureEnvVar('OLLAMA_MODEL'),
+  WORKER_CONCURRENCY: positiveIntegerEnv('WORKER_CONCURRENCY', 1),
+  PISCINA_THREAD_COUNT: positiveIntegerEnv('PISCINA_THREAD_COUNT', 1),
+  PGBOSS_SCHEMA: process.env.PGBOSS_SCHEMA || 'pgboss',
 };
