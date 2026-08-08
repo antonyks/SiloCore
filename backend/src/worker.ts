@@ -5,6 +5,7 @@ import { PgBoss } from 'pg-boss';
 import { ENV } from './config/env';
 import { connectDatabase, prisma } from './config/database';
 import { logger } from './config/logger';
+import { JobService, PgBossJobQueueTransport } from './modules/job';
 
 let boss: PgBoss | undefined;
 let shutdownStarted = false;
@@ -48,12 +49,17 @@ async function startWorker() {
     });
 
     await boss.start();
+    const jobQueueReconciliation =
+      await JobService.reconcileQueuedJobsWithoutQueueMessage(
+        new PgBossJobQueueTransport(boss),
+      );
 
     logger.info(
       {
         workerConcurrency: ENV.WORKER_CONCURRENCY,
         piscinaThreadCount: ENV.PISCINA_THREAD_COUNT,
         pgBossSchema: ENV.PGBOSS_SCHEMA,
+        jobQueueReconciliation,
       },
       'Worker started with no registered job handlers.',
     );
