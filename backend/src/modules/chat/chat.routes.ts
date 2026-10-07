@@ -11,72 +11,81 @@ import {
   validateSessionId,
 } from './chat.validation';
 
-const router = Router();
+export function createChatRoutes(dependencies: {
+  authenticate?: typeof authenticate;
+  controller?: typeof ChatController;
+} = {}) {
+  const authenticateRequest = dependencies.authenticate ?? authenticate;
+  const controller = dependencies.controller ?? ChatController;
+  const router = Router();
 
-// Session routes
-router.post('/', 
-  authenticate,
-  validateChatSessionCreate,
-  handleValidationErrors,
-  ChatController.createSession
-);
+  // Session routes
+  router.post('/',
+    authenticateRequest,
+    validateChatSessionCreate,
+    handleValidationErrors,
+    controller.createSession
+  );
 
-router.get('/', 
-  authenticate,
-  ChatController.getSessions
-);
+  router.get('/',
+    authenticateRequest,
+    controller.getSessions
+  );
 
-router.get('/:id', 
-  authenticate,
-  validateSessionId,
-  handleValidationErrors,
-  ChatController.getSessionById
-);
+  router.get('/:id',
+    authenticateRequest,
+    validateSessionId,
+    handleValidationErrors,
+    controller.getSessionById
+  );
 
-router.put('/:id', 
-  authenticate,
-  validateSessionId,
-  validateChatSessionUpdate,
-  handleValidationErrors,
-  ChatController.updateSession
-);
+  router.put('/:id',
+    authenticateRequest,
+    validateSessionId,
+    validateChatSessionUpdate,
+    handleValidationErrors,
+    controller.updateSession
+  );
 
-router.delete('/:id', 
-  authenticate,
-  validateSessionId,
-  handleValidationErrors,
-  ChatController.deleteSession
-);
+  router.delete('/:id',
+    authenticateRequest,
+    validateSessionId,
+    handleValidationErrors,
+    controller.deleteSession
+  );
 
-router.post('/:id/generate',
-  authenticate,
-  validateSessionId,
-  validateChatGeneration,
-  handleValidationErrors,
-  ChatController.generateAssistantResponse
-);
+  router.post('/:id/generate',
+    authenticateRequest,
+    validateSessionId,
+    validateChatGeneration,
+    handleValidationErrors,
+    controller.generateAssistantResponse
+  );
 
-router.post('/:id/generate/stream',
-  authenticate,
-  validateSessionId,
-  validateChatGeneration,
-  handleValidationErrors,
-  ChatController.streamAssistantResponse
-);
+  router.post('/:id/generate/stream',
+    authenticateRequest,
+    validateSessionId,
+    validateChatGeneration,
+    handleValidationErrors,
+    controller.streamAssistantResponse
+  );
 
-// Message routes
-router.post('/messages', 
-  authenticate,
-  validateChatMessageCreate,
-  handleValidationErrors,
-  ChatController.createMessage
-);
+  // Message routes
+  router.post('/messages',
+    authenticateRequest,
+    validateChatMessageCreate,
+    handleValidationErrors,
+    controller.createMessage
+  );
 
-router.get('/:id/messages', 
-  authenticate,
-  validateSessionId,
-  handleValidationErrors,
-  ChatController.getMessagesBySessionId
-);
+  router.get('/:id/messages',
+    authenticateRequest,
+    validateSessionId,
+    handleValidationErrors,
+    controller.getMessagesBySessionId
+  );
 
-export default router;
+  return router;
+}
+
+export default createChatRoutes();

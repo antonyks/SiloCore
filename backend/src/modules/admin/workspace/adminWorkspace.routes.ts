@@ -7,16 +7,25 @@ import {
   validateAdminWorkspaceId,
 } from './adminWorkspace.validation';
 
-const router = Router();
+export function createAdminWorkspaceRoutes(dependencies: {
+  authenticate?: typeof authenticate;
+  controller?: typeof AdminWorkspaceController;
+} = {}) {
+  const authenticateRequest = dependencies.authenticate ?? authenticate;
+  const controller = dependencies.controller ?? AdminWorkspaceController;
+  const router = Router();
 
-router.use(authenticate, authorizeRoles(UserRole.ADMIN));
+  router.use(authenticateRequest, authorizeRoles(UserRole.ADMIN));
 
-router.get('/workspaces', AdminWorkspaceController.listWorkspaces);
-router.delete(
-  '/workspaces/:id',
-  validateAdminWorkspaceId,
-  handleValidationErrors,
-  AdminWorkspaceController.deleteWorkspace,
-);
+  router.get('/workspaces', controller.listWorkspaces);
+  router.delete(
+    '/workspaces/:id',
+    validateAdminWorkspaceId,
+    handleValidationErrors,
+    controller.deleteWorkspace,
+  );
 
-export default router;
+  return router;
+}
+
+export default createAdminWorkspaceRoutes();

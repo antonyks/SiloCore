@@ -60,108 +60,121 @@ function waitForNotificationOrTimeout(
   });
 }
 
-export const JobController = {
-  async getJob(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const jobId = parseJobId(req.params.jobId);
-    const job = await JobService.getJobInWorkspace(jobId, getWorkspaceId(req));
-    res.status(200).json({ data: job });
-  },
+export interface JobControllerDependencies {
+  serviceDependency: typeof JobService;
+}
 
-  async cancelJob(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const jobId = parseJobId(req.params.jobId);
-    const job = await JobService.requestCancellationInWorkspace(jobId, getWorkspaceId(req));
-    res.status(200).json({ data: job });
-  },
+export function createJobController(dependencies: Partial<JobControllerDependencies> = {}) {
+  const serviceDependency = dependencies.serviceDependency ?? JobService;
 
-  async streamJob(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const jobId = parseJobId(req.params.jobId);
-    const workspaceId = getWorkspaceId(req);
+  const service = {
+    async getJob(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const jobId = parseJobId(req.params.jobId);
+      const job = await serviceDependency.getJobInWorkspace(jobId, getWorkspaceId(req));
+      res.status(200).json({ data: job });
+    },
 
-    let job = await JobService.getJobInWorkspace(jobId, workspaceId);
-    let clientClosed = false;
-    let lastSerializedJob = JSON.stringify(job);
-    let lastEventAt = Date.now();
-    let pendingNotification = false;
-    let notificationWake: (() => void) | null = null;
-    const unsubscribe = jobNotificationListener.subscribe(jobId, () => {
-      if (notificationWake) {
-        notificationWake();
-        return;
-      }
-      pendingNotification = true;
-    });
+    async cancelJob(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const jobId = parseJobId(req.params.jobId);
+      const job = await serviceDependency.requestCancellationInWorkspace(jobId, getWorkspaceId(req));
+      res.status(200).json({ data: job });
+    },
 
-    req.on?.('aborted', () => {
-      clientClosed = true;
-      unsubscribe();
-    });
-    res.on?.('close', () => {
-      clientClosed = true;
-      unsubscribe();
-    });
+    async streamJob(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const jobId = parseJobId(req.params.jobId);
+      const workspaceId = getWorkspaceId(req);
 
-    res.status(200);
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders?.();
-
-    try {
-      writeSseEvent(res, 'snapshot', job);
-      lastEventAt = Date.now();
-
-      const initialTerminalEvent = getTerminalEvent(job.status);
-      if (initialTerminalEvent) {
-        writeSseEvent(res, initialTerminalEvent, job);
-        return;
-      }
-
-      while (!clientClosed && !res.writableEnded) {
-        await waitForNotificationOrTimeout(
-          JOB_SSE_POLL_INTERVAL_MS,
-          () => {
-            if (!pendingNotification) return false;
-            pendingNotification = false;
-            return true;
-          },
-          (wake) => {
-            notificationWake = wake;
-          },
-        );
-        if (clientClosed || res.writableEnded) break;
-
-        try {
-          job = await JobService.getJobInWorkspace(jobId, workspaceId);
-        } catch (error: unknown) {
-          if (error instanceof NotFoundError) break;
-          throw error;
+      let job = await serviceDependency.getJobInWorkspace(jobId, workspaceId);
+      let clientClosed = false;
+      let lastSerializedJob = JSON.stringify(job);
+      let lastEventAt = Date.now();
+      let pendingNotification = false;
+      let notificationWake: (() => void) | null = null;
+      const unsubscribe = jobNotificationListener.subscribe(jobId, () => {
+        if (notificationWake) {
+          notificationWake();
+          return;
         }
-        const serializedJob = JSON.stringify(job);
-        const terminalEvent = getTerminalEvent(job.status);
+        pendingNotification = true;
+      });
 
-        if (terminalEvent) {
-          writeSseEvent(res, terminalEvent, job);
-          break;
+      req.on?.('aborted', () => {
+        clientClosed = true;
+        unsubscribe();
+      });
+      res.on?.('close', () => {
+        clientClosed = true;
+        unsubscribe();
+      });
+
+      res.status(200);
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders?.();
+
+      try {
+        writeSseEvent(res, 'snapshot', job);
+        lastEventAt = Date.now();
+
+        const initialTerminalEvent = getTerminalEvent(job.status);
+        if (initialTerminalEvent) {
+          writeSseEvent(res, initialTerminalEvent, job);
+          return;
         }
 
-        if (serializedJob !== lastSerializedJob) {
-          writeSseEvent(res, 'progress', job);
-          lastSerializedJob = serializedJob;
-          lastEventAt = Date.now();
-          continue;
-        }
+        while (!clientClosed && !res.writableEnded) {
+          await waitForNotificationOrTimeout(
+            JOB_SSE_POLL_INTERVAL_MS,
+            () => {
+              if (!pendingNotification) return false;
+              pendingNotification = false;
+              return true;
+            },
+            (wake) => {
+              notificationWake = wake;
+            },
+          );
+          if (clientClosed || res.writableEnded) break;
 
-        if (Date.now() - lastEventAt >= JOB_SSE_HEARTBEAT_INTERVAL_MS) {
-          writeSseEvent(res, 'heartbeat', job);
-          lastEventAt = Date.now();
+          try {
+            job = await serviceDependency.getJobInWorkspace(jobId, workspaceId);
+          } catch (error: unknown) {
+            if (error instanceof NotFoundError) break;
+            throw error;
+          }
+          const serializedJob = JSON.stringify(job);
+          const terminalEvent = getTerminalEvent(job.status);
+
+          if (terminalEvent) {
+            writeSseEvent(res, terminalEvent, job);
+            break;
+          }
+
+          if (serializedJob !== lastSerializedJob) {
+            writeSseEvent(res, 'progress', job);
+            lastSerializedJob = serializedJob;
+            lastEventAt = Date.now();
+            continue;
+          }
+
+          if (Date.now() - lastEventAt >= JOB_SSE_HEARTBEAT_INTERVAL_MS) {
+            writeSseEvent(res, 'heartbeat', job);
+            lastEventAt = Date.now();
+          }
+        }
+      } finally {
+        unsubscribe();
+        if (!res.writableEnded) {
+          res.end();
         }
       }
-    } finally {
-      unsubscribe();
-      if (!res.writableEnded) {
-        res.end();
-      }
-    }
-  },
-};
+    },
+  };
+
+  return service;
+}
+
+export type JobControllerContract = ReturnType<typeof createJobController>;
+export const JobController = createJobController();

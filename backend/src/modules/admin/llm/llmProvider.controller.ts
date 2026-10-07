@@ -12,47 +12,60 @@ function parseProviderId(value: string): number {
   return id;
 }
 
-export const LlmProviderController = {
-  async listProviders(_req: AuthenticatedRequest, res: Response): Promise<void> {
-    const providers = await LlmProviderService.listProviders();
-    res.status(200).json({ data: providers });
-  },
+export interface LlmProviderControllerDependencies {
+  serviceDependency: typeof LlmProviderService;
+}
 
-  async createProvider(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const data = req.body as LlmProviderCreateInput;
-    const provider = await LlmProviderService.createProvider(data);
-    res.status(201).json({ data: provider });
-  },
+export function createLlmProviderController(dependencies: Partial<LlmProviderControllerDependencies> = {}) {
+  const serviceDependency = dependencies.serviceDependency ?? LlmProviderService;
 
-  async getProvider(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const id = parseProviderId(req.params.id);
-    const provider = await LlmProviderService.getProvider(id);
-    res.status(200).json({ data: provider });
-  },
+  const service = {
+    async listProviders(_req: AuthenticatedRequest, res: Response): Promise<void> {
+      const providers = await serviceDependency.listProviders();
+      res.status(200).json({ data: providers });
+    },
 
-  async updateProvider(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const id = parseProviderId(req.params.id);
-    const data = req.body as LlmProviderUpdateInput;
-    const provider = await LlmProviderService.updateProvider(id, data);
-    res.status(200).json({ data: provider });
-  },
+    async createProvider(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const data = req.body as LlmProviderCreateInput;
+      const provider = await serviceDependency.createProvider(data);
+      res.status(201).json({ data: provider });
+    },
 
-  async deleteProvider(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const id = parseProviderId(req.params.id);
-    const provider = await LlmProviderService.deleteProvider(id);
-    res.status(200).json({ data: provider });
-  },
+    async getProvider(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const id = parseProviderId(req.params.id);
+      const provider = await serviceDependency.getProvider(id);
+      res.status(200).json({ data: provider });
+    },
 
-  async testProvider(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const id = parseProviderId(req.params.id);
-    const result = await LlmProviderService.testProvider(id);
-    res.status(200).json({ data: result });
-  },
+    async updateProvider(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const id = parseProviderId(req.params.id);
+      const data = req.body as LlmProviderUpdateInput;
+      const provider = await serviceDependency.updateProvider(id, data);
+      res.status(200).json({ data: provider });
+    },
 
-  async pullProviderModel(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const id = parseProviderId(req.params.id);
-    const { model } = req.body;
-    const result = await LlmProviderService.pullProviderModel(id, model);
-    res.status(200).json({ data: result });
-  },
-};
+    async deleteProvider(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const id = parseProviderId(req.params.id);
+      const provider = await serviceDependency.deleteProvider(id);
+      res.status(200).json({ data: provider });
+    },
+
+    async testProvider(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const id = parseProviderId(req.params.id);
+      const result = await serviceDependency.testProvider(id);
+      res.status(200).json({ data: result });
+    },
+
+    async pullProviderModel(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const id = parseProviderId(req.params.id);
+      const { model } = req.body;
+      const result = await serviceDependency.pullProviderModel(id, model);
+      res.status(200).json({ data: result });
+    },
+  };
+
+  return service;
+}
+
+export type LlmProviderControllerContract = ReturnType<typeof createLlmProviderController>;
+export const LlmProviderController = createLlmProviderController();

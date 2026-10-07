@@ -4,24 +4,30 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import { json, urlencoded } from 'express';
-import { router as moduleRouter } from './modules';
+import { router as moduleRouter, createModuleRouter } from './modules';
+import type { ApiComposition } from './composition/api';
 import { notFoundHandler, errorHandler, requestIdMiddleware } from './middleware';
 
-const app = express();
+/** Default export retains legacy service instances; production passes its composition. */
+export function createApp(composition?: ApiComposition) {
+  const app = express();
 
-app.use(requestIdMiddleware);
-app.use(helmet());
-app.use(cors());
-app.use(json());
-app.use(urlencoded({ extended: true }));
-app.use(morgan('dev'));
+  app.use(requestIdMiddleware);
+  app.use(helmet());
+  app.use(cors());
+  app.use(json());
+  app.use(urlencoded({ extended: true }));
+  app.use(morgan('dev'));
 
-app.use('/api', moduleRouter);
+  app.use('/api', composition ? createModuleRouter(composition) : moduleRouter);
 
 
-app.get('/health', (_, res) => res.json({ status: 'OK', service: 'backend' }));
+  app.get('/health', (_, res) => res.json({ status: 'OK', service: 'backend' }));
 
-app.use(notFoundHandler);
-app.use(errorHandler);
+  app.use(notFoundHandler);
+  app.use(errorHandler);
 
-export default app;
+  return app;
+}
+
+export default createApp();

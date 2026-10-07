@@ -3,12 +3,21 @@ import { authenticate, authorizeRoles } from '../../../middleware';
 import { UserRole } from '../../user/user.model';
 import { AdminSystemController } from './adminSystem.controller';
 
-const router = Router();
+export function createAdminSystemRoutes(dependencies: {
+  authenticate?: typeof authenticate;
+  controller?: typeof AdminSystemController;
+} = {}) {
+  const authenticateRequest = dependencies.authenticate ?? authenticate;
+  const controller = dependencies.controller ?? AdminSystemController;
+  const router = Router();
 
-router.use(authenticate, authorizeRoles(UserRole.ADMIN));
+  router.use(authenticateRequest, authorizeRoles(UserRole.ADMIN));
 
-router.get('/analytics/summary', AdminSystemController.getAnalyticsSummary);
-router.get('/system/status', AdminSystemController.getSystemStatus);
-router.post('/system/validation-jobs', AdminSystemController.createValidationJob);
+  router.get('/analytics/summary', controller.getAnalyticsSummary);
+  router.get('/system/status', controller.getSystemStatus);
+  router.post('/system/validation-jobs', controller.createValidationJob);
 
-export default router;
+  return router;
+}
+
+export default createAdminSystemRoutes();

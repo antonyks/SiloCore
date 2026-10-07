@@ -8,16 +8,29 @@ function normalizeOptionalInteger(value: number | undefined): number | undefined
   return Math.max(0, Math.round(value));
 }
 
-export const ProviderHealthSampleService = {
-  async recordSample(input: ProviderHealthSampleCreateInput): Promise<SelectedProviderHealthSample> {
-    return ProviderHealthSampleRepository.create({
-      providerId: input.providerId,
-      providerType: input.providerType,
-      operation: input.operation,
-      status: input.status,
-      latencyMs: normalizeOptionalInteger(input.latencyMs),
-      modelCount: normalizeOptionalInteger(input.modelCount),
-      errorCode: input.errorCode,
-    });
-  },
-};
+export interface ProviderHealthSampleServiceDependencies {
+  repository: typeof ProviderHealthSampleRepository;
+}
+
+export function createProviderHealthSampleService(dependencies: Partial<ProviderHealthSampleServiceDependencies> = {}) {
+  const repository = dependencies.repository ?? ProviderHealthSampleRepository;
+
+  const service = {
+    async recordSample(input: ProviderHealthSampleCreateInput): Promise<SelectedProviderHealthSample> {
+      return repository.create({
+        providerId: input.providerId,
+        providerType: input.providerType,
+        operation: input.operation,
+        status: input.status,
+        latencyMs: normalizeOptionalInteger(input.latencyMs),
+        modelCount: normalizeOptionalInteger(input.modelCount),
+        errorCode: input.errorCode,
+      });
+    },
+  };
+
+  return service;
+}
+
+export type ProviderHealthSampleServiceContract = ReturnType<typeof createProviderHealthSampleService>;
+export const ProviderHealthSampleService = createProviderHealthSampleService();

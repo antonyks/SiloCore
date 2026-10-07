@@ -88,159 +88,172 @@ function getChatWorkspaceContext(req: AuthenticatedRequest): IChatWorkspaceConte
   };
 }
 
-export const ChatController = {
-  async createSession(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const { title } = req.body;
-    const userId = req.user?.id;
-    
-    if (!userId) {
-      throw new InvalidInputError('User ID is required');
-    }
-    
-    const data: IChatSessionCreateInput = {
-      title,
-      userId,
-    };
-    const session = await ChatService.createSession(data, getChatWorkspaceContext(req));
-    res.status(201).json({ data: session });
-  },
+export interface ChatControllerDependencies {
+  serviceDependency: typeof ChatService;
+}
 
-  async getSessions(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const { skip, take, orderBy, orderDirection } = req.query;
-    
-    const paginationSkip: number | undefined = skip ? parseInt(skip as string, 10) : undefined;
-    const paginationTake: number | undefined = take ? parseInt(take as string, 10) : undefined;
-    
-    if (paginationSkip !== undefined && (isNaN(paginationSkip) || paginationSkip < 0)) {
-      throw new InvalidInputError("Invalid value for skip parameter");
-    }
-    if (paginationTake !== undefined && (isNaN(paginationTake) || paginationTake < 0)) {
-      throw new InvalidInputError("Invalid value for take parameter");
-    }
-    
-    const params:IChatSessionListServiceParams = {
-      skip: paginationSkip,
-      take: paginationTake,
-      orderBy: orderBy as 'createdAt' | 'updatedAt' | undefined,
-      orderDirection: orderDirection as 'asc' | 'desc' | undefined
-    };
-    
-    const sessions = await ChatService.getWorkspaceSessions(params, getChatWorkspaceContext(req));
-    res.status(200).json({ data: sessions });
-  },
+export function createChatController(dependencies: Partial<ChatControllerDependencies> = {}) {
+  const serviceDependency = dependencies.serviceDependency ?? ChatService;
 
-  async getSessionById(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const idString: string = req.params.id;
-    const id: number = parseSessionId(idString);
+  const service = {
+    async createSession(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const { title } = req.body;
+      const userId = req.user?.id;
 
-    const session = await ChatService.getSessionById(id, getChatWorkspaceContext(req));
-    res.status(200).json({ data: session });
-  },
+      if (!userId) {
+        throw new InvalidInputError('User ID is required');
+      }
 
-  async updateSession(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const idString: string = req.params.id;
-    const id: number = parseSessionId(idString);
-    
-    const data: IChatSessionUpdateInput = req.body;
-    const session = await ChatService.updateSession(id, data, getChatWorkspaceContext(req));
-    res.status(200).json({ data: session });
-  },
+      const data: IChatSessionCreateInput = {
+        title,
+        userId,
+      };
+      const session = await serviceDependency.createSession(data, getChatWorkspaceContext(req));
+      res.status(201).json({ data: session });
+    },
 
-  async deleteSession(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const idString: string = req.params.id;
-    const id: number = parseSessionId(idString);
-    
-    const session = await ChatService.deleteSession(id, getChatWorkspaceContext(req));
-    res.status(200).json({ data: session });
-  },
+    async getSessions(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const { skip, take, orderBy, orderDirection } = req.query;
 
-  async createMessage(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const { content, sessionId, metadata } = req.body;
-    const author=MessageAuthor.USER;
-    
-    const data: IChatMessageCreateInput = { 
-      content, 
-      author, 
-      sessionId, 
-      metadata 
-    };
-    
-    const message = await ChatService.createMessage(data, getChatWorkspaceContext(req));
-    res.status(201).json({ data: message });
-  },
+      const paginationSkip: number | undefined = skip ? parseInt(skip as string, 10) : undefined;
+      const paginationTake: number | undefined = take ? parseInt(take as string, 10) : undefined;
 
-  async getMessagesBySessionId(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const idString: string = req.params.id;
-    const id: number = parseSessionId(idString);
-    
-    const messages = await ChatService.getMessagesBySessionId(id, getChatWorkspaceContext(req));
-    res.status(200).json({ data: messages });
-  },
+      if (paginationSkip !== undefined && (isNaN(paginationSkip) || paginationSkip < 0)) {
+        throw new InvalidInputError("Invalid value for skip parameter");
+      }
+      if (paginationTake !== undefined && (isNaN(paginationTake) || paginationTake < 0)) {
+        throw new InvalidInputError("Invalid value for take parameter");
+      }
 
-  async generateAssistantResponse(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const sessionId = parseSessionId(req.params.id);
+      const params:IChatSessionListServiceParams = {
+        skip: paginationSkip,
+        take: paginationTake,
+        orderBy: orderBy as 'createdAt' | 'updatedAt' | undefined,
+        orderDirection: orderDirection as 'asc' | 'desc' | undefined
+      };
 
-    const result = await ChatService.generateAssistantResponse(
-      {
-        ...toGenerationInput(req.body),
+      const sessions = await serviceDependency.getWorkspaceSessions(params, getChatWorkspaceContext(req));
+      res.status(200).json({ data: sessions });
+    },
+
+    async getSessionById(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const idString: string = req.params.id;
+      const id: number = parseSessionId(idString);
+
+      const session = await serviceDependency.getSessionById(id, getChatWorkspaceContext(req));
+      res.status(200).json({ data: session });
+    },
+
+    async updateSession(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const idString: string = req.params.id;
+      const id: number = parseSessionId(idString);
+
+      const data: IChatSessionUpdateInput = req.body;
+      const session = await serviceDependency.updateSession(id, data, getChatWorkspaceContext(req));
+      res.status(200).json({ data: session });
+    },
+
+    async deleteSession(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const idString: string = req.params.id;
+      const id: number = parseSessionId(idString);
+
+      const session = await serviceDependency.deleteSession(id, getChatWorkspaceContext(req));
+      res.status(200).json({ data: session });
+    },
+
+    async createMessage(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const { content, sessionId, metadata } = req.body;
+      const author=MessageAuthor.USER;
+
+      const data: IChatMessageCreateInput = {
+        content,
+        author,
         sessionId,
-        ...(req.requestId ? { requestId: req.requestId } : {}),
-      },
-      getChatWorkspaceContext(req),
-    );
+        metadata
+      };
 
-    res.status(201).json({ data: result });
-  },
+      const message = await serviceDependency.createMessage(data, getChatWorkspaceContext(req));
+      res.status(201).json({ data: message });
+    },
 
-  async streamAssistantResponse(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const sessionId = parseSessionId(req.params.id);
+    async getMessagesBySessionId(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const idString: string = req.params.id;
+      const id: number = parseSessionId(idString);
 
-    const events = ChatService.streamAssistantResponse(
-      {
-        ...toGenerationInput(req.body),
-        sessionId,
-        ...(req.requestId ? { requestId: req.requestId } : {}),
-      },
-      getChatWorkspaceContext(req),
-    )[Symbol.asyncIterator]();
-    let clientClosed = false;
-    req.on?.('aborted', () => {
-      clientClosed = true;
-    });
-    res.on?.('close', () => {
-      clientClosed = true;
-    });
-    const firstEvent = await events.next();
+      const messages = await serviceDependency.getMessagesBySessionId(id, getChatWorkspaceContext(req));
+      res.status(200).json({ data: messages });
+    },
 
-    res.status(200);
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders?.();
+    async generateAssistantResponse(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const sessionId = parseSessionId(req.params.id);
 
-    try {
-      if (!firstEvent.done) {
-        writeSseEvent(res, firstEvent.value.event, firstEvent.value.data);
-      }
+      const result = await serviceDependency.generateAssistantResponse(
+        {
+          ...toGenerationInput(req.body),
+          sessionId,
+          ...(req.requestId ? { requestId: req.requestId } : {}),
+        },
+        getChatWorkspaceContext(req),
+      );
 
-      while (true) {
-        const nextEvent = await nextStreamEventWithHeartbeat(
-          events,
-          res,
-          () => clientClosed || res.writableEnded,
-        );
-        if (nextEvent.done) break;
-        const event: ChatGenerationStreamEvent = nextEvent.value;
-        writeSseEvent(res, event.event, event.data);
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Streaming failed';
-      writeSseEvent(res, 'error', { message });
-    } finally {
-      if (!res.writableEnded) {
-        res.end();
+      res.status(201).json({ data: result });
+    },
+
+    async streamAssistantResponse(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const sessionId = parseSessionId(req.params.id);
+
+      const events = serviceDependency.streamAssistantResponse(
+        {
+          ...toGenerationInput(req.body),
+          sessionId,
+          ...(req.requestId ? { requestId: req.requestId } : {}),
+        },
+        getChatWorkspaceContext(req),
+      )[Symbol.asyncIterator]();
+      let clientClosed = false;
+      req.on?.('aborted', () => {
+        clientClosed = true;
+      });
+      res.on?.('close', () => {
+        clientClosed = true;
+      });
+      const firstEvent = await events.next();
+
+      res.status(200);
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders?.();
+
+      try {
+        if (!firstEvent.done) {
+          writeSseEvent(res, firstEvent.value.event, firstEvent.value.data);
+        }
+
+        while (true) {
+          const nextEvent = await nextStreamEventWithHeartbeat(
+            events,
+            res,
+            () => clientClosed || res.writableEnded,
+          );
+          if (nextEvent.done) break;
+          const event: ChatGenerationStreamEvent = nextEvent.value;
+          writeSseEvent(res, event.event, event.data);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Streaming failed';
+        writeSseEvent(res, 'error', { message });
+      } finally {
+        if (!res.writableEnded) {
+          res.end();
+        }
       }
     }
-  }
-};
+  };
+
+  return service;
+}
+
+export type ChatControllerContract = ReturnType<typeof createChatController>;
+export const ChatController = createChatController();

@@ -1,3 +1,4 @@
+import type { LlmRuntimeServiceContract } from '../../llm/llmRuntime.service';
 import { LlmRuntimeService } from '../../llm/llmRuntime.service';
 import { SelectedLlmProviderConfig } from '../../llm/llmProviderConfig.model';
 import { LlmProviderConfigRepository } from '../../llm/llmProviderConfig.repository';
@@ -9,57 +10,72 @@ import {
   SanitizedLlmProviderConfig,
 } from './llmProvider.types';
 
-function sanitizeProvider(provider: SelectedLlmProviderConfig): SanitizedLlmProviderConfig {
-  const adapter = LlmRuntimeService.createProvider(provider);
-
-  return {
-    id: provider.id,
-    name: provider.name,
-    type: fromDbProviderType(provider.type),
-    baseUrl: provider.baseUrl,
-    enabled: provider.enabled,
-    defaultModel: provider.defaultModel,
-    timeoutMs: provider.timeoutMs,
-    generationDefaults: LlmRuntimeService.normalizeGenerationDefaults(provider.generationDefaults),
-    capabilities: adapter?.capabilities ?? UNSUPPORTED_LLM_PROVIDER_CAPABILITIES,
-    extraHeaders: LlmRuntimeService.normalizeExtraHeaders(provider.extraHeaders),
-    hasApiKey: Boolean(provider.apiKey),
-    deletedAt: provider.deletedAt,
-    createdAt: provider.createdAt,
-    updatedAt: provider.updatedAt,
-  };
+export interface LlmProviderServiceDependencies {
+  llm: LlmRuntimeServiceContract;
+  repository: typeof LlmProviderConfigRepository;
 }
 
-export const LlmProviderService = {
-  async listProviders(): Promise<SanitizedLlmProviderConfig[]> {
-    await LlmRuntimeService.ensureBootstrapProviderConfig();
-    const providers = await LlmProviderConfigRepository.findAll();
-    return providers.map(sanitizeProvider);
-  },
+export function createLlmProviderService(dependencies: Partial<LlmProviderServiceDependencies> = {}) {
+  const llm = dependencies.llm ?? LlmRuntimeService;
+  const repository = dependencies.repository ?? LlmProviderConfigRepository;
 
-  async getProvider(id: number): Promise<SanitizedLlmProviderConfig> {
-    const provider = await LlmRuntimeService.getProviderConfigById(id);
-    return sanitizeProvider(provider);
-  },
+  function sanitizeProvider(provider: SelectedLlmProviderConfig): SanitizedLlmProviderConfig {
+    const adapter = llm.createProvider(provider);
 
-  async createProvider(data: LlmProviderCreateInput): Promise<SanitizedLlmProviderConfig> {
-    const provider = await LlmProviderConfigRepository.create(data);
-    return sanitizeProvider(provider);
-  },
+    return {
+      id: provider.id,
+      name: provider.name,
+      type: fromDbProviderType(provider.type),
+      baseUrl: provider.baseUrl,
+      enabled: provider.enabled,
+      defaultModel: provider.defaultModel,
+      timeoutMs: provider.timeoutMs,
+      generationDefaults: llm.normalizeGenerationDefaults(provider.generationDefaults),
+      capabilities: adapter?.capabilities ?? UNSUPPORTED_LLM_PROVIDER_CAPABILITIES,
+      extraHeaders: llm.normalizeExtraHeaders(provider.extraHeaders),
+      hasApiKey: Boolean(provider.apiKey),
+      deletedAt: provider.deletedAt,
+      createdAt: provider.createdAt,
+      updatedAt: provider.updatedAt,
+    };
+  }
 
-  async updateProvider(id: number, data: LlmProviderUpdateInput): Promise<SanitizedLlmProviderConfig> {
-    await LlmRuntimeService.getProviderConfigById(id);
-    const provider = await LlmProviderConfigRepository.update(id, data);
-    return sanitizeProvider(provider);
-  },
+  const service = {
+    async listProviders(): Promise<SanitizedLlmProviderConfig[]> {
+      await llm.ensureBootstrapProviderConfig();
+      const providers = await repository.findAll();
+      return providers.map(sanitizeProvider);
+    },
 
-  async deleteProvider(id: number): Promise<SanitizedLlmProviderConfig> {
-    await LlmRuntimeService.getProviderConfigById(id);
-    const provider = await LlmProviderConfigRepository.softDelete(id);
-    return sanitizeProvider(provider);
-  },
+    async getProvider(id: number): Promise<SanitizedLlmProviderConfig> {
+      const provider = await llm.getProviderConfigById(id);
+      return sanitizeProvider(provider);
+    },
 
-  testProvider: LlmRuntimeService.testProvider.bind(LlmRuntimeService),
+    async createProvider(data: LlmProviderCreateInput): Promise<SanitizedLlmProviderConfig> {
+      const provider = await repository.create(data);
+      return sanitizeProvider(provider);
+    },
 
-  pullProviderModel: LlmRuntimeService.pullProviderModel.bind(LlmRuntimeService),
-};
+    async updateProvider(id: number, data: LlmProviderUpdateInput): Promise<SanitizedLlmProviderConfig> {
+      await llm.getProviderConfigById(id);
+      const provider = await repository.update(id, data);
+      return sanitizeProvider(provider);
+    },
+
+    async deleteProvider(id: number): Promise<SanitizedLlmProviderConfig> {
+      await llm.getProviderConfigById(id);
+      const provider = await repository.softDelete(id);
+      return sanitizeProvider(provider);
+    },
+
+    testProvider: llm.testProvider.bind(llm),
+
+    pullProviderModel: llm.pullProviderModel.bind(llm),
+  };
+
+  return service;
+}
+
+export type LlmProviderServiceContract = ReturnType<typeof createLlmProviderService>;
+export const LlmProviderService = createLlmProviderService();

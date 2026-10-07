@@ -3,35 +3,48 @@ import { InvalidInputError } from '../../../errors';
 import { AuthenticatedRequest } from '../../../types/authenticatedRequest';
 import { AdminSystemService } from './adminSystem.service';
 
-export const AdminSystemController = {
-  async getAnalyticsSummary(_req: AuthenticatedRequest, res: Response): Promise<void> {
-    const summary = await AdminSystemService.getAnalyticsSummary(_req.query);
-    res.status(200).json({ data: summary });
-  },
+export interface AdminSystemControllerDependencies {
+  serviceDependency: typeof AdminSystemService;
+}
 
-  async getSystemStatus(_req: AuthenticatedRequest, res: Response): Promise<void> {
-    const status = await AdminSystemService.getSystemStatus();
-    res.status(200).json({ data: status });
-  },
+export function createAdminSystemController(dependencies: Partial<AdminSystemControllerDependencies> = {}) {
+  const serviceDependency = dependencies.serviceDependency ?? AdminSystemService;
 
-  async createValidationJob(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const workspaceId = req.workspace?.id;
-    const createdByUserId = req.user?.id;
+  const service = {
+    async getAnalyticsSummary(_req: AuthenticatedRequest, res: Response): Promise<void> {
+      const summary = await serviceDependency.getAnalyticsSummary(_req.query);
+      res.status(200).json({ data: summary });
+    },
 
-    if (!workspaceId) {
-      throw new InvalidInputError('Workspace context is required');
-    }
+    async getSystemStatus(_req: AuthenticatedRequest, res: Response): Promise<void> {
+      const status = await serviceDependency.getSystemStatus();
+      res.status(200).json({ data: status });
+    },
 
-    if (!createdByUserId) {
-      throw new InvalidInputError('Authenticated user context is required');
-    }
+    async createValidationJob(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const workspaceId = req.workspace?.id;
+      const createdByUserId = req.user?.id;
 
-    const job = await AdminSystemService.enqueueValidationJob({
-      workspaceId,
-      createdByUserId,
-      mode: req.body?.mode,
-    });
+      if (!workspaceId) {
+        throw new InvalidInputError('Workspace context is required');
+      }
 
-    res.status(202).json({ data: job });
-  },
-};
+      if (!createdByUserId) {
+        throw new InvalidInputError('Authenticated user context is required');
+      }
+
+      const job = await serviceDependency.enqueueValidationJob({
+        workspaceId,
+        createdByUserId,
+        mode: req.body?.mode,
+      });
+
+      res.status(202).json({ data: job });
+    },
+  };
+
+  return service;
+}
+
+export type AdminSystemControllerContract = ReturnType<typeof createAdminSystemController>;
+export const AdminSystemController = createAdminSystemController();

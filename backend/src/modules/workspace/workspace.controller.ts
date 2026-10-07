@@ -22,46 +22,59 @@ function getAuthenticatedUserId(req: AuthenticatedRequest): number {
   return userId;
 }
 
-export const WorkspaceController = {
-  async listWorkspaces(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const userId = getAuthenticatedUserId(req);
-    const workspaces = await WorkspaceService.listOwnedWorkspaces(userId);
-    res.status(200).json({ data: workspaces });
-  },
+export interface WorkspaceControllerDependencies {
+  serviceDependency: typeof WorkspaceService;
+}
 
-  async createWorkspace(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const ownerUserId = getAuthenticatedUserId(req);
-    const data: WorkspaceCreateInput = {
-      ownerUserId,
-      name: req.body.name,
-    };
-    const workspace = await WorkspaceService.createStandardWorkspace(data);
-    res.status(201).json({ data: workspace });
-  },
+export function createWorkspaceController(dependencies: Partial<WorkspaceControllerDependencies> = {}) {
+  const serviceDependency = dependencies.serviceDependency ?? WorkspaceService;
 
-  async getCurrentWorkspace(req: AuthenticatedRequest, res: Response): Promise<void> {
-    if (!req.workspace) {
-      throw new InvalidInputError('Workspace context is required');
-    }
+  const service = {
+    async listWorkspaces(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const userId = getAuthenticatedUserId(req);
+      const workspaces = await serviceDependency.listOwnedWorkspaces(userId);
+      res.status(200).json({ data: workspaces });
+    },
 
-    const workspace = await WorkspaceService.getCurrentWorkspace(req.workspace);
-    res.status(200).json({ data: workspace });
-  },
+    async createWorkspace(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const ownerUserId = getAuthenticatedUserId(req);
+      const data: WorkspaceCreateInput = {
+        ownerUserId,
+        name: req.body.name,
+      };
+      const workspace = await serviceDependency.createStandardWorkspace(data);
+      res.status(201).json({ data: workspace });
+    },
 
-  async updateWorkspace(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const id = parseWorkspaceId(req.params.id);
-    const userId = getAuthenticatedUserId(req);
-    const data: WorkspaceUpdateInput = {
-      name: req.body.name,
-    };
-    const workspace = await WorkspaceService.updateWorkspace(id, userId, data, req.user?.role);
-    res.status(200).json({ data: workspace });
-  },
+    async getCurrentWorkspace(req: AuthenticatedRequest, res: Response): Promise<void> {
+      if (!req.workspace) {
+        throw new InvalidInputError('Workspace context is required');
+      }
 
-  async deleteWorkspace(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const id = parseWorkspaceId(req.params.id);
-    const userId = getAuthenticatedUserId(req);
-    const workspace = await WorkspaceService.deleteWorkspace(id, userId, req.user?.role);
-    res.status(200).json({ data: workspace });
-  },
-};
+      const workspace = await serviceDependency.getCurrentWorkspace(req.workspace);
+      res.status(200).json({ data: workspace });
+    },
+
+    async updateWorkspace(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const id = parseWorkspaceId(req.params.id);
+      const userId = getAuthenticatedUserId(req);
+      const data: WorkspaceUpdateInput = {
+        name: req.body.name,
+      };
+      const workspace = await serviceDependency.updateWorkspace(id, userId, data, req.user?.role);
+      res.status(200).json({ data: workspace });
+    },
+
+    async deleteWorkspace(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const id = parseWorkspaceId(req.params.id);
+      const userId = getAuthenticatedUserId(req);
+      const workspace = await serviceDependency.deleteWorkspace(id, userId, req.user?.role);
+      res.status(200).json({ data: workspace });
+    },
+  };
+
+  return service;
+}
+
+export type WorkspaceControllerContract = ReturnType<typeof createWorkspaceController>;
+export const WorkspaceController = createWorkspaceController();

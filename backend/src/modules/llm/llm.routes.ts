@@ -2,9 +2,18 @@ import { Router } from 'express';
 import { authenticate } from '../../middleware';
 import { LlmController } from './llm.controller';
 
-const router = Router();
+export function createLlmRoutes(dependencies: {
+  authenticate?: typeof authenticate;
+  controller?: typeof LlmController;
+} = {}) {
+  const authenticateRequest = dependencies.authenticate ?? authenticate;
+  const controller = dependencies.controller ?? LlmController;
+  const router = Router();
 
-router.get('/models', authenticate, LlmController.listAvailableModels);
-router.get('/providers/:id/models', authenticate, LlmController.listProviderModels);
+  router.get('/models', authenticateRequest, controller.listAvailableModels);
+  router.get('/providers/:id/models', authenticateRequest, controller.listProviderModels);
 
-export default router;
+  return router;
+}
+
+export default createLlmRoutes();

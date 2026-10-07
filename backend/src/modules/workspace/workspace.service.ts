@@ -7,6 +7,7 @@ import { CoreSingleOwnerWorkspaceAuthorizationPolicy } from './coreSingleOwnerWo
 import {
   ResolvedWorkspaceContext,
   WorkspaceAction,
+  WorkspaceAuthorizationPolicy,
   WorkspaceActor,
   WorkspaceAuthorizationDenialReason,
 } from './workspaceAuthorization.types';
@@ -14,7 +15,6 @@ import {
 const WORKSPACE_NOT_FOUND_MESSAGE = 'Workspace not found';
 const PERSONAL_WORKSPACE_UPDATE_MESSAGE = 'Personal workspace cannot be renamed.';
 
-const workspaceAuthorizationPolicy = new CoreSingleOwnerWorkspaceAuthorizationPolicy();
 
 function normalizeWorkspaceName(name: string): string {
   const normalizedName = name.trim();
@@ -42,90 +42,105 @@ function ensureStandardWorkspace(workspace: SelectedWorkspace, action: Workspace
   throw new InvalidInputError(PERSONAL_WORKSPACE_UPDATE_MESSAGE);
 }
 
-export const WorkspaceService = {
-  listOwnedWorkspaces(userId: number): Promise<SelectedWorkspace[]> {
-    return WorkspaceRepository.listActiveOwnedWorkspaces(userId);
-  },
+export interface WorkspaceServiceDependencies {
+  policy: WorkspaceAuthorizationPolicy;
+  repository: typeof WorkspaceRepository;
+}
 
-  async createStandardWorkspace(input: WorkspaceCreateInput): Promise<SelectedWorkspace> {
-    return WorkspaceRepository.createStandardWorkspaceWithOwnerMembership(
-      input.ownerUserId,
-      normalizeWorkspaceName(input.name),
-    );
-  },
+export function createWorkspaceService(dependencies: Partial<WorkspaceServiceDependencies> = {}) {
+  const policy = dependencies.policy ?? new CoreSingleOwnerWorkspaceAuthorizationPolicy();
+  const repository = dependencies.repository ?? WorkspaceRepository;
 
-  async getCurrentWorkspace(workspace: ResolvedWorkspaceContext): Promise<SelectedWorkspace> {
-    const selectedWorkspace = await WorkspaceRepository.findActiveOwnedWorkspaceById(
-      workspace.id,
-      workspace.ownerUserId,
-    );
+  const service = {
+    listOwnedWorkspaces(userId: number): Promise<SelectedWorkspace[]> {
+      return repository.listActiveOwnedWorkspaces(userId);
+    },
 
-    if (!selectedWorkspace) {
-      throw new NotFoundError(WORKSPACE_NOT_FOUND_MESSAGE);
-    }
+    async createStandardWorkspace(input: WorkspaceCreateInput): Promise<SelectedWorkspace> {
+      return repository.createStandardWorkspaceWithOwnerMembership(
+        input.ownerUserId,
+        normalizeWorkspaceName(input.name),
+      );
+    },
 
-    return selectedWorkspace;
-  },
+    async getCurrentWorkspace(workspace: ResolvedWorkspaceContext): Promise<SelectedWorkspace> {
+      const selectedWorkspace = await repository.findActiveOwnedWorkspaceById(
+        workspace.id,
+        workspace.ownerUserId,
+      );
 
-  async updateWorkspace(
-    id: number,
-    userId: number,
-    input: WorkspaceUpdateInput,
-    role?: WorkspaceActor['role'],
-  ): Promise<SelectedWorkspace> {
-    const workspace = await WorkspaceRepository.findActiveOwnedWorkspaceById(id, userId);
-
-    if (!workspace) {
-      throw new NotFoundError(WORKSPACE_NOT_FOUND_MESSAGE);
-    }
-
-    const actor = ensureWorkspaceActor(userId, role);
-    const decision = workspaceAuthorizationPolicy.checkWorkspaceAction(
-      actor,
-      workspace,
-      WorkspaceAction.UPDATE_WORKSPACE,
-    );
-
-    if (!decision.allowed) {
-      throw new NotFoundError(WORKSPACE_NOT_FOUND_MESSAGE);
-    }
-
-    ensureStandardWorkspace(workspace, WorkspaceAction.UPDATE_WORKSPACE);
-
-    return WorkspaceRepository.updateWorkspaceName(id, normalizeWorkspaceName(input.name));
-  },
-
-  async deleteWorkspace(
-    id: number,
-    userId: number,
-    role?: WorkspaceActor['role'],
-  ): Promise<SelectedWorkspace> {
-    const workspace = await WorkspaceRepository.findActiveOwnedWorkspaceById(id, userId);
-
-    if (!workspace) {
-      throw new NotFoundError(WORKSPACE_NOT_FOUND_MESSAGE);
-    }
-
-    const actor = ensureWorkspaceActor(userId, role);
-    const decision = workspaceAuthorizationPolicy.checkWorkspaceAction(
-      actor,
-      workspace,
-      WorkspaceAction.DELETE_WORKSPACE,
-    );
-
-    if (!decision.allowed) {
-      if (
-        decision.reason === WorkspaceAuthorizationDenialReason.PERSONAL_WORKSPACE_DELETE_FORBIDDEN ||
-        workspace.type === WorkspaceType.PERSONAL
-      ) {
-        throw new InvalidInputError('Personal workspace cannot be deleted.');
+      if (!selectedWorkspace) {
+        throw new NotFoundError(WORKSPACE_NOT_FOUND_MESSAGE);
       }
 
-      throw new NotFoundError(WORKSPACE_NOT_FOUND_MESSAGE);
-    }
+      return selectedWorkspace;
+    },
 
-    ensureStandardWorkspace(workspace, WorkspaceAction.DELETE_WORKSPACE);
+    async updateWorkspace(
+      id: number,
+      userId: number,
+      input: WorkspaceUpdateInput,
+      role?: WorkspaceActor['role'],
+    ): Promise<SelectedWorkspace> {
+      const workspace = await repository.findActiveOwnedWorkspaceById(id, userId);
 
-    return WorkspaceRepository.softDeleteWorkspace(id);
-  },
-};
+      if (!workspace) {
+        throw new NotFoundError(WORKSPACE_NOT_FOUND_MESSAGE);
+      }
+
+      const actor = ensureWorkspaceActor(userId, role);
+      const decision = policy.checkWorkspaceAction(
+        actor,
+        workspace,
+        WorkspaceAction.UPDATE_WORKSPACE,
+      );
+
+      if (!decision.allowed) {
+        throw new NotFoundError(WORKSPACE_NOT_FOUND_MESSAGE);
+      }
+
+      ensureStandardWorkspace(workspace, WorkspaceAction.UPDATE_WORKSPACE);
+
+      return repository.updateWorkspaceName(id, normalizeWorkspaceName(input.name));
+    },
+
+    async deleteWorkspace(
+      id: number,
+      userId: number,
+      role?: WorkspaceActor['role'],
+    ): Promise<SelectedWorkspace> {
+      const workspace = await repository.findActiveOwnedWorkspaceById(id, userId);
+
+      if (!workspace) {
+        throw new NotFoundError(WORKSPACE_NOT_FOUND_MESSAGE);
+      }
+
+      const actor = ensureWorkspaceActor(userId, role);
+      const decision = policy.checkWorkspaceAction(
+        actor,
+        workspace,
+        WorkspaceAction.DELETE_WORKSPACE,
+      );
+
+      if (!decision.allowed) {
+        if (
+          decision.reason === WorkspaceAuthorizationDenialReason.PERSONAL_WORKSPACE_DELETE_FORBIDDEN ||
+          workspace.type === WorkspaceType.PERSONAL
+        ) {
+          throw new InvalidInputError('Personal workspace cannot be deleted.');
+        }
+
+        throw new NotFoundError(WORKSPACE_NOT_FOUND_MESSAGE);
+      }
+
+      ensureStandardWorkspace(workspace, WorkspaceAction.DELETE_WORKSPACE);
+
+      return repository.softDeleteWorkspace(id);
+    },
+  };
+
+  return service;
+}
+
+export type WorkspaceServiceContract = ReturnType<typeof createWorkspaceService>;
+export const WorkspaceService = createWorkspaceService();

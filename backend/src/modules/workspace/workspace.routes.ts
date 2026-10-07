@@ -8,34 +8,43 @@ import {
   validateWorkspaceUpdate,
 } from './workspace.validation';
 
-const router = Router();
+export function createWorkspaceRoutes(dependencies: {
+  authenticate?: typeof authenticate;
+  controller?: typeof WorkspaceController;
+} = {}) {
+  const authenticateRequest = dependencies.authenticate ?? authenticate;
+  const controller = dependencies.controller ?? WorkspaceController;
+  const router = Router();
 
-router.use(authenticate);
+  router.use(authenticateRequest);
 
-router.get('/', WorkspaceController.listWorkspaces);
+  router.get('/', controller.listWorkspaces);
 
-router.post(
-  '/',
-  validateWorkspaceCreate,
-  handleValidationErrors,
-  WorkspaceController.createWorkspace,
-);
+  router.post(
+    '/',
+    validateWorkspaceCreate,
+    handleValidationErrors,
+    controller.createWorkspace,
+  );
 
-router.get('/current', WorkspaceController.getCurrentWorkspace);
+  router.get('/current', controller.getCurrentWorkspace);
 
-router.put(
-  '/:id',
-  validateWorkspaceId,
-  validateWorkspaceUpdate,
-  handleValidationErrors,
-  WorkspaceController.updateWorkspace,
-);
+  router.put(
+    '/:id',
+    validateWorkspaceId,
+    validateWorkspaceUpdate,
+    handleValidationErrors,
+    controller.updateWorkspace,
+  );
 
-router.delete(
-  '/:id',
-  validateWorkspaceId,
-  handleValidationErrors,
-  WorkspaceController.deleteWorkspace,
-);
+  router.delete(
+    '/:id',
+    validateWorkspaceId,
+    handleValidationErrors,
+    controller.deleteWorkspace,
+  );
 
-export default router;
+  return router;
+}
+
+export default createWorkspaceRoutes();

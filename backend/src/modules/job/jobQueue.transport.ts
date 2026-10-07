@@ -2,7 +2,7 @@ import type { PgBoss, SendOptions } from 'pg-boss';
 import { JobQueuePayload, JobQueueSendOptions, JobQueueTransport } from './job.types';
 
 export class PgBossJobQueueTransport implements JobQueueTransport {
-  constructor(private readonly boss: PgBoss) {}
+  constructor(private readonly boss: Pick<PgBoss, 'send' | 'createQueue'>) {}
 
   async send(
     queueName: string,

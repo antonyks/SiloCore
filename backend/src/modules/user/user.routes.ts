@@ -5,76 +5,85 @@ import { UserRole } from '../user/user.model'
 import { handleValidationErrors, validateBanActivate, validateChangePassword, validateCreateUser, validateSearch, validateUpdateUser, validateUserId } from './user.validation';
 
 
-const router = Router();
+export function createUserRoutes(dependencies: {
+  authenticate?: typeof authenticate;
+  controller?: typeof UserController;
+} = {}) {
+  const authenticateRequest = dependencies.authenticate ?? authenticate;
+  const controller = dependencies.controller ?? UserController;
+  const router = Router();
 
 
-router.get('/profile', 
-    authenticate, 
-    UserController.getUserProfile
-);
+  router.get('/profile',
+      authenticateRequest,
+      controller.getUserProfile
+  );
 
-router.post('/', 
-  authenticate,
-  authorizeRoles(UserRole.ADMIN),
-  validateCreateUser,
-  handleValidationErrors,
-  UserController.createUser
-);
+  router.post('/',
+    authenticateRequest,
+    authorizeRoles(UserRole.ADMIN),
+    validateCreateUser,
+    handleValidationErrors,
+    controller.createUser
+  );
 
-router.get('/', 
-  authenticate,
-  authorizeRoles(UserRole.ADMIN),
-  validateSearch,
-  handleValidationErrors,
-  UserController.getAllUsers
-);
+  router.get('/',
+    authenticateRequest,
+    authorizeRoles(UserRole.ADMIN),
+    validateSearch,
+    handleValidationErrors,
+    controller.getAllUsers
+  );
 
-router.get('/:id', 
-  authenticate,
-  authorizeRoles(UserRole.ADMIN),
-  validateUserId,
-  handleValidationErrors,
-  UserController.getUserById
-);
+  router.get('/:id',
+    authenticateRequest,
+    authorizeRoles(UserRole.ADMIN),
+    validateUserId,
+    handleValidationErrors,
+    controller.getUserById
+  );
 
-router.put('/:id', 
-  authenticate,
-  authorizeRoles(UserRole.ADMIN),
-  validateUserId,
-  validateUpdateUser,
-  handleValidationErrors,
-  UserController.updateUserById
-);
+  router.put('/:id',
+    authenticateRequest,
+    authorizeRoles(UserRole.ADMIN),
+    validateUserId,
+    validateUpdateUser,
+    handleValidationErrors,
+    controller.updateUserById
+  );
 
-router.delete('/:id', 
-  authenticate,
-  authorizeRoles(UserRole.ADMIN),
-  validateUserId,
-  handleValidationErrors,
-  UserController.deleteUserById
-);
+  router.delete('/:id',
+    authenticateRequest,
+    authorizeRoles(UserRole.ADMIN),
+    validateUserId,
+    handleValidationErrors,
+    controller.deleteUserById
+  );
 
-router.post('/ban/:id', 
-  authenticate,
-  authorizeRoles(UserRole.ADMIN),
-  validateBanActivate,
-  handleValidationErrors,
-  UserController.banUserById
-);
+  router.post('/ban/:id',
+    authenticateRequest,
+    authorizeRoles(UserRole.ADMIN),
+    validateBanActivate,
+    handleValidationErrors,
+    controller.banUserById
+  );
 
-router.post('/activate/:id', 
-  authenticate,
-  authorizeRoles(UserRole.ADMIN),
-  validateBanActivate,
-  handleValidationErrors,
-  UserController.activateUserById
-);
+  router.post('/activate/:id',
+    authenticateRequest,
+    authorizeRoles(UserRole.ADMIN),
+    validateBanActivate,
+    handleValidationErrors,
+    controller.activateUserById
+  );
 
-router.post('/change-password', 
-  authenticate,
-  validateChangePassword,
-  handleValidationErrors,
-  UserController.updateUserPassword
-);
+  router.post('/change-password',
+    authenticateRequest,
+    validateChangePassword,
+    handleValidationErrors,
+    controller.updateUserPassword
+  );
 
-export default router;
+  return router;
+}
+
+export default createUserRoutes();

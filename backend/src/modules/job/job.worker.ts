@@ -1,3 +1,4 @@
+import type { JobServiceContract } from './job.service';
 import type { JobWithMetadata, PgBoss } from 'pg-boss';
 import type { Prisma } from '@prisma/client';
 import { JobStatus } from '@prisma/client';
@@ -36,6 +37,7 @@ export type JobWorkerHandler = (
 ) => Promise<Prisma.InputJsonValue | undefined | void>;
 
 export interface JobWorkerRunnerOptions {
+  jobService?: JobServiceContract;
   heartbeatIntervalMs?: number;
   touchJob?: (queueName: string, queueMessageId: string) => Promise<void>;
 }
@@ -53,6 +55,7 @@ export function createJobWorkerHandler(
   return async (jobs: JobWithMetadata<JobQueuePayload>[]): Promise<void> => {
     for (const job of jobs) {
       await runJobWorker(job, handler, {
+        jobService: options.jobService,
         heartbeatIntervalMs: options.heartbeatIntervalMs,
         touchJob,
       });
@@ -65,6 +68,7 @@ export async function runJobWorker(
   handler: JobWorkerHandler,
   options: JobWorkerRunnerOptions = {},
 ): Promise<void> {
+  const jobService = options.jobService ?? JobService;
   const jobId = parseQueueJobId(queueJob.data);
   let appJob: SelectedJob | null = null;
   let heartbeatTimer: NodeJS.Timeout | null = null;
@@ -74,12 +78,12 @@ export async function runJobWorker(
       throw new JobWorkerShutdownError(jobId);
     }
 
-    await JobService.heartbeat(jobId);
+    await jobService.heartbeat(jobId);
     await options.touchJob?.(queueJob.name, queueJob.id);
   };
 
   const checkpointCancellation = async (): Promise<void> => {
-    const currentJob = await JobService.checkpointCancellation(jobId);
+    const currentJob = await jobService.checkpointCancellation(jobId);
     if (currentJob.status === JobStatus.CANCELLED) {
       throw new JobWorkerCancelledError(jobId);
     }
@@ -87,7 +91,7 @@ export async function runJobWorker(
 
   try {
     await checkpointCancellation();
-    appJob = await JobService.startWorkerAttempt(jobId);
+    appJob = await jobService.startWorkerAttempt(jobId);
 
     if (appJob.status === JobStatus.CANCELLED) {
       return;
@@ -119,7 +123,7 @@ export async function runJobWorker(
     await checkpointCancellation();
     const persistedResult: Prisma.InputJsonValue | undefined =
       result === undefined ? undefined : result;
-    await JobService.markSucceeded(jobId, persistedResult);
+    await jobService.markSucceeded(jobId, persistedResult);
   } catch (error: unknown) {
     if (error instanceof JobWorkerCancelledError) {
       return;
@@ -129,15 +133,15 @@ export async function runJobWorker(
       throw error;
     }
 
-    const cancellationState = await JobService.checkpointCancellation(jobId);
+    const cancellationState = await jobService.checkpointCancellation(jobId);
     if (cancellationState.status === JobStatus.CANCELLED) {
       return;
     }
 
     if (isFinalAttempt(appJob, queueJob)) {
-      await JobService.markHandlerFailed(jobId);
+      await jobService.markHandlerFailed(jobId);
     } else {
-      await JobService.markRetryPending(jobId);
+      await jobService.markRetryPending(jobId);
     }
 
     throw error;

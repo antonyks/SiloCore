@@ -1,3 +1,4 @@
+import type { JobServiceContract } from '../job/job.service';
 import path from 'node:path';
 import { Prisma } from '@prisma/client';
 import { InvalidInputError } from '../../errors';
@@ -44,9 +45,10 @@ export function parseValidationJobMode(mode: unknown): ValidationJobMode {
 export async function enqueueValidationJob(
   input: EnqueueValidationJobInput,
   queueTransport: JobQueueTransport,
+  jobService: JobServiceContract = JobService,
 ): Promise<PublicJob> {
   const mode = parseValidationJobMode(input.mode);
-  const job = await JobService.enqueueJob({
+  const job = await jobService.enqueueJob({
     workspaceId: input.workspaceId,
     createdByUserId: input.createdByUserId,
     type: VALIDATION_JOB_TYPE,
@@ -58,17 +60,18 @@ export async function enqueueValidationJob(
     stage: 'validation_queued',
   }, queueTransport);
 
-  return JobService.getJobInWorkspace(job.id, input.workspaceId);
+  return jobService.getJobInWorkspace(job.id, input.workspaceId);
 }
 
 export function createValidationJobHandler(
   cpuTaskPool: WorkerCpuTaskPool,
+  jobService: JobServiceContract = JobService,
 ): JobWorkerHandler {
   return async ({ job, payload, signal, heartbeat, checkpointCancellation }) => {
     const mode = parsePayloadMode(payload);
 
     await checkpointCancellation();
-    await JobService.updateProgress(job.id, 25, 'validation_preparing');
+    await jobService.updateProgress(job.id, 25, 'validation_preparing');
     await heartbeat();
 
     const checksum = await cpuTaskPool.run<ValidationChecksumInput, ValidationChecksumResult>({
@@ -82,7 +85,7 @@ export function createValidationJobHandler(
     });
 
     await checkpointCancellation();
-    await JobService.updateProgress(job.id, 75, 'validation_checksum_complete');
+    await jobService.updateProgress(job.id, 75, 'validation_checksum_complete');
     await heartbeat();
 
     if (mode === 'fail') {

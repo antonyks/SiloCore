@@ -12,24 +12,37 @@ function normalizeLatencyMs(latencyMs: number | undefined): number | undefined {
   return Math.max(0, Math.round(latencyMs));
 }
 
-export const GenerationUsageService = {
-  async recordGeneration(input: GenerationUsageCreateInput): Promise<SelectedGenerationUsage> {
-    const usage = input.usage;
+export interface GenerationUsageServiceDependencies {
+  repository: typeof GenerationUsageRepository;
+}
 
-    return GenerationUsageRepository.create({
-      workspaceId: input.workspaceId,
-      providerId: input.providerId,
-      model: input.model,
-      streaming: input.streaming,
-      latencyMs: normalizeLatencyMs(input.latencyMs),
-      inputTokens: usage?.promptTokens,
-      outputTokens: usage?.completionTokens,
-      totalTokens: usage?.totalTokens,
-      tokenCountSource: usage
-        ? GenerationUsageTokenCountSource.PROVIDER_REPORTED
-        : GenerationUsageTokenCountSource.UNKNOWN,
-      outcome: input.outcome,
-      errorCode: input.outcome === GenerationUsageOutcome.SUCCEEDED ? undefined : input.errorCode,
-    });
-  },
-};
+export function createGenerationUsageService(dependencies: Partial<GenerationUsageServiceDependencies> = {}) {
+  const repository = dependencies.repository ?? GenerationUsageRepository;
+
+  const service = {
+    async recordGeneration(input: GenerationUsageCreateInput): Promise<SelectedGenerationUsage> {
+      const usage = input.usage;
+
+      return repository.create({
+        workspaceId: input.workspaceId,
+        providerId: input.providerId,
+        model: input.model,
+        streaming: input.streaming,
+        latencyMs: normalizeLatencyMs(input.latencyMs),
+        inputTokens: usage?.promptTokens,
+        outputTokens: usage?.completionTokens,
+        totalTokens: usage?.totalTokens,
+        tokenCountSource: usage
+          ? GenerationUsageTokenCountSource.PROVIDER_REPORTED
+          : GenerationUsageTokenCountSource.UNKNOWN,
+        outcome: input.outcome,
+        errorCode: input.outcome === GenerationUsageOutcome.SUCCEEDED ? undefined : input.errorCode,
+      });
+    },
+  };
+
+  return service;
+}
+
+export type GenerationUsageServiceContract = ReturnType<typeof createGenerationUsageService>;
+export const GenerationUsageService = createGenerationUsageService();

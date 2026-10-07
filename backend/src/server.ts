@@ -1,16 +1,19 @@
 import dotenv from 'dotenv';
 dotenv.config();
-import app from './app';
+import { createApp } from './app';
 import { connectDatabase, prisma } from './config/database';
 import { logger } from './config/logger';
-import { startJobQueueClient, stopJobQueueClient } from './modules/job/jobQueue.client';
+import { createApiComposition } from './composition/api';
+
+const composition = createApiComposition();
+const app = createApp(composition);
 
 const PORT = process.env.PORT || 5000;
 
 async function startServer() {
   try {
     await connectDatabase();
-    await startJobQueueClient();
+    await composition.start();
     const server = app.listen(PORT, () => logger.info(`🚀 Server running on port ${PORT}`));
     server.timeout = 0;
     server.requestTimeout = 0;
@@ -26,7 +29,7 @@ async function startServer() {
             resolve();
           });
         });
-        await stopJobQueueClient();
+        await composition.stop();
         await prisma.$disconnect();
         process.exit(0);
       } catch (error: unknown) {
@@ -44,7 +47,7 @@ async function startServer() {
   } catch (error:unknown) {
     if(error instanceof Error)
     logger.error(`❌ Failed to start server: ${error.message}`);
-    await stopJobQueueClient().catch(() => undefined);
+    await composition.stop().catch(() => undefined);
     await prisma.$disconnect().catch(() => undefined);
     process.exit(1);
   }

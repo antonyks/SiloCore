@@ -11,15 +11,28 @@ function parseProviderId(value: string): number {
   return id;
 }
 
-export const LlmController = {
-  async listAvailableModels(_req: AuthenticatedRequest, res: Response): Promise<void> {
-    const result = await LlmRuntimeService.listAvailableModels();
-    res.status(200).json({ data: result });
-  },
+export interface LlmControllerDependencies {
+  serviceDependency: typeof LlmRuntimeService;
+}
 
-  async listProviderModels(req: AuthenticatedRequest, res: Response): Promise<void> {
-    const id = parseProviderId(req.params.id);
-    const result = await LlmRuntimeService.listProviderModels(id);
-    res.status(200).json({ data: result });
-  },
-};
+export function createLlmController(dependencies: Partial<LlmControllerDependencies> = {}) {
+  const serviceDependency = dependencies.serviceDependency ?? LlmRuntimeService;
+
+  const service = {
+    async listAvailableModels(_req: AuthenticatedRequest, res: Response): Promise<void> {
+      const result = await serviceDependency.listAvailableModels();
+      res.status(200).json({ data: result });
+    },
+
+    async listProviderModels(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const id = parseProviderId(req.params.id);
+      const result = await serviceDependency.listProviderModels(id);
+      res.status(200).json({ data: result });
+    },
+  };
+
+  return service;
+}
+
+export type LlmControllerContract = ReturnType<typeof createLlmController>;
+export const LlmController = createLlmController();

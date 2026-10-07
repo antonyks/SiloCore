@@ -10,54 +10,63 @@ import {
   validateProviderUpdate,
 } from './llmProvider.validation';
 
-const router = Router();
+export function createLlmProviderRoutes(dependencies: {
+  authenticate?: typeof authenticate;
+  controller?: typeof LlmProviderController;
+} = {}) {
+  const authenticateRequest = dependencies.authenticate ?? authenticate;
+  const controller = dependencies.controller ?? LlmProviderController;
+  const router = Router();
 
-router.use(authenticate, authorizeRoles(UserRole.ADMIN));
+  router.use(authenticateRequest, authorizeRoles(UserRole.ADMIN));
 
-router.get('/providers', LlmProviderController.listProviders);
+  router.get('/providers', controller.listProviders);
 
-router.post(
-  '/providers',
-  validateProviderCreate,
-  handleValidationErrors,
-  LlmProviderController.createProvider,
-);
+  router.post(
+    '/providers',
+    validateProviderCreate,
+    handleValidationErrors,
+    controller.createProvider,
+  );
 
-router.get(
-  '/providers/:id',
-  validateProviderId,
-  handleValidationErrors,
-  LlmProviderController.getProvider,
-);
+  router.get(
+    '/providers/:id',
+    validateProviderId,
+    handleValidationErrors,
+    controller.getProvider,
+  );
 
-router.put(
-  '/providers/:id',
-  validateProviderId,
-  validateProviderUpdate,
-  handleValidationErrors,
-  LlmProviderController.updateProvider,
-);
+  router.put(
+    '/providers/:id',
+    validateProviderId,
+    validateProviderUpdate,
+    handleValidationErrors,
+    controller.updateProvider,
+  );
 
-router.delete(
-  '/providers/:id',
-  validateProviderId,
-  handleValidationErrors,
-  LlmProviderController.deleteProvider,
-);
+  router.delete(
+    '/providers/:id',
+    validateProviderId,
+    handleValidationErrors,
+    controller.deleteProvider,
+  );
 
-router.post(
-  '/providers/:id/test',
-  validateProviderId,
-  handleValidationErrors,
-  LlmProviderController.testProvider,
-);
+  router.post(
+    '/providers/:id/test',
+    validateProviderId,
+    handleValidationErrors,
+    controller.testProvider,
+  );
 
-router.post(
-  '/providers/:id/models/pull',
-  validateProviderId,
-  validateModelPull,
-  handleValidationErrors,
-  LlmProviderController.pullProviderModel,
-);
+  router.post(
+    '/providers/:id/models/pull',
+    validateProviderId,
+    validateModelPull,
+    handleValidationErrors,
+    controller.pullProviderModel,
+  );
 
-export default router;
+  return router;
+}
+
+export default createLlmProviderRoutes();
