@@ -63,6 +63,7 @@ describe('Home workspace route context', () => {
     );
 
     renderWithProviders(<Home />, {
+      workspaceLayout: true,
       initialEntries: ['/workspaces/30/chat/home'],
       routePath: '/workspaces/:workspaceId/chat/home',
     });
@@ -93,6 +94,7 @@ describe('Home workspace route context', () => {
     );
 
     renderWithProviders(<Home />, {
+      workspaceLayout: true,
       initialEntries: ['/workspaces/999/chat/home'],
       routePath: '/workspaces/:workspaceId/chat/home',
     });
@@ -118,6 +120,7 @@ describe('Home workspace route context', () => {
     );
 
     renderWithProviders(<Home />, {
+      workspaceLayout: true,
       initialEntries: ['/workspaces/25/chat/home'],
       routePath: '/workspaces/:workspaceId/chat/home',
     });
@@ -160,6 +163,7 @@ describe('Home workspace route context', () => {
     );
 
     renderWithProviders(<Home />, {
+      workspaceLayout: true,
       initialEntries: ['/workspaces/25/chat/home'],
       routePath: '/workspaces/:workspaceId/chat/home',
     });
@@ -203,6 +207,7 @@ describe('Home workspace route context', () => {
     );
 
     renderWithProviders(<Home />, {
+      workspaceLayout: true,
       initialEntries: ['/workspaces/30/chat/home'],
       routePath: '/workspaces/:workspaceId/chat/home',
     });
@@ -248,6 +253,7 @@ describe('Home workspace route context', () => {
     );
 
     renderWithProviders(<Home />, {
+      workspaceLayout: true,
       initialEntries: ['/workspaces/25/chat/home'],
       routePath: '/workspaces/:workspaceId/chat/home',
     });

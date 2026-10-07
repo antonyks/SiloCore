@@ -1,9 +1,16 @@
-import React, { type ReactElement } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { render, type RenderOptions } from '@testing-library/react';
+import { FrontendExtensionProvider } from "../src/extensions/FrontendExtensionProvider";
+import { createFrontendExtensionRegistry } from "../src/extensions/registry";
+import type { FrontendExtensionRegistry } from "../src/extensions/types";
+import { WorkspaceRouteProvider } from "../src/features/workspace/components/WorkspaceRouteProvider";
+import React, { type ReactElement } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { render, type RenderOptions } from "@testing-library/react";
 
-type RenderWithProvidersOptions = Omit<RenderOptions, 'wrapper'> & {
+type RenderWithProvidersOptions = Omit<RenderOptions, "wrapper"> & {
+  extensions?: FrontendExtensionRegistry;
+  workspaceLayout?: boolean;
+  fallbackRoutes?: boolean;
   initialEntries?: string[];
   routePath?: string;
 };
@@ -24,8 +31,11 @@ function createTestQueryClient(): QueryClient {
 export function renderWithProviders(
   ui: ReactElement,
   {
-    initialEntries = ['/'],
-    routePath = '*',
+    extensions = createFrontendExtensionRegistry(),
+    workspaceLayout = false,
+    fallbackRoutes = true,
+    initialEntries = ["/"],
+    routePath = "*",
     ...renderOptions
   }: RenderWithProvidersOptions = {},
 ) {
@@ -33,14 +43,35 @@ export function renderWithProviders(
 
   const result = render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={initialEntries}>
-        <Routes>
-          <Route path={routePath} element={ui} />
-          <Route path="/chat/home" element={<div>Legacy chat route</div>} />
-          <Route path="/workspaces/:workspaceId/chat/home" element={<div>Chat home route</div>} />
-          <Route path="/analytics/dashboard" element={<div>Admin dashboard route</div>} />
-        </Routes>
-      </MemoryRouter>
+      <FrontendExtensionProvider registry={extensions}>
+        <MemoryRouter initialEntries={initialEntries}>
+          <Routes>
+            {workspaceLayout ? (
+              <Route path={routePath} element={<WorkspaceRouteProvider />}>
+                <Route index element={ui} />
+              </Route>
+            ) : (
+              <Route path={routePath} element={ui} />
+            )}
+            {fallbackRoutes && (
+              <>
+                <Route
+                  path="/chat/home"
+                  element={<div>Legacy chat route</div>}
+                />
+                <Route
+                  path="/workspaces/:workspaceId/chat/home"
+                  element={<div>Chat home route</div>}
+                />
+                <Route
+                  path="/analytics/dashboard"
+                  element={<div>Admin dashboard route</div>}
+                />
+              </>
+            )}
+          </Routes>
+        </MemoryRouter>
+      </FrontendExtensionProvider>
     </QueryClientProvider>,
     renderOptions,
   );

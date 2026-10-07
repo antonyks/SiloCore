@@ -1,3 +1,5 @@
+import { useFrontendExtensions } from "../../extensions/context";
+import { extensionRoutePath, isContributionAvailable } from "../../extensions/registry";
 import React, { useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import {
@@ -64,14 +66,37 @@ const isNavItemActive = (
   item: (typeof navGroups)[number],
 ) => pathname === item.href || item.children?.some((child) => child.href === pathname);
 
-const mobileNavItems = navGroups.flatMap((item) => item.children || [item]);
-
 const AdminLayout: React.FC = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const { user } = useAuth();
   const systemStatusQuery = useAdminSystemStatus();
   const location = useLocation();
-  const activeRoute = getRouteLabel(location.pathname);
+  const extensions = useFrontendExtensions();
+  const extensionRoutes = extensions.flatMap((extension) =>
+    (extension.routes || [])
+      .filter((route) => route.scope === "admin" && isContributionAvailable(extension, route))
+      .map((route) => ({
+        path: extensionRoutePath(extension.id, route),
+        label: route.title,
+        section: "Admin",
+      })),
+  );
+  const activeRoute = extensionRoutes.find((route) => route.path === location.pathname)
+    || getRouteLabel(location.pathname);
+  const navigationGroups: typeof navGroups = [
+    ...navGroups,
+    ...extensions.flatMap((extension) =>
+      (extension.navigation || []).flatMap((item) => {
+        const route = extension.routes?.find(
+          (route) => route.id === item.routeId && route.scope === "admin",
+        );
+        return route && isContributionAvailable(extension, route)
+          ? [{ label: item.label, href: extensionRoutePath(extension.id, route), icon: item.icon || Gauge }]
+          : [];
+      }),
+    ),
+  ];
+  const mobileNavItems = navigationGroups.flatMap((item) => item.children || [item]);
   const systemStatus = systemStatusQuery.data;
   const databaseIsOnline = systemStatus?.database.status === "online";
   const inferenceStatus = systemStatus?.inference.status;
@@ -105,12 +130,12 @@ const AdminLayout: React.FC = () => {
               </div>
             )}
             <div className="space-y-1">
-              {navGroups.map((item) => {
+              {navigationGroups.map((item) => {
                 const Icon = item.icon;
                 const isActive = isNavItemActive(location.pathname, item);
 
                 return (
-                  <div key={item.label}>
+                  <div key={item.href}>
                     <Link
                       to={item.href}
                       title={isSidebarCollapsed ? item.label : undefined}
@@ -197,7 +222,7 @@ const AdminLayout: React.FC = () => {
 
                 return (
                   <Link
-                    key={item.label}
+                    key={item.href}
                     to={item.href}
                     className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-md border px-3 text-xs font-medium ${
                       isActive
