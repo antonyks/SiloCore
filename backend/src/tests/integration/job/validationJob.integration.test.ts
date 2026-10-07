@@ -19,6 +19,7 @@ import {
   startJobQueueClient,
   stopJobQueueClient,
 } from '../../../modules/job/jobQueue.client';
+import { importPgBoss } from '../../../modules/job/pgBoss.loader.cjs';
 import { WorkspaceProvisioningService } from '../../../modules/workspace/workspaceProvisioning.service';
 import {
   createIntegrationTestUser,
@@ -184,13 +185,6 @@ async function clearValidationQueue(): Promise<void> {
   } finally {
     await boss.stop({ graceful: true, close: true, timeout: 5000 });
   }
-}
-
-async function importPgBoss(): Promise<typeof import('pg-boss')> {
-  const dynamicImport = new Function('moduleName', 'return import(moduleName)') as
-    (moduleName: string) => Promise<typeof import('pg-boss')>;
-
-  return dynamicImport('pg-boss');
 }
 
 async function waitForJobStatus(

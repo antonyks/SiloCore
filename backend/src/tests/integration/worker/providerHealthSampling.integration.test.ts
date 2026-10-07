@@ -1,5 +1,6 @@
 import { JobStatus, LlmProviderConfigType, ProviderHealthSampleStatus, UserRole } from '@prisma/client';
 import { ENV } from '../../../config/env';
+import { importPgBoss } from '../../../modules/job/pgBoss.loader.cjs';
 import {
   createJobWorkerHandler,
   ensurePgBossQueue,
@@ -22,13 +23,6 @@ import { createMockLlmUpstream, sendJson } from '../helpers/mockLlmUpstream';
 type ProviderHealthSamplingWorker = {
   close: () => Promise<void>;
 };
-
-async function importPgBoss(): Promise<typeof import('pg-boss')> {
-  const dynamicImport = new Function('moduleName', 'return import(moduleName)') as
-    (moduleName: string) => Promise<typeof import('pg-boss')>;
-
-  return dynamicImport('pg-boss');
-}
 
 async function startProviderHealthSamplingWorker(): Promise<{
   worker: ProviderHealthSamplingWorker;

@@ -2,6 +2,7 @@ import type { PgBoss as PgBossType } from 'pg-boss';
 import { ENV } from '../../config/env';
 import { PgBossJobQueueTransport } from './jobQueue.transport';
 import { JobQueueTransport } from './job.types';
+import { importPgBoss } from './pgBoss.loader.cjs';
 
 export type ApiQueueClient = Pick<PgBossType, 'start' | 'stop' | 'send' | 'createQueue'>;
 
@@ -86,10 +87,3 @@ const defaultClient = createJobQueueClient();
 export const startJobQueueClient = defaultClient.start;
 export const getJobQueueTransport = defaultClient.getTransport;
 export const stopJobQueueClient = defaultClient.stop;
-
-async function importPgBoss(): Promise<typeof import('pg-boss')> {
-  const dynamicImport = new Function('moduleName', 'return import(moduleName)') as
-    (moduleName: string) => Promise<typeof import('pg-boss')>;
-
-  return dynamicImport('pg-boss');
-}

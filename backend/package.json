@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon src/server.ts",
     "dev:worker": "ts-node src/worker.ts",
-    "build": "tsc",
+    "build": "tsc && node -e \"require('node:fs').copyFileSync('src/modules/job/pgBoss.loader.cjs', 'dist/modules/job/pgBoss.loader.cjs')\"",
     "start": "node dist/server.js",
     "start:worker": "node dist/worker.js",
     "lint": "eslint src --ext .ts",

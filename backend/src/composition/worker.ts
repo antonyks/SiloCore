@@ -3,6 +3,7 @@ import { ENV } from '../config/env';
 import { logger } from '../config/logger';
 import { createJobWorkerHandler, JobWorkerHandler } from '../modules/job/job.worker';
 import { ensurePgBossQueue, PgBossJobQueueTransport } from '../modules/job/jobQueue.transport';
+import { importPgBoss } from '../modules/job/pgBoss.loader.cjs';
 import { createValidationJobHandler, VALIDATION_JOB_QUEUE } from '../modules/worker/validationJob';
 import { createProviderHealthSampling, PROVIDER_HEALTH_SAMPLING_JOB_QUEUE, ProviderHealthSamplingScheduler } from '../modules/worker/providerHealthSamplingJob';
 import { createWorkerCpuTaskPool, WorkerCpuTaskPool } from '../modules/worker/workerTaskPool';
@@ -130,9 +131,7 @@ type WorkerStartupResult = {
 };
 
 async function createCoreWorkerQueueClient(): Promise<WorkerQueueClient> {
-  const dynamicImport = new Function('moduleName', 'return import(moduleName)') as
-    (moduleName: string) => Promise<typeof import('pg-boss')>;
-  const { PgBoss } = await dynamicImport('pg-boss');
+  const { PgBoss } = await importPgBoss();
   return new PgBoss({
     connectionString: ENV.DATABASE_URL,
     schema: ENV.PGBOSS_SCHEMA,
