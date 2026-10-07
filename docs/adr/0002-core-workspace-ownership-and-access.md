@@ -1,14 +1,16 @@
 # ADR 0002: Core Workspace Ownership And Access
 
-Status: Accepted
+Status: Accepted; amended 2026-10-07
 
 Date: 2026-07-27
 
+This ADR's original phase exclusion of ownership transfer is superseded for planned Core admin recovery of `STANDARD` ownership. Its classification of RLS as Enterprise work is also superseded: selective RLS is planned Core security. The original Core owner-private decision remains in force; neither recovery nor RLS is implemented yet.
+
 ## Context
 
-SiloCore Core is the non-Enterprise product. It needs multiple private workspaces per user, but it must not implement workspace sharing, invitations, multi-user membership management, ownership transfer, or RBAC in this phase.
+SiloCore Core is the non-Enterprise product. At the time of this decision, it needed multiple private workspaces per user without workspace sharing, invitations, multi-user membership management, ownership transfer, or RBAC in that implementation phase. The transfer exclusion was phase-specific and is superseded for planned Core admin recovery.
 
-The schema will later include forward-compatible access structures so Enterprise can activate richer governance without redesigning the workspace boundary. Those structures must not change Core authorization behavior.
+The schema includes forward-compatible membership structures so Enterprise can later activate richer governance without redesigning the workspace boundary. Those structures do not change Core authorization behavior.
 
 ## Decision
 
@@ -16,11 +18,11 @@ Every user receives exactly one private `PERSONAL` workspace. A user may create 
 
 Every Core workspace is single-owner and non-shareable. Core authorization is based on the workspace's canonical owner relation. The global `ADMIN` role does not grant workspace-content access and must not allow admins to read private chats or future private workspace resources.
 
-The base schema may contain a forward-compatible membership or access relation. Core creates only the canonical owner's active `OWNER` membership. Core must not treat extra membership or grant rows, including future `EDITOR` or `VIEWER` values, as access grants.
+The base schema contains a forward-compatible membership relation. Core creates the canonical owner's active `OWNER` membership. Core must not treat extra membership or grant rows, including `EDITOR` or `VIEWER` values, as access grants; existing non-owner rows need no deletion or status rewrite for Core operation.
 
-Core exposes no share, invite, member-management, role-assignment, ownership-transfer, group, SCIM, or RBAC flows.
+Core currently exposes no share, invite, member-management, role-assignment, ownership-transfer, group, SCIM, or RBAC flows. A future Core admin recovery operation may reassign any `STANDARD` workspace from any owner to any target user without current-owner participation. That operation is not yet implemented and will not permit `PERSONAL` ownership transfer.
 
-Enterprise may later activate direct-user grants, group principals, nested groups, role evaluation, ABAC modifiers, effective-permission materialization, PostgreSQL RLS, and SCIM behind the same workspace boundary.
+Enterprise may later activate direct-user grants, group principals, nested groups, role evaluation, ABAC modifiers, effective-permission materialization, and SCIM behind the same workspace boundary. Selective PostgreSQL RLS is planned Core security, not an Enterprise entitlement.
 
 ## Consequences
 

@@ -1,8 +1,10 @@
 # ADR 0008: Deferred Architecture Notes
 
-Status: Accepted
+Status: Accepted; amended 2026-10-07
 
 Date: 2026-07-27
+
+The original inclusion of PostgreSQL RLS within deferred Enterprise governance is superseded. Selective RLS is separately planned Core security and is not implemented.
 
 ## Context
 
@@ -18,7 +20,7 @@ The following work is deferred and must not be implemented as part of the curren
 - Dynamic context-window governance, token pruning, pinning, rolling summaries, exact BPE tokenization, context inspection, and KV-cache parameter pass-through.
 - Blob storage and document-binary lifecycle.
 - MCP, tool execution, workflow schemas, and multi-agent orchestration.
-- Enterprise runtime access governance, including direct-user workspace sharing, group grants, nested groups, advanced RBAC, ABAC controls, effective-access materialization, PostgreSQL RLS, and SCIM.
+- Enterprise runtime access governance, including direct-user workspace sharing, group grants, nested groups, advanced RBAC, ABAC controls, effective-access materialization, and SCIM.
 
 Future implementations should use the relevant architecture reports and deferred task phases as design references, but should only adopt concrete schema names, column names, data types, routes, and code behavior through explicit future tasks.
 
