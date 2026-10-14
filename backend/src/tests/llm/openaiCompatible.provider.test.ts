@@ -113,7 +113,7 @@ describe('OpenAiCompatibleProvider completion', () => {
   it('sends a standard chat completion request and normalizes the response', async () => {
     mockedFetch.mockResolvedValue(mockResponse({
       json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
-        model: 'upstream-model',
+        model: 'private-upstream-model',
         choices: [
           {
             finish_reason: 'stop',
@@ -170,18 +170,23 @@ describe('OpenAiCompatibleProvider completion', () => {
     expect(result).toEqual({
       content: 'Assistant response',
       reasoning: 'Intermediate reasoning',
-      model: 'upstream-model',
+      model: TEST_MODEL_ID,
       finishReason: 'stop',
       usage: { promptTokens: 5, completionTokens: 7, totalTokens: 12 },
       latencyMs: expect.any(Number),
     });
+    expect(loggedText()).not.toContain('private-upstream-model');
+    expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'provider.complete', status: 'success', model: TEST_MODEL_ID,
+      providerModelMismatch: true,
+    }), 'provider.complete.success');
   });
 
   it('sends a standard embedding request and normalizes the response', async () => {
     mockedFetch.mockResolvedValue(mockResponse({
       json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
         object: 'list',
-        model: 'embedding-model',
+        model: 'private-upstream-embedding-model',
         data: [
           { object: 'embedding', index: 1, embedding: [0.3, 0.4] },
           { object: 'embedding', index: 0, embedding: [0.1, 0.2] },
@@ -227,7 +232,7 @@ describe('OpenAiCompatibleProvider completion', () => {
       providerId: 'cloud-openai-compatible',
       providerName: 'OpenAI Compatible',
       providerType: 'openai-compatible',
-      model: 'embedding-model',
+      model: TEST_MODEL_ID,
       embeddings: [
         { embedding: [0.1, 0.2], index: 0 },
         { embedding: [0.3, 0.4], index: 1 },
@@ -245,7 +250,8 @@ describe('OpenAiCompatibleProvider completion', () => {
     expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
       providerId: 'cloud-openai-compatible',
       providerType: 'openai-compatible',
-      model: 'embedding-model',
+      model: TEST_MODEL_ID,
+      providerModelMismatch: true,
       operation: 'provider.embed',
       status: 'success',
       latencyMs: expect.any(Number),
@@ -253,6 +259,7 @@ describe('OpenAiCompatibleProvider completion', () => {
     expect(loggedText()).not.toContain('secret-token');
     expect(loggedText()).not.toContain('Private first');
     expect(loggedText()).not.toContain('Private second');
+    expect(loggedText()).not.toContain('private-upstream-embedding-model');
   });
 
   it('logs lifecycle fields without secrets, headers, prompts, assistant content, or reasoning', async () => {

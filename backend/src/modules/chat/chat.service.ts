@@ -1,7 +1,6 @@
 import type { GenerationUsageServiceContract } from '../generationUsage/generationUsage.service';
 import type { LlmRuntimeServiceContract } from '../llm/llmRuntime.service';
 import { Prisma } from '@prisma/client';
-import { logger } from '../../config/logger';
 import { safeErrorDiagnostic } from '../../config/safeErrorDiagnostic';
 import { ChatRepository } from './chat.repository';
 import {
@@ -179,13 +178,12 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
     latencyMs: number;
     usage?: TokenUsage;
     errorCode?: string;
-    model?: string;
   }): Promise<void> {
     try {
       await usage.recordGeneration({
         workspaceId: data.prepared.workspaceId,
         providerId: Number(data.prepared.providerMetadata.providerId),
-        model: data.model ?? data.prepared.request.model,
+        model: data.prepared.request.model,
         streaming: data.streaming,
         latencyMs: data.latencyMs,
         usage: data.usage,
@@ -193,14 +191,14 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
         errorCode: data.errorCode,
       });
     } catch (error) {
-      logger.error({
+      logLlmEvent({
         providerId: data.prepared.providerMetadata.providerId,
         providerType: data.prepared.providerMetadata.providerType,
         model: data.prepared.request.model,
         operation: 'generationUsage.record',
         status: 'error',
         ...safeErrorDiagnostic(error),
-      }, 'Generation usage recording failed.');
+      });
     }
   }
 
@@ -327,7 +325,7 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
           sessionId: input.sessionId,
           metadata: createAssistantMetadata({
             ...prepared.providerMetadata,
-            model: completion.model,
+            model: prepared.request.model,
             reasoning: completion.reasoning,
             finishReason: completion.finishReason,
             incomplete: isIncompleteGeneration({
@@ -346,13 +344,12 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
           outcome: GenerationUsageOutcome.SUCCEEDED,
           latencyMs,
           usage: completion.usage,
-          model: completion.model,
         });
         logLlmEvent({
           requestId: input.requestId,
           providerId: prepared.providerMetadata.providerId,
           providerType: prepared.providerMetadata.providerType,
-          model: completion.model,
+          model: prepared.request.model,
           operation: 'chat.complete',
           latencyMs,
           status: 'success',

@@ -22,6 +22,7 @@ import {
   TokenUsage,
 } from '../llm.types';
 import { getLlmErrorCode, logLlmEvent } from '../llm.logging';
+import { providerModelMismatch } from '../llm.modelIdentity';
 import { safeErrorDiagnostic } from '../../../config/safeErrorDiagnostic';
 
 interface OpenAiCompatibleChatRequest {
@@ -266,6 +267,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
       operation: 'provider.embed',
       latencyMs: result.latencyMs,
       status: 'success',
+      providerModelMismatch: providerModelMismatch(request.model, result.value.model),
     });
 
     return response;
@@ -337,6 +339,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
       operation: 'provider.complete',
       latencyMs: result.latencyMs,
       status: 'success',
+      providerModelMismatch: providerModelMismatch(enriched.model, result.value.model),
     });
 
     return completion;
@@ -657,7 +660,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
     return {
       content,
       reasoning: extractReasoning(choice.message),
-      model: raw.model ?? fallbackModel,
+      model: fallbackModel,
       finishReason: choice.finish_reason ?? undefined,
       usage: normalizeUsage(raw.usage),
       latencyMs,
@@ -758,7 +761,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
       providerId: this.id,
       providerName: this.config.name,
       providerType: this.config.type,
-      model: raw.model ?? fallbackModel,
+      model: fallbackModel,
       embeddings,
       usage: promptTokens === undefined || totalTokens === undefined
         ? undefined

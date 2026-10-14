@@ -536,7 +536,7 @@ describe('ChatService', () => {
       const complete = jest.spyOn(OllamaProvider.prototype, 'complete').mockResolvedValue({
         content: 'Hi there',
         reasoning: 'I should greet the user.',
-        model: TEST_MODEL_ID,
+        model: 'private-upstream-reported-model',
         finishReason: 'stop',
         usage: { promptTokens: 3, completionTokens: 4, totalTokens: 7 },
         latencyMs: 12,
@@ -608,8 +608,47 @@ describe('ChatService', () => {
         latencyMs: expect.any(Number),
       }), 'chat.complete.success');
       expect(JSON.stringify(loggedPayloads())).not.toContain('Hello');
+      expect(JSON.stringify(loggedPayloads())).not.toContain('private-upstream-reported-model');
+      expect(JSON.stringify(mockPrisma.chatMessage.create.mock.calls)).not.toContain('private-upstream-reported-model');
+      expect(JSON.stringify(mockPrisma.generationUsage.create.mock.calls)).not.toContain('private-upstream-reported-model');
       expect(JSON.stringify(loggedPayloads())).not.toContain('Hi there');
       expect(JSON.stringify(loggedPayloads())).not.toContain('I should greet the user.');
+    });
+
+    it('keeps usage-recording failures readable without exposing the failure text', async () => {
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
+      mockPrisma.chatMessage.create.mockResolvedValue({
+        id: 2,
+        content: 'Hi there',
+        author: 'ASSISTANT',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      });
+      mockPrisma.generationUsage.create.mockRejectedValue(new Error('private database failure text'));
+      jest.spyOn(OllamaProvider.prototype, 'complete').mockResolvedValue({
+        content: 'Hi there',
+        model: 'private-upstream-reported-model',
+        latencyMs: 12,
+      });
+
+      await ChatService.generateAssistantResponse({
+        sessionId: 1,
+        content: 'Hello',
+        requestId: 'req-usage-failure',
+      }, createWorkspaceContextFor(25));
+
+      expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+        providerId: '1',
+        providerType: 'ollama',
+        model: TEST_MODEL_ID,
+        operation: 'generationUsage.record',
+        status: 'error',
+        failureKind: 'Error',
+      }), 'generationUsage.record.error');
+      expect(JSON.stringify(loggedPayloads())).not.toContain('private database failure text');
+      expect(JSON.stringify(loggedPayloads())).not.toContain('private-upstream-reported-model');
     });
 
     it('should resolve an explicit provider and model', async () => {

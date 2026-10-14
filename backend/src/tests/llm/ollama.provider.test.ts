@@ -403,7 +403,7 @@ describe('OllamaProvider embeddings', () => {
   it('normalizes successful embedding responses', async () => {
     mockedFetch.mockResolvedValue(mockResponse({
       json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
-        model: 'embedding-model',
+        model: 'private-upstream-embedding-model',
         embeddings: [
           [0.1, 0.2],
           [0.3, 0.4],
@@ -421,7 +421,7 @@ describe('OllamaProvider embeddings', () => {
       providerId: 'local-ollama',
       providerName: 'Local Ollama',
       providerType: 'ollama',
-      model: 'embedding-model',
+      model: TEST_MODEL_ID,
       embeddings: [
         { embedding: [0.1, 0.2], index: 0 },
         { embedding: [0.3, 0.4], index: 1 },
@@ -439,7 +439,8 @@ describe('OllamaProvider embeddings', () => {
     expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
       providerId: 'local-ollama',
       providerType: 'ollama',
-      model: 'embedding-model',
+      model: TEST_MODEL_ID,
+      providerModelMismatch: true,
       operation: 'provider.embed',
       status: 'success',
       latencyMs: expect.any(Number),
@@ -450,6 +451,7 @@ describe('OllamaProvider embeddings', () => {
     ]);
     expect(logText).not.toContain('Private first');
     expect(logText).not.toContain('Private second');
+    expect(logText).not.toContain('private-upstream-embedding-model');
   });
 
   it('rejects malformed embedding responses', async () => {

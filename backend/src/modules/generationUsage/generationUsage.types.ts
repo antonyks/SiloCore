@@ -4,6 +4,7 @@ import { GenerationUsageOutcome } from './generationUsage.model';
 export interface GenerationUsageCreateInput {
   workspaceId: number;
   providerId: number;
+  /** Selected/resolved request model, never a provider response-reported model. */
   model: string;
   streaming: boolean;
   latencyMs?: number;

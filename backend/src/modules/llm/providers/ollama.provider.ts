@@ -20,6 +20,7 @@ import {
     LlmProviderListedModel,
 } from '../llm.types';
 import { getLlmErrorCode, logLlmEvent } from '../llm.logging';
+import { providerModelMismatch } from '../llm.modelIdentity';
 import { safeErrorDiagnostic } from '../../../config/safeErrorDiagnostic';
 
 /** Ollama-specific API request shape. */
@@ -205,6 +206,7 @@ export class OllamaProvider extends AbstractLlmProvider {
             operation: 'provider.embed',
             latencyMs: result.latencyMs,
             status: 'success',
+            providerModelMismatch: providerModelMismatch(request.model, result.value.model),
         });
 
         return response;
@@ -556,7 +558,7 @@ export class OllamaProvider extends AbstractLlmProvider {
             providerId: this.id,
             providerName: this.config.name,
             providerType: this.config.type,
-            model: raw.model ?? fallbackModel,
+            model: fallbackModel,
             embeddings: embeddings.map((embedding, index) => ({
                 embedding,
                 index,
