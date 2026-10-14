@@ -1,5 +1,9 @@
 import { logger } from '../../config/logger';
 import { getPublicLlmErrorCode } from './llm.safeError';
+import {
+  PROVIDER_FAILURE_CATEGORIES, PROVIDER_FAILURE_CODES, PROVIDER_FAILURE_STAGES,
+  ProviderFailureCategory, ProviderFailureCode, ProviderFailureStage,
+} from './llm.failure';
 
 type LlmLogStatus = 'started' | 'success' | 'error' | 'aborted' | 'skipped';
 
@@ -18,6 +22,10 @@ type LlmLogFields = {
   failureReason?: string;
   upstreamStatus?: number;
   failureSite?: string;
+  stage?: ProviderFailureStage;
+  failureCategory?: ProviderFailureCategory;
+  providerFailureCode?: ProviderFailureCode;
+  retryable?: boolean;
 };
 
 function allowedLogFields(fields: LlmLogFields): Record<string, unknown> {
@@ -37,6 +45,18 @@ function allowedLogFields(fields: LlmLogFields): Record<string, unknown> {
     result.upstreamStatus = fields.upstreamStatus;
   }
   if (fields.providerModelMismatch === true) result.providerModelMismatch = true;
+  if (typeof fields.stage === 'string' && (PROVIDER_FAILURE_STAGES as readonly string[]).includes(fields.stage)) {
+    result.stage = fields.stage;
+  }
+  if (typeof fields.failureCategory === 'string'
+    && (PROVIDER_FAILURE_CATEGORIES as readonly string[]).includes(fields.failureCategory)) {
+    result.failureCategory = fields.failureCategory;
+  }
+  if (typeof fields.providerFailureCode === 'string'
+    && (PROVIDER_FAILURE_CODES as readonly string[]).includes(fields.providerFailureCode)) {
+    result.providerFailureCode = fields.providerFailureCode;
+  }
+  if (typeof fields.retryable === 'boolean') result.retryable = fields.retryable;
   return result;
 }
 

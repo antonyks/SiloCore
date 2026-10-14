@@ -394,6 +394,30 @@ describe('OpenAiCompatibleProvider completion', () => {
     });
   });
 
+  it('marks a confirmed adapter deadline retryable without changing the public timeout error', async () => {
+    const controller = new AbortController();
+    controller.abort(new DOMException('private timeout detail', 'TimeoutError'));
+    const timeoutSpy = jest.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+    try {
+      const abortError = new Error('private upstream abort detail');
+      abortError.name = 'AbortError';
+      mockedFetch.mockRejectedValue(abortError);
+
+      await expect(createProvider().complete({
+        model: TEST_MODEL_ID,
+        messages: [{ role: 'user', content: 'Hi' }],
+      })).rejects.toMatchObject({ code: 'REQUEST_TIMEOUT' });
+      expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+        operation: 'provider.complete', status: 'error', errorCode: 'REQUEST_TIMEOUT',
+        failureCategory: 'timeout', providerFailureCode: 'TIMEOUT', retryable: true,
+      }), 'provider.complete.error');
+      expect(loggedText()).not.toContain('private upstream abort detail');
+      expect(loggedText()).not.toContain('private timeout detail');
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  });
+
   it('maps malformed payloads to provider errors', async () => {
     mockedFetch.mockResolvedValue(mockResponse({
       json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
@@ -410,11 +434,15 @@ describe('OpenAiCompatibleProvider completion', () => {
       code: 'MALFORMED_RESPONSE',
       message: 'OpenAI-compatible completion response was malformed',
     });
+    expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'provider.complete', status: 'error', stage: 'response_parse',
+      providerFailureCode: 'MALFORMED_RESPONSE', retryable: false,
+    }), 'provider.complete.error');
   });
 
   it('maps invalid JSON payloads to malformed provider errors', async () => {
     mockedFetch.mockResolvedValue(mockResponse({
-      json: jest.fn<() => Promise<unknown>>().mockRejectedValue(new SyntaxError('Unexpected token')),
+      json: jest.fn<() => Promise<unknown>>().mockRejectedValue(new SyntaxError('Bearer private-token\nprivate prompt')),
     }));
 
     await expect(createProvider().complete({
@@ -425,6 +453,13 @@ describe('OpenAiCompatibleProvider completion', () => {
       code: 'MALFORMED_RESPONSE',
       message: 'OpenAI-compatible completion response was malformed',
     });
+    expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'provider.complete', status: 'error', errorCode: 'MALFORMED_RESPONSE',
+      stage: 'response_parse', failureCategory: 'malformed_response',
+      providerFailureCode: 'MALFORMED_RESPONSE', retryable: false,
+      failureSite: expect.any(String), latencyMs: expect.any(Number),
+    }), 'provider.complete.error');
+    expect(loggedText()).not.toContain('private-token');
   });
 
   it.each([

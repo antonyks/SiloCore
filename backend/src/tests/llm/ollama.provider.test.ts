@@ -470,6 +470,10 @@ describe('OllamaProvider embeddings', () => {
       code: 'MALFORMED_EMBEDDING_RESPONSE',
       message: 'Ollama embedding response was malformed',
     });
+    expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'provider.embed', status: 'error', stage: 'response_parse',
+      providerFailureCode: 'MALFORMED_RESPONSE', retryable: false,
+    }), 'provider.embed.error');
   });
 
   it('maps embedding HTTP failures to provider errors', async () => {
@@ -529,6 +533,29 @@ describe('OllamaProvider upstream failure privacy', () => {
       code: 'UPSTREAM_ERROR',
       message: 'Ollama completion failed',
     });
+    expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'provider.complete', status: 'error', errorCode: 'UPSTREAM_ERROR',
+      stage: 'upstream_request', failureCategory: 'unknown', providerFailureCode: 'UNKNOWN',
+      failureSite: expect.any(String), latencyMs: expect.any(Number),
+    }), 'provider.complete.error');
+    expect(JSON.stringify(mockedLogger.error.mock.calls)).not.toContain('private-api-key');
+  });
+
+  it('distinguishes invalid JSON internally while keeping the established public error', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      json: jest.fn<() => Promise<unknown>>().mockRejectedValue(new SyntaxError('Bearer private-token\nprivate prompt')),
+    }));
+
+    await expect(createProvider().complete({
+      model: TEST_MODEL_ID,
+      messages: [{ role: 'user', content: 'Hi' }],
+    })).rejects.toMatchObject({ code: 'UPSTREAM_ERROR', message: 'Ollama completion failed' });
+    expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'provider.complete', status: 'error', errorCode: 'UPSTREAM_ERROR',
+      stage: 'response_parse', failureCategory: 'malformed_response',
+      providerFailureCode: 'MALFORMED_RESPONSE', retryable: false,
+    }), 'provider.complete.error');
+    expect(JSON.stringify(mockedLogger.error.mock.calls)).not.toContain('private-token');
   });
 
   it.each(['listModels', 'pullModel'] as const)('does not expose fetch error details from %s', async (operation) => {

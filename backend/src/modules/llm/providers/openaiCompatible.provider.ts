@@ -3,10 +3,9 @@
  * Adapter for OpenAI-compatible chat completion APIs.
  */
 
-import fetch, { Response } from 'node-fetch';
+import fetch from 'node-fetch';
 import { AbstractLlmProvider } from '../llm.base';
 import {
-  LlmAuthenticationError,
   LlmCompletionRequest,
   LlmCompletionResponse,
   LlmEmbeddingRequest,
@@ -16,7 +15,6 @@ import {
   LlmProviderConfig,
   LlmProviderError,
   LlmProviderListedModel,
-  LlmRateLimitError,
   LlmStreamingError,
   LlmStreamChunk,
   TokenUsage,
@@ -24,6 +22,7 @@ import {
 import { getLlmErrorCode, logLlmEvent } from '../llm.logging';
 import { providerModelMismatch } from '../llm.modelIdentity';
 import { safeErrorDiagnostic } from '../../../config/safeErrorDiagnostic';
+import { classifyProviderFailure, confirmedDeadline, providerHttpError, ProviderFailureOperation, ProviderFailureStage } from '../llm.failure';
 
 interface OpenAiCompatibleChatRequest {
   model: string;
@@ -151,11 +150,18 @@ function extractDeltaReasoning(delta: OpenAiCompatibleDelta | undefined): string
   return delta?.reasoning ?? delta?.reasoning_content;
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
-}
-
 export class OpenAiCompatibleProvider extends AbstractLlmProvider {
+  private classifyFailure(
+    error: unknown, operation: ProviderFailureOperation, stage: ProviderFailureStage,
+    signal: AbortSignal | undefined, diagnostics: Record<string, string | number>,
+  ) {
+    return classifyProviderFailure({
+      providerType: this.config.type, providerId: this.id, operation, stage, error,
+      diagnostics,
+      abortCause: confirmedDeadline(signal),
+    });
+  }
+
   constructor(config: LlmProviderConfig) {
     super(config, {
       completion: true,
@@ -173,6 +179,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
   async initialise(): Promise<void> {
     if (!this.isEnabled) return;
     const startedAt = Date.now();
+    const signal = this.buildAbortSignal(this.config.timeoutMs ?? 5000);
 
     logLlmEvent({
       providerId: this.id,
@@ -182,7 +189,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
     });
 
     try {
-      const raw = await this.fetchModelList(this.config.timeoutMs ?? 5000);
+      const raw = await this.fetchModelList(signal);
       this.normalizeModelListResponse(raw);
       logLlmEvent({
         providerId: this.id,
@@ -192,21 +199,24 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
         status: 'success',
       });
     } catch (error) {
-      const normalizedError = this.normalizeModelListError(error);
+      const failure = this.classifyFailure(error, 'initialise', 'upstream_request', signal, safeErrorDiagnostic(error));
       logLlmEvent({
         providerId: this.id,
         providerType: this.config.type,
         operation: 'provider.initialise',
         latencyMs: Date.now() - startedAt,
         status: 'error',
-        errorCode: getLlmErrorCode(normalizedError),
-        ...safeErrorDiagnostic(error),
+        errorCode: getLlmErrorCode(failure.error),
+        ...failure.diagnostics,
+        stage: failure.stage, failureCategory: failure.failureCategory,
+        providerFailureCode: failure.providerFailureCode, retryable: failure.retryable,
       });
-      throw normalizedError;
+      throw failure.error;
     }
   }
 
   async embed(request: LlmEmbeddingRequest): Promise<LlmEmbeddingResponse> {
+    const signal = this.buildAbortSignal();
     const body: OpenAiCompatibleEmbeddingRequest = {
       model: request.model,
       input: request.input,
@@ -223,6 +233,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
     });
 
     let result: { value: OpenAiCompatibleEmbeddingResponse; latencyMs: number };
+    let response: LlmEmbeddingResponse;
     try {
       result = await this.withLatency(async () => {
         const res = await fetch(buildEmbeddingsUrl(this.config.baseUrl), {
@@ -231,11 +242,11 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
             'Content-Type': 'application/json',
           }),
           body: JSON.stringify(body),
-          signal: this.buildAbortSignal(),
+          signal,
         });
 
         if (!res.ok) {
-          await this.throwEmbeddingHttpError(res);
+          throw providerHttpError({ providerType: this.config.type, providerId: this.id, operation: 'embed' }, res.status);
         }
 
         try {
@@ -244,8 +255,9 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
           throw this.createMalformedEmbeddingResponseError();
         }
       });
+      response = this.normalizeEmbeddingResponse(result.value, request.model, result.latencyMs);
     } catch (error) {
-      const normalizedError = this.normalizeEmbeddingError(error);
+      const failure = this.classifyFailure(error, 'embed', 'upstream_request', signal, safeErrorDiagnostic(error));
       logLlmEvent({
         providerId: this.id,
         providerType: this.config.type,
@@ -253,13 +265,14 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
         operation: 'provider.embed',
         latencyMs: Date.now() - startedAt,
         status: 'error',
-        errorCode: getLlmErrorCode(normalizedError),
-        ...safeErrorDiagnostic(error),
+        errorCode: getLlmErrorCode(failure.error),
+        ...failure.diagnostics,
+        stage: failure.stage, failureCategory: failure.failureCategory,
+        providerFailureCode: failure.providerFailureCode, retryable: failure.retryable,
       });
-      throw normalizedError;
+      throw failure.error;
     }
 
-    const response = this.normalizeEmbeddingResponse(result.value, request.model, result.latencyMs);
     logLlmEvent({
       providerId: this.id,
       providerType: this.config.type,
@@ -275,6 +288,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
 
   async complete(request: LlmCompletionRequest): Promise<LlmCompletionResponse> {
     const enriched = this.enrichRequest({ ...request, stream: false });
+    const signal = this.buildAbortSignal();
     const body: OpenAiCompatibleChatRequest = {
       model: enriched.model,
       messages: enriched.messages,
@@ -295,6 +309,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
     });
 
     let result: { value: OpenAiCompatibleChatResponse; latencyMs: number };
+    let completion: LlmCompletionResponse;
     try {
       result = await this.withLatency(async () => {
         const res = await fetch(buildChatCompletionsUrl(this.config.baseUrl), {
@@ -303,11 +318,11 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
             'Content-Type': 'application/json',
           }),
           body: JSON.stringify(body),
-          signal: this.buildAbortSignal(),
+          signal,
         });
 
         if (!res.ok) {
-          await this.throwHttpError(res);
+          throw providerHttpError({ providerType: this.config.type, providerId: this.id, operation: 'complete' }, res.status);
         }
 
         try {
@@ -316,8 +331,9 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
           throw this.createMalformedResponseError();
         }
       });
+      completion = this.normalizeCompletionResponse(result.value, enriched.model, result.latencyMs);
     } catch (error) {
-      const normalizedError = this.normalizeCompletionError(error);
+      const failure = this.classifyFailure(error, 'complete', 'upstream_request', signal, safeErrorDiagnostic(error));
       logLlmEvent({
         providerId: this.id,
         providerType: this.config.type,
@@ -325,13 +341,14 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
         operation: 'provider.complete',
         latencyMs: Date.now() - startedAt,
         status: 'error',
-        errorCode: getLlmErrorCode(normalizedError),
-        ...safeErrorDiagnostic(error),
+        errorCode: getLlmErrorCode(failure.error),
+        ...failure.diagnostics,
+        stage: failure.stage, failureCategory: failure.failureCategory,
+        providerFailureCode: failure.providerFailureCode, retryable: failure.retryable,
       });
-      throw normalizedError;
+      throw failure.error;
     }
 
-    const completion = this.normalizeCompletionResponse(result.value, enriched.model, result.latencyMs);
     logLlmEvent({
       providerId: this.id,
       providerType: this.config.type,
@@ -347,6 +364,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
 
   async *streamComplete(request: LlmCompletionRequest): AsyncIterable<LlmStreamChunk> {
     const enriched = this.enrichRequest({ ...request, stream: true });
+    const signal = this.buildAbortSignal();
     const body: OpenAiCompatibleChatRequest = {
       model: enriched.model,
       messages: enriched.messages,
@@ -359,6 +377,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
     const startedAt = Date.now();
     let completed = false;
     let failed = false;
+    let failureStage: ProviderFailureStage = 'upstream_request';
 
     logLlmEvent({
       providerId: this.id,
@@ -375,13 +394,14 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
           'Content-Type': 'application/json',
         }),
         body: JSON.stringify(body),
-        signal: this.buildAbortSignal(),
+        signal,
       });
 
       if (!res.ok) {
-        await this.throwStreamingHttpError(res);
+        throw providerHttpError({ providerType: this.config.type, providerId: this.id, operation: 'stream' }, res.status);
       }
 
+      failureStage = 'stream_read';
       const reader = res.body as NodeJS.ReadableStream;
       for await (const chunk of this.readStreamChunks(reader)) {
         yield chunk;
@@ -398,7 +418,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
       });
     } catch (error) {
       failed = true;
-      const normalizedError = this.normalizeStreamingError(error);
+      const failure = this.classifyFailure(error, 'stream', failureStage, signal, safeErrorDiagnostic(error));
       logLlmEvent({
         providerId: this.id,
         providerType: this.config.type,
@@ -406,10 +426,12 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
         operation: 'provider.stream',
         latencyMs: Date.now() - startedAt,
         status: 'error',
-        errorCode: getLlmErrorCode(normalizedError),
-        ...safeErrorDiagnostic(error),
+        errorCode: getLlmErrorCode(failure.error),
+        ...failure.diagnostics,
+        stage: failure.stage, failureCategory: failure.failureCategory,
+        providerFailureCode: failure.providerFailureCode, retryable: failure.retryable,
       });
-      throw normalizedError;
+      throw failure.error;
     } finally {
       if (!completed && !failed) {
         logLlmEvent({
@@ -426,6 +448,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
 
   async listModels(): Promise<LlmProviderListedModel[]> {
     const startedAt = Date.now();
+    const signal = this.buildAbortSignal();
 
     logLlmEvent({
       providerId: this.id,
@@ -435,7 +458,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
     });
 
     try {
-      const raw = await this.fetchModelList();
+      const raw = await this.fetchModelList(signal);
       const models = this.normalizeModelListResponse(raw);
 
       logLlmEvent({
@@ -448,201 +471,20 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
 
       return models;
     } catch (error) {
-      const normalizedError = this.normalizeModelListError(error);
+      const failure = this.classifyFailure(error, 'listModels', 'upstream_request', signal, safeErrorDiagnostic(error));
       logLlmEvent({
         providerId: this.id,
         providerType: this.config.type,
         operation: 'provider.listModels',
         latencyMs: Date.now() - startedAt,
         status: 'error',
-        errorCode: getLlmErrorCode(normalizedError),
-        ...safeErrorDiagnostic(error),
+        errorCode: getLlmErrorCode(failure.error),
+        ...failure.diagnostics,
+        stage: failure.stage, failureCategory: failure.failureCategory,
+        providerFailureCode: failure.providerFailureCode, retryable: failure.retryable,
       });
-      throw normalizedError;
+      throw failure.error;
     }
-  }
-
-  private async throwHttpError(res: Response): Promise<never> {
-    if (res.status === 401 || res.status === 403) {
-      throw new LlmAuthenticationError(
-        'OpenAI-compatible authentication failed',
-        this.id,
-        'AUTHENTICATION_ERROR',
-        res.status,
-      );
-    }
-
-    if (res.status === 429) {
-      throw new LlmRateLimitError(
-        'OpenAI-compatible rate limit exceeded',
-        this.id,
-        'RATE_LIMITED',
-        res.status,
-      );
-    }
-
-    throw new LlmProviderError(
-      `OpenAI-compatible completion failed with status ${res.status}`,
-      this.id,
-      `HTTP_${res.status}`,
-      res.status,
-    );
-  }
-
-  private async throwModelListHttpError(res: Response): Promise<never> {
-    if (res.status === 401 || res.status === 403) {
-      throw new LlmAuthenticationError(
-        'OpenAI-compatible authentication failed',
-        this.id,
-        'AUTHENTICATION_ERROR',
-        res.status,
-      );
-    }
-
-    if (res.status === 429) {
-      throw new LlmRateLimitError(
-        'OpenAI-compatible rate limit exceeded',
-        this.id,
-        'RATE_LIMITED',
-        res.status,
-      );
-    }
-
-    if (res.status === 404 || res.status === 405) {
-      throw new LlmProviderError(
-        'OpenAI-compatible model listing is unsupported',
-        this.id,
-        'MODEL_LISTING_UNSUPPORTED',
-        res.status,
-      );
-    }
-
-    throw new LlmProviderError(
-      `OpenAI-compatible model listing failed with status ${res.status}`,
-      this.id,
-      `HTTP_${res.status}`,
-      res.status,
-    );
-  }
-
-  private async throwEmbeddingHttpError(res: Response): Promise<never> {
-    if (res.status === 401 || res.status === 403) {
-      throw new LlmAuthenticationError(
-        'OpenAI-compatible authentication failed',
-        this.id,
-        'AUTHENTICATION_ERROR',
-        res.status,
-      );
-    }
-
-    if (res.status === 429) {
-      throw new LlmRateLimitError(
-        'OpenAI-compatible rate limit exceeded',
-        this.id,
-        'RATE_LIMITED',
-        res.status,
-      );
-    }
-
-    throw new LlmProviderError(
-      `OpenAI-compatible embedding failed with status ${res.status}`,
-      this.id,
-      `HTTP_${res.status}`,
-      res.status,
-    );
-  }
-
-  private async throwStreamingHttpError(res: Response): Promise<never> {
-    throw new LlmStreamingError(
-      `OpenAI-compatible streaming failed with status ${res.status}`,
-      this.id,
-      `HTTP_${res.status}`,
-      res.status,
-    );
-  }
-
-  private normalizeCompletionError(error: unknown): Error {
-    if (error instanceof LlmProviderError) {
-      return error;
-    }
-
-    if (isAbortError(error)) {
-      return new LlmProviderError(
-        'OpenAI-compatible completion timed out or was aborted',
-        this.id,
-        'REQUEST_TIMEOUT',
-      );
-    }
-
-    return new LlmProviderError(
-      'OpenAI-compatible completion failed',
-      this.id,
-      'UPSTREAM_ERROR',
-    );
-  }
-
-  private normalizeStreamingError(error: unknown): Error {
-    if (error instanceof LlmStreamingError) {
-      return error;
-    }
-
-    if (error instanceof LlmProviderError) {
-      return new LlmStreamingError(error.message, this.id, error.code, error.statusCode);
-    }
-
-    if (isAbortError(error)) {
-      return new LlmStreamingError(
-        'OpenAI-compatible stream timed out or was aborted',
-        this.id,
-        'REQUEST_TIMEOUT',
-      );
-    }
-
-    return new LlmStreamingError(
-      'OpenAI-compatible stream failed',
-      this.id,
-      'UPSTREAM_STREAM_ERROR',
-    );
-  }
-
-  private normalizeModelListError(error: unknown): Error {
-    if (error instanceof LlmProviderError) {
-      return error;
-    }
-
-    if (isAbortError(error)) {
-      return new LlmProviderError(
-        'OpenAI-compatible model listing timed out or was aborted',
-        this.id,
-        'REQUEST_TIMEOUT',
-      );
-    }
-
-    return new LlmProviderError(
-      'OpenAI-compatible model listing failed',
-      this.id,
-      'LIST_MODELS_FAILED',
-    );
-  }
-
-  private normalizeEmbeddingError(error: unknown): Error {
-    if (error instanceof LlmProviderError) {
-      return error;
-    }
-
-    if (isAbortError(error)) {
-      return new LlmProviderError(
-        'OpenAI-compatible embedding timed out or was aborted',
-        this.id,
-        'REQUEST_TIMEOUT',
-      );
-    }
-
-    return new LlmProviderError(
-      'OpenAI-compatible embedding failed',
-      this.id,
-      'EMBEDDINGS_FAILED',
-    );
   }
 
   private normalizeCompletionResponse(
@@ -699,14 +541,14 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
     );
   }
 
-  private async fetchModelList(timeoutMs?: number): Promise<OpenAiCompatibleModelListResponse> {
+  private async fetchModelList(signal?: AbortSignal): Promise<OpenAiCompatibleModelListResponse> {
     const res = await fetch(buildModelsUrl(this.config.baseUrl), {
       headers: this.buildRequestHeaders(),
-      signal: this.buildAbortSignal(timeoutMs),
+      signal,
     });
 
     if (!res.ok) {
-      await this.throwModelListHttpError(res);
+      throw providerHttpError({ providerType: this.config.type, providerId: this.id, operation: 'listModels' }, res.status);
     }
 
     try {

@@ -58,4 +58,15 @@ describe('provider model identity and safe LLM log fields', () => {
       failureSite: 'src/modules/llm/providers/ollama.provider.ts:12',
     }, 'provider.embed.error');
   });
+
+  it('drops untrusted failure taxonomy values at runtime', () => {
+    logLlmEvent({
+      operation: 'provider.embed', status: 'error',
+      stage: 'private prompt', failureCategory: 'private category',
+      providerFailureCode: 'private code',
+    } as never);
+    expect(logger.error).toHaveBeenCalledWith({
+      operation: 'provider.embed', status: 'error',
+    }, 'provider.embed.error');
+  });
 });
