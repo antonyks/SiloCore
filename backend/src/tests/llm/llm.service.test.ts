@@ -1,4 +1,5 @@
 import { jest } from '@jest/globals';
+import { InvalidInputError } from '../../errors';
 import { ILlmProvider } from '../../modules/llm/llm.interface';
 import {
   LlmProviderModelListObserver,
@@ -172,7 +173,10 @@ describe('LlmRegistryService', () => {
     const successfulListModels = jest.fn<() => Promise<LlmProviderListedModel[]>>().mockResolvedValue([
       createListedModel(TEST_MODEL_ID),
     ]);
-    const failingListModels = jest.fn<() => Promise<LlmProviderListedModel[]>>().mockRejectedValue(new Error('provider offline'));
+    const upstreamError = Object.assign(new Error('Authorization: Bearer private-api-key'), {
+      code: 'PRIVATE_API_KEY',
+    });
+    const failingListModels = jest.fn<() => Promise<LlmProviderListedModel[]>>().mockRejectedValue(upstreamError);
     const service = new LlmRegistryService([
       createProvider({ id: 'ollama', name: 'Local Ollama', type: 'ollama' }, successfulListModels),
       createProvider({ id: 'broken', name: 'Broken Provider', type: 'openai-compatible' }, failingListModels),
@@ -208,9 +212,27 @@ describe('LlmRegistryService', () => {
         status: 'error',
         modelCount: 0,
         capabilities: DEFAULT_CAPABILITIES,
-        errorMessage: 'provider offline',
+        errorMessage: 'Provider operation failed',
       },
     ]);
+  });
+
+  it('does not expose adapter validation text in model-list results', async () => {
+    const listModels = jest.fn<() => Promise<LlmProviderListedModel[]>>()
+      .mockRejectedValue(new InvalidInputError('Bearer private-token; prompt: private chat'));
+    const service = new LlmRegistryService([
+      createProvider({ id: 'broken', name: 'Broken Provider', type: 'ollama' }, listModels),
+    ]);
+
+    const result = await service.listAvailableModels();
+
+    expect(result.providers[0]).toEqual(expect.objectContaining({
+      status: 'error',
+      errorMessage: 'Provider rejected the request',
+      errorCode: 'PROVIDER_INVALID_REQUEST',
+    }));
+    expect(JSON.stringify(result)).not.toContain('private-token');
+    expect(JSON.stringify(result)).not.toContain('private chat');
   });
 
   it('fails unsupported model listing before calling the provider', async () => {
@@ -269,7 +291,7 @@ describe('LlmRegistryService', () => {
           status: 'error',
           modelCount: 0,
           capabilities: DEFAULT_CAPABILITIES,
-          errorMessage: 'Unknown provider error',
+          errorMessage: 'Provider operation failed',
         },
       ],
     });

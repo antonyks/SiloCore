@@ -2,6 +2,7 @@ import { Client, Notification } from 'pg';
 import { prisma } from '../../config/database';
 import { ENV } from '../../config/env';
 import { logger } from '../../config/logger';
+import { safeErrorDiagnostic } from '../../config/safeErrorDiagnostic';
 
 export const JOB_NOTIFICATION_CHANNEL = 'silocore_job_state_changed';
 
@@ -53,9 +54,9 @@ export async function bestEffortNotifyJobChanged(
 ): Promise<void> {
   try {
     await notifyJobChanged(jobId, event);
-  } catch (error: unknown) {
+  } catch (error) {
     logger.warn(
-      { err: error, jobId, event, operation: 'job.notify' },
+      { jobId, event, operation: 'job.notify', ...safeErrorDiagnostic(error) },
       'Job notification failed.',
     );
   }
@@ -110,9 +111,9 @@ export class JobNotificationListener {
     subscribers.add(subscriber);
     this.subscribersByJobId.set(jobId, subscribers);
 
-    void this.start().catch((error: unknown) => {
+    void this.start().catch((error) => {
       logger.warn(
-        { err: error, jobId, operation: 'job.listen' },
+        { jobId, operation: 'job.listen', ...safeErrorDiagnostic(error) },
         'Job notification listener failed to start; polling fallback remains active.',
       );
     });
@@ -174,7 +175,7 @@ export class JobNotificationListener {
     client.on('error', (error) => {
       if (this.suppressClientErrors) return;
       logger.warn(
-        { err: error, operation: 'job.listen' },
+        { operation: 'job.listen', ...safeErrorDiagnostic(error) },
         'Job notification listener error; polling fallback remains active.',
       );
     });

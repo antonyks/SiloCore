@@ -1,6 +1,7 @@
 import type { PgBoss } from 'pg-boss';
 import { ENV } from '../config/env';
 import { logger } from '../config/logger';
+import { safeErrorDiagnostic } from '../config/safeErrorDiagnostic';
 import { createJobWorkerHandler, JobWorkerHandler } from '../modules/job/job.worker';
 import { ensurePgBossQueue, PgBossJobQueueTransport } from '../modules/job/jobQueue.transport';
 import { importPgBoss } from '../modules/job/pgBoss.loader.cjs';
@@ -45,8 +46,8 @@ export function createWorkerComposition(overrides: WorkerCompositionOverrides = 
     try {
       pool = (overrides.createCpuPool ?? createWorkerCpuTaskPool)({ threadCount: ENV.PISCINA_THREAD_COUNT });
       boss = await (overrides.createQueueClient ?? createCoreWorkerQueueClient)();
-      boss.on('error', (error) => logger.error({ err: error }, 'pg-boss emitted an error.'));
-      boss.on('warning', (warning) => logger.warn({ warning }, 'pg-boss emitted a warning.'));
+      boss.on('error', (error) => logger.error({ ...safeErrorDiagnostic(error), operation: 'pgBoss.error' }, 'pg-boss emitted an error.'));
+      boss.on('warning', (error) => logger.warn({ ...safeErrorDiagnostic(error), operation: 'pgBoss.warning' }, 'pg-boss emitted a warning.'));
       await boss.start();
       const handlers = registrations(pool);
       for (const { queueName } of handlers) await ensurePgBossQueue(boss, queueName);

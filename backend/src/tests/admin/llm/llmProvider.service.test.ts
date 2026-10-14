@@ -1,7 +1,7 @@
 import fetch, { Response } from 'node-fetch';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import { logger } from '../../../config/logger';
-import { NotFoundError } from '../../../errors';
+import { InvalidInputError, NotFoundError } from '../../../errors';
 import { LlmProviderService } from '../../../modules/admin/llm/llmProvider.service';
 import { LlmRuntimeService } from '../../../modules/llm/llmRuntime.service';
 import { SelectedLlmProviderConfig } from '../../../modules/llm/llmProviderConfig.model';
@@ -222,6 +222,25 @@ describe('LlmProviderService', () => {
   });
 
   describe('provider operations', () => {
+    it('returns a safe error code when provider initialization rejects input', async () => {
+      jest.spyOn(OllamaProvider.prototype, 'initialise')
+        .mockRejectedValue(new InvalidInputError('Bearer private-token; prompt: private chat'));
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider());
+
+      const result = await LlmProviderService.testProvider(1);
+
+      expect(result).toEqual(expect.objectContaining({
+        status: 'error',
+        errorMessage: 'Provider rejected the request',
+        errorCode: 'PROVIDER_INVALID_REQUEST',
+      }));
+      expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+        errorCode: 'PROVIDER_INVALID_REQUEST',
+      }), 'provider.test.error');
+      expect(JSON.stringify(result)).not.toContain('private-token');
+      expect(JSON.stringify(mockedLogger.error.mock.calls)).not.toContain('private-token');
+    });
+
     it('tests openai-compatible providers without leaking secrets', async () => {
       mockedFetch.mockResolvedValue(mockResponse());
       mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider({
@@ -275,7 +294,7 @@ describe('LlmProviderService', () => {
         providerName: 'OpenAI Compatible',
         providerType: 'openai-compatible',
         status: 'error',
-        errorMessage: 'OpenAI-compatible model listing is unsupported: missing endpoint',
+        errorMessage: 'Provider model listing is unsupported',
         errorCode: 'MODEL_LISTING_UNSUPPORTED',
       });
       expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
@@ -396,7 +415,7 @@ describe('LlmProviderService', () => {
             status: 'error',
             modelCount: 0,
             capabilities: OPENAI_COMPATIBLE_CAPABILITIES,
-            errorMessage: 'OpenAI-compatible model listing is unsupported: method not allowed',
+            errorMessage: 'Provider model listing is unsupported',
           }),
         ],
       });
@@ -416,6 +435,23 @@ describe('LlmProviderService', () => {
         providerId: String(provider.id),
         status: 'success',
       }));
+    });
+
+    it('returns a safe error code when model pull rejects input', async () => {
+      jest.spyOn(OllamaProvider.prototype, 'pullModel')
+        .mockRejectedValue(new InvalidInputError('Bearer private-token; prompt: private chat'));
+      const provider = createProvider();
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(provider);
+
+      const result = await LlmProviderService.pullProviderModel(provider.id, TEST_MODEL_ID);
+
+      expect(result).toEqual(expect.objectContaining({
+        status: 'error',
+        errorMessage: 'Provider rejected the request',
+        errorCode: 'PROVIDER_INVALID_REQUEST',
+      }));
+      expect(JSON.stringify(result)).not.toContain('private-token');
+      expect(JSON.stringify(mockedLogger.error.mock.calls)).not.toContain('private-token');
     });
 
     it('rejects unsupported model pull before provider-specific work starts', async () => {

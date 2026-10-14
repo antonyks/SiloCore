@@ -22,6 +22,7 @@ import {
   TokenUsage,
 } from '../llm.types';
 import { getLlmErrorCode, logLlmEvent } from '../llm.logging';
+import { safeErrorDiagnostic } from '../../../config/safeErrorDiagnostic';
 
 interface OpenAiCompatibleChatRequest {
   model: string;
@@ -153,23 +154,6 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
-async function readProviderErrorMessage(res: Response): Promise<string | undefined> {
-  const parsed = await res.json().catch(() => undefined) as
-    | { error?: { message?: unknown }; message?: unknown }
-    | undefined;
-
-  if (typeof parsed?.error?.message === 'string' && parsed.error.message.trim()) {
-    return parsed.error.message;
-  }
-
-  if (typeof parsed?.message === 'string' && parsed.message.trim()) {
-    return parsed.message;
-  }
-
-  const text = await res.text().catch(() => '');
-  return text.trim() || undefined;
-}
-
 export class OpenAiCompatibleProvider extends AbstractLlmProvider {
   constructor(config: LlmProviderConfig) {
     super(config, {
@@ -215,6 +199,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
         latencyMs: Date.now() - startedAt,
         status: 'error',
         errorCode: getLlmErrorCode(normalizedError),
+        ...safeErrorDiagnostic(error),
       });
       throw normalizedError;
     }
@@ -268,6 +253,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
         latencyMs: Date.now() - startedAt,
         status: 'error',
         errorCode: getLlmErrorCode(normalizedError),
+        ...safeErrorDiagnostic(error),
       });
       throw normalizedError;
     }
@@ -338,6 +324,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
         latencyMs: Date.now() - startedAt,
         status: 'error',
         errorCode: getLlmErrorCode(normalizedError),
+        ...safeErrorDiagnostic(error),
       });
       throw normalizedError;
     }
@@ -417,6 +404,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
         latencyMs: Date.now() - startedAt,
         status: 'error',
         errorCode: getLlmErrorCode(normalizedError),
+        ...safeErrorDiagnostic(error),
       });
       throw normalizedError;
     } finally {
@@ -465,18 +453,16 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
         latencyMs: Date.now() - startedAt,
         status: 'error',
         errorCode: getLlmErrorCode(normalizedError),
+        ...safeErrorDiagnostic(error),
       });
       throw normalizedError;
     }
   }
 
   private async throwHttpError(res: Response): Promise<never> {
-    const detail = await readProviderErrorMessage(res);
-    const suffix = detail ? `: ${detail}` : '';
-
     if (res.status === 401 || res.status === 403) {
       throw new LlmAuthenticationError(
-        `OpenAI-compatible authentication failed${suffix}`,
+        'OpenAI-compatible authentication failed',
         this.id,
         'AUTHENTICATION_ERROR',
         res.status,
@@ -485,7 +471,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
 
     if (res.status === 429) {
       throw new LlmRateLimitError(
-        `OpenAI-compatible rate limit exceeded${suffix}`,
+        'OpenAI-compatible rate limit exceeded',
         this.id,
         'RATE_LIMITED',
         res.status,
@@ -493,7 +479,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
     }
 
     throw new LlmProviderError(
-      `OpenAI-compatible completion failed with status ${res.status}${suffix}`,
+      `OpenAI-compatible completion failed with status ${res.status}`,
       this.id,
       `HTTP_${res.status}`,
       res.status,
@@ -501,12 +487,9 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
   }
 
   private async throwModelListHttpError(res: Response): Promise<never> {
-    const detail = await readProviderErrorMessage(res);
-    const suffix = detail ? `: ${detail}` : '';
-
     if (res.status === 401 || res.status === 403) {
       throw new LlmAuthenticationError(
-        `OpenAI-compatible authentication failed${suffix}`,
+        'OpenAI-compatible authentication failed',
         this.id,
         'AUTHENTICATION_ERROR',
         res.status,
@@ -515,7 +498,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
 
     if (res.status === 429) {
       throw new LlmRateLimitError(
-        `OpenAI-compatible rate limit exceeded${suffix}`,
+        'OpenAI-compatible rate limit exceeded',
         this.id,
         'RATE_LIMITED',
         res.status,
@@ -524,7 +507,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
 
     if (res.status === 404 || res.status === 405) {
       throw new LlmProviderError(
-        `OpenAI-compatible model listing is unsupported${suffix}`,
+        'OpenAI-compatible model listing is unsupported',
         this.id,
         'MODEL_LISTING_UNSUPPORTED',
         res.status,
@@ -532,7 +515,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
     }
 
     throw new LlmProviderError(
-      `OpenAI-compatible model listing failed with status ${res.status}${suffix}`,
+      `OpenAI-compatible model listing failed with status ${res.status}`,
       this.id,
       `HTTP_${res.status}`,
       res.status,
@@ -540,12 +523,9 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
   }
 
   private async throwEmbeddingHttpError(res: Response): Promise<never> {
-    const detail = await readProviderErrorMessage(res);
-    const suffix = detail ? `: ${detail}` : '';
-
     if (res.status === 401 || res.status === 403) {
       throw new LlmAuthenticationError(
-        `OpenAI-compatible authentication failed${suffix}`,
+        'OpenAI-compatible authentication failed',
         this.id,
         'AUTHENTICATION_ERROR',
         res.status,
@@ -554,7 +534,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
 
     if (res.status === 429) {
       throw new LlmRateLimitError(
-        `OpenAI-compatible rate limit exceeded${suffix}`,
+        'OpenAI-compatible rate limit exceeded',
         this.id,
         'RATE_LIMITED',
         res.status,
@@ -562,7 +542,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
     }
 
     throw new LlmProviderError(
-      `OpenAI-compatible embedding failed with status ${res.status}${suffix}`,
+      `OpenAI-compatible embedding failed with status ${res.status}`,
       this.id,
       `HTTP_${res.status}`,
       res.status,
@@ -570,11 +550,8 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
   }
 
   private async throwStreamingHttpError(res: Response): Promise<never> {
-    const detail = await readProviderErrorMessage(res);
-    const suffix = detail ? `: ${detail}` : '';
-
     throw new LlmStreamingError(
-      `OpenAI-compatible streaming failed with status ${res.status}${suffix}`,
+      `OpenAI-compatible streaming failed with status ${res.status}`,
       this.id,
       `HTTP_${res.status}`,
       res.status,
@@ -591,14 +568,6 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
         'OpenAI-compatible completion timed out or was aborted',
         this.id,
         'REQUEST_TIMEOUT',
-      );
-    }
-
-    if (error instanceof Error) {
-      return new LlmProviderError(
-        `OpenAI-compatible completion failed: ${error.message}`,
-        this.id,
-        'UPSTREAM_ERROR',
       );
     }
 
@@ -626,14 +595,6 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
       );
     }
 
-    if (error instanceof Error) {
-      return new LlmStreamingError(
-        `OpenAI-compatible stream failed: ${error.message}`,
-        this.id,
-        'UPSTREAM_STREAM_ERROR',
-      );
-    }
-
     return new LlmStreamingError(
       'OpenAI-compatible stream failed',
       this.id,
@@ -654,14 +615,6 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
       );
     }
 
-    if (error instanceof Error) {
-      return new LlmProviderError(
-        `OpenAI-compatible model listing failed: ${error.message}`,
-        this.id,
-        'LIST_MODELS_FAILED',
-      );
-    }
-
     return new LlmProviderError(
       'OpenAI-compatible model listing failed',
       this.id,
@@ -679,14 +632,6 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
         'OpenAI-compatible embedding timed out or was aborted',
         this.id,
         'REQUEST_TIMEOUT',
-      );
-    }
-
-    if (error instanceof Error) {
-      return new LlmProviderError(
-        `OpenAI-compatible embedding failed: ${error.message}`,
-        this.id,
-        'EMBEDDINGS_FAILED',
       );
     }
 

@@ -2,6 +2,7 @@ import type { LlmRuntimeServiceContract } from '../llm/llmRuntime.service';
 import type { JobServiceContract } from '../job/job.service';
 import { Prisma, UserRole, UserStatus } from '@prisma/client';
 import { logger } from '../../config/logger';
+import { safeErrorDiagnostic } from '../../config/safeErrorDiagnostic';
 import { prisma } from '../../config/database';
 import { WorkspaceProvisioningService } from '../workspace/workspaceProvisioning.service';
 import { JobQueueTransport, JobService } from '../job';
@@ -115,8 +116,8 @@ export function createProviderHealthSampling(dependencies: Partial<ProviderHealt
       } catch (error) {
         logger.error(
           {
-            err: error,
             jobType: PROVIDER_HEALTH_SAMPLING_JOB_TYPE,
+            ...safeErrorDiagnostic(error),
           },
           'Provider health sampling enqueue tick failed.',
         );

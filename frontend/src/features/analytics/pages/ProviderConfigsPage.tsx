@@ -272,7 +272,7 @@ const ProviderConfigsPage: React.FC = () => {
           <div>
             <h2 className="text-sm font-semibold text-slate-950">Provider Configs</h2>
             <p className="text-xs text-slate-500">
-              Manage persisted LLM provider settings without exposing stored secrets.
+              Manage persisted LLM provider settings. API keys stay hidden; custom headers are visible to admins.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

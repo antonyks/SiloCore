@@ -5,7 +5,8 @@ import {
   ProviderHealthSampleStatus,
 } from '@prisma/client';
 import { describe, expect, it, jest, afterEach, beforeEach } from '@jest/globals';
-import { LlmRuntimeService } from '../../modules/llm/llmRuntime.service';
+import { InvalidInputError } from '../../errors';
+import { createLlmRuntimeService, LlmRuntimeService } from '../../modules/llm/llmRuntime.service';
 import { ILlmProvider } from '../../modules/llm/llm.interface';
 import {
   LlmCompletionRequest,
@@ -18,6 +19,7 @@ import {
   LlmStreamChunk,
 } from '../../modules/llm/llm.types';
 import { SelectedLlmProviderConfig } from '../../modules/llm/llmProviderConfig.model';
+import { LlmProviderConfigRepository } from '../../modules/llm/llmProviderConfig.repository';
 import { LLM_PROVIDER_CAPABILITY_UNSUPPORTED_CODE } from '../../modules/llm/llm.capabilities';
 import { mockPrisma } from '../setup';
 
@@ -122,6 +124,43 @@ describe('LlmRuntimeService embeddings', () => {
     });
 
     expect(embed).not.toHaveBeenCalled();
+  });
+
+  it('normalizes private validation text thrown while creating an adapter', async () => {
+    const service = createLlmRuntimeService({
+      repository: {
+        ...LlmProviderConfigRepository,
+        findById: async () => createProviderConfig(),
+      },
+      adapterFactories: {
+        'openai-compatible': () => {
+          throw new InvalidInputError('Bearer private-token; prompt: private chat');
+        },
+      },
+    });
+
+    await expect(service.resolveGenerationProvider({ providerId: 1 })).rejects.toMatchObject({
+      message: 'Provider rejected the request',
+      code: 'PROVIDER_INVALID_REQUEST',
+    });
+  });
+
+  it('normalizes private validation text thrown by an embedding adapter', async () => {
+    const embed = jest.fn<(request: LlmEmbeddingRequest) => Promise<LlmEmbeddingResponse>>()
+      .mockRejectedValue(new InvalidInputError('Bearer private-token; prompt: private chat'));
+    const provider = createRuntimeProvider(embed);
+    provider.capabilities.embeddings = true;
+    jest.spyOn(LlmRuntimeService, 'createProvider').mockReturnValue(provider);
+    mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProviderConfig());
+
+    await expect(LlmRuntimeService.embedWithProvider({
+      providerId: 1,
+      request: { model: TEST_MODEL_ID, input: 'Private input' },
+    })).rejects.toMatchObject({
+      message: 'Provider rejected the request',
+      code: 'PROVIDER_INVALID_REQUEST',
+    });
+    expect(embed).toHaveBeenCalledTimes(1);
   });
 
   it('records provider health samples for single-provider model registry requests', async () => {

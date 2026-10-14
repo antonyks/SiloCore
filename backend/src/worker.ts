@@ -4,6 +4,7 @@ dotenv.config();
 import { ENV } from './config/env';
 import { connectDatabase, prisma } from './config/database';
 import { logger } from './config/logger';
+import { safeErrorDiagnostic } from './config/safeErrorDiagnostic';
 import { createWorkerComposition } from './composition/worker';
 
 const composition = createWorkerComposition();
@@ -30,7 +31,7 @@ async function shutdown(signal: NodeJS.Signals) {
   }
 
   if (shutdownError) {
-    logger.error({ signal, err: shutdownError }, 'Worker shutdown failed.');
+    logger.error({ signal, ...safeErrorDiagnostic(shutdownError) }, 'Worker shutdown failed.');
     process.exit(1);
   }
 
@@ -57,9 +58,9 @@ async function startWorker() {
       },
       'Worker started with job lifecycle execution infrastructure, validation job handler and provider health sampling handler.',
     );
-  } catch (error: unknown) {
+  } catch (error) {
     logger.error(
-      { err: error, pgBossSchema: ENV.PGBOSS_SCHEMA },
+      { pgBossSchema: ENV.PGBOSS_SCHEMA, ...safeErrorDiagnostic(error) },
       'Worker failed to start.',
     );
     await composition.stop().catch(() => undefined);

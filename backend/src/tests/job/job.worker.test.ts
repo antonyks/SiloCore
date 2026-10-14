@@ -1,6 +1,8 @@
 import type { JobWithMetadata } from 'pg-boss';
 import { JobStatus } from '@prisma/client';
+import { logger } from '../../config/logger';
 import {
+  createJobWorkerHandler,
   JobQueuePayload,
   JobWorkerCancelledError,
   JobWorkerShutdownError,
@@ -76,6 +78,167 @@ function createQueueJob(
 }
 
 describe('job worker lifecycle wrapper', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('logs safe failure details and passes only a fixed error to pg-boss for retries', async () => {
+    const running = createJob({ attempts: 1, maxAttempts: 3 });
+    const retryPending = createJob({ attempts: 1, maxAttempts: 3, stage: 'retry_pending' });
+    const logError = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    const handlerError = Object.assign(new Error('prompt=private-content; password=secret'), {
+      code: 'ECONNRESET',
+      statusCode: 503,
+      cause: new Error('x-api-key=private-key'),
+    });
+    mockPrisma.job.findUnique.mockResolvedValue(running);
+    mockPrisma.job.update
+      .mockResolvedValueOnce(running)
+      .mockResolvedValueOnce(retryPending);
+
+    const worker = createJobWorkerHandler(async () => { throw handlerError; });
+    let queueError: unknown;
+    try {
+      await worker([createQueueJob()]);
+    } catch (error: unknown) {
+      queueError = error;
+    }
+
+    expect(queueError).toBeInstanceOf(Error);
+    expect(queueError).toMatchObject({
+      name: 'JobWorkerQueueError',
+      message: 'JOB_HANDLER_FAILED: Job handler failed.',
+    });
+    expect(JSON.stringify({
+      message: (queueError as Error).message,
+      stack: (queueError as Error).stack,
+      cause: (queueError as Error & { cause?: unknown }).cause,
+    })).not.toMatch(/private-content|secret|private-key/);
+    expect(logError).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'job.worker.run',
+      status: 'error',
+      errorCode: 'JOB_HANDLER_FAILED',
+      phase: 'handler',
+      jobId: 1,
+      queueName: 'validation.fixture',
+      queueMessageId: 'pgboss-1',
+      retryCount: 0,
+      retryLimit: 2,
+      failureKind: 'Error',
+      failureCode: 'ECONNRESET',
+      failureReason: 'Connection reset',
+      upstreamStatus: 503,
+    }), 'Job worker failed.');
+    expect(JSON.stringify(logError.mock.calls)).not.toMatch(/private-content|secret|private-key/);
+    expect(mockPrisma.job.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 1 },
+      data: { status: JobStatus.RUNNING, stage: 'retry_pending' },
+      select: expect.objectContaining({ id: true }),
+    });
+  });
+
+  it('keeps final app failure sanitized while shielding pg-boss output', async () => {
+    const running = createJob({ attempts: 1, maxAttempts: 1 });
+    const failed = createJob({
+      attempts: 1,
+      maxAttempts: 1,
+      status: JobStatus.FAILED,
+      stage: 'failed',
+      errorCode: 'JOB_HANDLER_FAILED',
+      sanitizedError: 'Job handler failed.',
+    });
+    mockPrisma.job.findUnique.mockResolvedValue(running);
+    mockPrisma.job.update.mockResolvedValueOnce(running).mockResolvedValueOnce(failed);
+
+    const worker = createJobWorkerHandler(async () => {
+      throw new Error('Bearer private-token');
+    });
+    await expect(worker([createQueueJob({ retryCount: 0, retryLimit: 0 })]))
+      .rejects.toThrow('JOB_HANDLER_FAILED: Job handler failed.');
+
+    expect(mockPrisma.job.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 1 },
+      data: expect.objectContaining({
+        status: JobStatus.FAILED,
+        errorCode: 'JOB_HANDLER_FAILED',
+        sanitizedError: 'Job handler failed.',
+      }),
+      select: expect.objectContaining({ id: true }),
+    });
+  });
+
+  it('also shields payload and secondary state-update failures', async () => {
+    const logError = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    const worker = createJobWorkerHandler(async () => {
+      throw new Error('private handler text');
+    });
+
+    await expect(worker([createQueueJob({ data: { jobId: 0 } })]))
+      .rejects.toThrow('JOB_QUEUE_PAYLOAD_INVALID: Worker queue payload is invalid.');
+    expect(logError).toHaveBeenLastCalledWith(expect.objectContaining({
+      errorCode: 'JOB_QUEUE_PAYLOAD_INVALID',
+      phase: 'queuePayload',
+    }), 'Job worker failed.');
+
+    const running = createJob();
+    mockPrisma.job.findUnique.mockResolvedValue(running);
+    mockPrisma.job.update
+      .mockResolvedValueOnce(running)
+      .mockRejectedValueOnce(new Error('password=state-secret'));
+
+    await expect(worker([createQueueJob()]))
+      .rejects.toThrow('JOB_WORKER_STATE_FAILED: Job worker state update failed.');
+    expect(logError).toHaveBeenLastCalledWith(expect.objectContaining({
+      errorCode: 'JOB_WORKER_STATE_FAILED',
+      phase: 'markFailureState',
+      jobId: 1,
+    }), 'Job worker failed.');
+    expect(JSON.stringify(logError.mock.calls)).not.toMatch(/private handler text|state-secret/);
+  });
+
+  it('still rejects with a fixed error if diagnostic logging fails', async () => {
+    jest.spyOn(logger, 'error').mockImplementation(() => {
+      throw new Error('logger-secret');
+    });
+    const running = createJob();
+    mockPrisma.job.findUnique.mockResolvedValue(running);
+    mockPrisma.job.update.mockResolvedValue(running);
+    const worker = createJobWorkerHandler(async () => {
+      throw new Error('handler-secret');
+    });
+
+    await expect(worker([createQueueJob()]))
+      .rejects.toThrow('JOB_HANDLER_FAILED: Job handler failed.');
+  });
+
+  it('preserves cancellation and shutdown behavior at the queue boundary', async () => {
+    const cancelled = createJob({ status: JobStatus.CANCELLED });
+    const logError = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    mockPrisma.job.findUnique.mockResolvedValue(cancelled);
+    const handler = jest.fn();
+    const worker = createJobWorkerHandler(handler);
+
+    await expect(worker([createQueueJob()])).resolves.toBeUndefined();
+    expect(handler).not.toHaveBeenCalled();
+    expect(logError).not.toHaveBeenCalled();
+
+    const running = createJob();
+    mockPrisma.job.findUnique.mockResolvedValue(running);
+    mockPrisma.job.update.mockResolvedValue(running);
+    const shutdownWorker = createJobWorkerHandler(async () => {
+      throw new JobWorkerShutdownError(1);
+    });
+
+    await expect(shutdownWorker([createQueueJob()]))
+      .rejects.toThrow('JOB_WORKER_INTERRUPTED: Job worker was interrupted.');
+    expect(logError).toHaveBeenLastCalledWith(expect.objectContaining({
+      errorCode: 'JOB_WORKER_INTERRUPTED',
+      phase: 'handler',
+      jobId: 1,
+    }), 'Job worker failed.');
+    expect(mockPrisma.job.update).toHaveBeenCalledTimes(1);
+  });
+
   it('records an attempt and marks successful work as succeeded', async () => {
     const running = createJob();
     const succeeded = createJob({

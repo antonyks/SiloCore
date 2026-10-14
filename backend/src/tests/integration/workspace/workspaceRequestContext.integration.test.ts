@@ -1,12 +1,14 @@
 import jwt from 'jsonwebtoken';
 import {
   UserRole,
+  UserStatus,
   WorkspaceMembershipRole,
   WorkspaceMembershipStatus,
   WorkspaceStatus,
   WorkspaceType,
 } from '@prisma/client';
-import { authenticate } from '../../../middleware';
+import { authenticate, authorizeRoles } from '../../../middleware';
+import { AuthenticationError } from '../../../errors';
 import { WorkspaceProvisioningService } from '../../../modules/workspace/workspaceProvisioning.service';
 import { createIntegrationTestUser, integrationPrisma, resetIntegrationDatabase } from '../helpers/prisma';
 import { AuthenticatedRequest } from '../../../types/authenticatedRequest';
@@ -73,6 +75,35 @@ describe('Workspace request context integration', () => {
       role: user.role,
     });
     expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([UserStatus.BANNED, UserStatus.DELETED])(
+    'rejects a previously issued token after the user becomes %s',
+    async (status) => {
+      const user = await createIntegrationTestUser();
+      const { workspace } = await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(user.id);
+      const token = signToken(user);
+      await integrationPrisma.user.update({ where: { id: user.id }, data: { status } });
+
+      await expect(
+        authenticate(createRequest(token, String(workspace.id)), createResponse(), createNext()),
+      ).rejects.toThrow(AuthenticationError);
+    },
+  );
+
+  it('uses the current database role for role authorization', async () => {
+    const user = await createIntegrationTestUser({ role: UserRole.ADMIN });
+    const { workspace } = await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(user.id);
+    const token = signToken(user);
+    await integrationPrisma.user.update({ where: { id: user.id }, data: { role: UserRole.USER } });
+    const request = createRequest(token, String(workspace.id));
+
+    await authenticate(request, createResponse(), createNext());
+
+    expect(request.user?.role).toBe(UserRole.USER);
+    expect(() => authorizeRoles(UserRole.ADMIN)(request, createResponse(), createNext())).toThrow(
+      AuthenticationError,
+    );
   });
 
   it.each([

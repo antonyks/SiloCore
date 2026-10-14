@@ -1,5 +1,5 @@
 import { logger } from '../../config/logger';
-import { LlmProviderError } from './llm.types';
+import { getPublicLlmErrorCode } from './llm.safeError';
 
 type LlmLogStatus = 'started' | 'success' | 'error' | 'aborted' | 'skipped';
 
@@ -24,15 +24,7 @@ function removeUndefinedValues<T extends Record<string, unknown>>(data: T): Reco
 }
 
 export function getLlmErrorCode(error: unknown): string {
-  if (error instanceof LlmProviderError && error.code) {
-    return error.code;
-  }
-
-  if (error instanceof Error && error.name) {
-    return error.name;
-  }
-
-  return 'UNKNOWN_ERROR';
+  return getPublicLlmErrorCode(error) ?? 'UNKNOWN_ERROR';
 }
 
 export function logLlmEvent(fields: LlmLogFields): void {

@@ -3,6 +3,7 @@ import type { JobWithMetadata, PgBoss } from 'pg-boss';
 import type { Prisma } from '@prisma/client';
 import { JobStatus } from '@prisma/client';
 import { logger } from '../../config/logger';
+import { safeErrorDiagnostic } from '../../config/safeErrorDiagnostic';
 import { InvalidInputError } from '../../errors';
 import { SelectedJob } from './job.model';
 import { JobService } from './job.service';
@@ -46,6 +47,28 @@ export interface CreateJobWorkerHandlerOptions extends JobWorkerRunnerOptions {
   boss?: Pick<PgBoss, 'touch'>;
 }
 
+type JobWorkerFailurePhase =
+  | 'queuePayload'
+  | 'checkpointCancellation'
+  | 'startAttempt'
+  | 'handler'
+  | 'markSucceeded'
+  | 'markFailureState';
+
+interface JobWorkerDiagnosticContext {
+  phase: JobWorkerFailurePhase;
+  jobId?: number;
+}
+
+const QUEUE_FAILURE_MESSAGES = {
+  JOB_QUEUE_PAYLOAD_INVALID: 'Worker queue payload is invalid.',
+  JOB_WORKER_INTERRUPTED: 'Job worker was interrupted.',
+  JOB_HANDLER_FAILED: 'Job handler failed.',
+  JOB_WORKER_STATE_FAILED: 'Job worker state update failed.',
+} as const;
+
+type QueueFailureCode = keyof typeof QUEUE_FAILURE_MESSAGES;
+
 export function createJobWorkerHandler(
   handler: JobWorkerHandler,
   options: CreateJobWorkerHandlerOptions = {},
@@ -53,12 +76,45 @@ export function createJobWorkerHandler(
   const touchJob = options.touchJob ?? createPgBossTouchJob(options.boss);
 
   return async (jobs: JobWithMetadata<JobQueuePayload>[]): Promise<void> => {
-    for (const job of jobs) {
-      await runJobWorker(job, handler, {
-        jobService: options.jobService,
-        heartbeatIntervalMs: options.heartbeatIntervalMs,
-        touchJob,
-      });
+    let activeJob: JobWithMetadata<JobQueuePayload> | undefined;
+    const diagnostic: JobWorkerDiagnosticContext = { phase: 'queuePayload' };
+
+    try {
+      for (const job of jobs) {
+        activeJob = job;
+        diagnostic.phase = 'queuePayload';
+        diagnostic.jobId = undefined;
+        await runJobWorkerWithDiagnostics(job, handler, {
+          jobService: options.jobService,
+          heartbeatIntervalMs: options.heartbeatIntervalMs,
+          touchJob,
+        }, diagnostic);
+      }
+    } catch (error: unknown) {
+      const errorCode = queueFailureCode(error, diagnostic.phase, activeJob?.signal.aborted);
+      const queueError = new Error(`${errorCode}: ${QUEUE_FAILURE_MESSAGES[errorCode]}`);
+      queueError.name = 'JobWorkerQueueError';
+
+      try {
+        logger.error({
+          operation: 'job.worker.run',
+          status: 'error',
+          errorCode,
+          phase: diagnostic.phase,
+          ...(diagnostic.jobId === undefined ? {} : { jobId: diagnostic.jobId }),
+          ...(activeJob ? {
+            queueName: activeJob.name,
+            queueMessageId: activeJob.id,
+            retryCount: activeJob.retryCount,
+            retryLimit: activeJob.retryLimit,
+          } : {}),
+          ...safeErrorDiagnostic(error),
+        }, 'Job worker failed.');
+      } catch {
+        // A logging failure must not pass the original error to pg-boss.
+      }
+
+      throw queueError;
     }
   };
 }
@@ -68,8 +124,18 @@ export async function runJobWorker(
   handler: JobWorkerHandler,
   options: JobWorkerRunnerOptions = {},
 ): Promise<void> {
+  return runJobWorkerWithDiagnostics(queueJob, handler, options);
+}
+
+async function runJobWorkerWithDiagnostics(
+  queueJob: JobWithMetadata<JobQueuePayload>,
+  handler: JobWorkerHandler,
+  options: JobWorkerRunnerOptions,
+  diagnostic?: JobWorkerDiagnosticContext,
+): Promise<void> {
   const jobService = options.jobService ?? JobService;
   const jobId = parseQueueJobId(queueJob.data);
+  if (diagnostic) diagnostic.jobId = jobId;
   let appJob: SelectedJob | null = null;
   let heartbeatTimer: NodeJS.Timeout | null = null;
 
@@ -90,7 +156,9 @@ export async function runJobWorker(
   };
 
   try {
+    if (diagnostic) diagnostic.phase = 'checkpointCancellation';
     await checkpointCancellation();
+    if (diagnostic) diagnostic.phase = 'startAttempt';
     appJob = await jobService.startWorkerAttempt(jobId);
 
     if (appJob.status === JobStatus.CANCELLED) {
@@ -101,6 +169,7 @@ export async function runJobWorker(
       return;
     }
 
+    if (diagnostic) diagnostic.phase = 'checkpointCancellation';
     await checkpointCancellation();
     heartbeatTimer = startHeartbeatLoop(
       options.heartbeatIntervalMs ?? DEFAULT_WORKER_JOB_HEARTBEAT_INTERVAL_MS,
@@ -108,6 +177,7 @@ export async function runJobWorker(
       jobId,
     );
 
+    if (diagnostic) diagnostic.phase = 'handler';
     const result = await handler({
       job: appJob,
       payload: appJob.payload,
@@ -120,11 +190,14 @@ export async function runJobWorker(
       throw new JobWorkerShutdownError(jobId);
     }
 
+    if (diagnostic) diagnostic.phase = 'checkpointCancellation';
     await checkpointCancellation();
     const persistedResult: Prisma.InputJsonValue | undefined =
       result === undefined ? undefined : result;
+    if (diagnostic) diagnostic.phase = 'markSucceeded';
     await jobService.markSucceeded(jobId, persistedResult);
   } catch (error: unknown) {
+    const failedPhase = diagnostic?.phase;
     if (error instanceof JobWorkerCancelledError) {
       return;
     }
@@ -133,23 +206,37 @@ export async function runJobWorker(
       throw error;
     }
 
+    if (diagnostic) diagnostic.phase = 'checkpointCancellation';
     const cancellationState = await jobService.checkpointCancellation(jobId);
     if (cancellationState.status === JobStatus.CANCELLED) {
       return;
     }
 
+    if (diagnostic) diagnostic.phase = 'markFailureState';
     if (isFinalAttempt(appJob, queueJob)) {
       await jobService.markHandlerFailed(jobId);
     } else {
       await jobService.markRetryPending(jobId);
     }
 
+    if (diagnostic && failedPhase) diagnostic.phase = failedPhase;
     throw error;
   } finally {
     if (heartbeatTimer) {
       clearInterval(heartbeatTimer);
     }
   }
+}
+
+function queueFailureCode(
+  error: unknown,
+  phase: JobWorkerFailurePhase,
+  signalAborted: boolean | undefined,
+): QueueFailureCode {
+  if (signalAborted || error instanceof JobWorkerShutdownError) return 'JOB_WORKER_INTERRUPTED';
+  if (phase === 'queuePayload') return 'JOB_QUEUE_PAYLOAD_INVALID';
+  if (phase === 'handler') return 'JOB_HANDLER_FAILED';
+  return 'JOB_WORKER_STATE_FAILED';
 }
 
 function createPgBossTouchJob(
@@ -193,12 +280,12 @@ function startHeartbeatLoop(
   jobId: number,
 ): NodeJS.Timeout {
   return setInterval(() => {
-    void heartbeat().catch((error: unknown) => {
+    void heartbeat().catch((error) => {
       logger.warn(
         {
-          err: error,
           jobId,
           operation: 'job.worker.heartbeat',
+          ...safeErrorDiagnostic(error),
         },
         'Job worker heartbeat failed.',
       );

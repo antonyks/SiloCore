@@ -2,6 +2,7 @@ import type { GenerationUsageServiceContract } from '../generationUsage/generati
 import type { LlmRuntimeServiceContract } from '../llm/llmRuntime.service';
 import { Prisma } from '@prisma/client';
 import { logger } from '../../config/logger';
+import { safeErrorDiagnostic } from '../../config/safeErrorDiagnostic';
 import { ChatRepository } from './chat.repository';
 import {
   IChatSessionCreateInput,
@@ -20,6 +21,7 @@ import { LlmRuntimeService } from '../llm/llmRuntime.service';
 import { ILlmProvider } from '../llm/llm.interface';
 import { LlmCompletionRequest, LlmMessage, TokenUsage } from '../llm/llm.types';
 import { getLlmErrorCode, logLlmEvent } from '../llm/llm.logging';
+import { getPublicLlmErrorMessage, normalizeAdapterError } from '../llm/llm.safeError';
 import { CoreSingleOwnerWorkspaceAuthorizationPolicy, WorkspaceAuthorizationPolicy, WorkspaceAction } from '../workspace';
 import { GenerationUsageOutcome, GenerationUsageService } from '../generationUsage';
 
@@ -52,6 +54,22 @@ function toLlmMessages(messages: Array<{ author: MessageAuthor; content: string 
     role: toLlmRole(message.author),
     content: message.content,
   }));
+}
+
+async function completeFromAdapter(provider: ILlmProvider, request: LlmCompletionRequest) {
+  try {
+    return await provider.complete(request);
+  } catch (error) {
+    throw normalizeAdapterError(error, provider.id);
+  }
+}
+
+async function* streamFromAdapter(provider: ILlmProvider, request: LlmCompletionRequest) {
+  try {
+    yield* provider.streamComplete(request);
+  } catch (error) {
+    throw normalizeAdapterError(error, provider.id);
+  }
 }
 
 function removeUndefinedValues<T extends Record<string, unknown>>(data: T): Record<string, unknown> {
@@ -176,12 +194,12 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
       });
     } catch (error) {
       logger.error({
-        err: error,
         providerId: data.prepared.providerMetadata.providerId,
         providerType: data.prepared.providerMetadata.providerType,
         model: data.prepared.request.model,
         operation: 'generationUsage.record',
         status: 'error',
+        ...safeErrorDiagnostic(error),
       }, 'Generation usage recording failed.');
     }
   }
@@ -301,7 +319,7 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
       });
 
       try {
-        const completion = await prepared.provider.complete(prepared.request);
+        const completion = await completeFromAdapter(prepared.provider, prepared.request);
         const latencyMs = Date.now() - prepared.startedAt;
         const assistantMessage = await repository.createMessage({
           content: completion.content,
@@ -362,6 +380,7 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
           latencyMs,
           status: 'error',
           errorCode: getLlmErrorCode(error),
+          ...safeErrorDiagnostic(error),
         });
         throw error;
       }
@@ -425,7 +444,7 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
       };
 
       try {
-        for await (const chunk of prepared.provider.streamComplete(prepared.request)) {
+        for await (const chunk of streamFromAdapter(prepared.provider, prepared.request)) {
           if (chunk.usage) {
             usage = chunk.usage;
           }
@@ -481,7 +500,7 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
       } catch (error) {
         failed = true;
         const latencyMs = Date.now() - prepared.startedAt;
-        const errorMessage = error instanceof Error ? error.message : 'Streaming failed';
+        const errorMessage = getPublicLlmErrorMessage(error, 'Streaming failed');
         const assistantMessage = await persistAssistantMessage({
           finishReason: 'error',
           incomplete: true,
@@ -507,6 +526,7 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
           latencyMs,
           status: 'error',
           errorCode: getLlmErrorCode(error),
+          ...safeErrorDiagnostic(error),
         });
         throw error;
       } finally {

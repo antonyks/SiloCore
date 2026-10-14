@@ -2,7 +2,7 @@ jest.mock('node-fetch', () => jest.fn());
 jest.mock('../../config/logger', () => ({ logger: { info: jest.fn(), error: jest.fn(), warn: jest.fn() } }));
 
 import jwt from 'jsonwebtoken';
-import { JobStatus, MessageAuthor, UserRole, WorkspaceStatus, WorkspaceType } from '@prisma/client';
+import { JobStatus, MessageAuthor, UserRole, UserStatus, WorkspaceStatus, WorkspaceType } from '@prisma/client';
 import { createApiComposition } from '../../composition/api';
 import { createCoreServices } from '../../composition/coreServices';
 import { createLlmRuntimeService } from '../../modules/llm/llmRuntime.service';
@@ -84,6 +84,10 @@ describe('Core composition', () => {
     const api = createApiComposition({ policy });
     const decoded = { id: 1, role: UserRole.USER };
     (jwt.verify as jest.Mock).mockReturnValue(decoded);
+    mockPrisma.user.findUnique.mockResolvedValue({
+      id: 1, name: 'Owner', email: 'owner@example.com', role: UserRole.USER,
+      status: UserStatus.ACTIVE, createdAt: new Date(),
+    });
     mockPrisma.workspace.findFirst.mockResolvedValue(workspace);
     const req = createAuthenticatedMockRequest({
       headers: { authorization: 'Bearer token', 'x-workspace-id': '25' },

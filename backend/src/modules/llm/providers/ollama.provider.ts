@@ -20,6 +20,7 @@ import {
     LlmProviderListedModel,
 } from '../llm.types';
 import { getLlmErrorCode, logLlmEvent } from '../llm.logging';
+import { safeErrorDiagnostic } from '../../../config/safeErrorDiagnostic';
 
 /** Ollama-specific API request shape. */
 interface OllamaGenerateRequest {
@@ -123,15 +124,23 @@ export class OllamaProvider extends AbstractLlmProvider {
                 status: 'success',
             });
         } catch (err) {
+            const normalizedError = err instanceof LlmProviderError
+                ? err
+                : new LlmProviderError(
+                    isAbortError(err) ? 'Ollama health check timed out' : 'Ollama unreachable',
+                    this.id,
+                    isAbortError(err) ? 'REQUEST_TIMEOUT' : 'CONNECTION_ERROR',
+                );
             logLlmEvent({
                 providerId: this.id,
                 providerType: this.config.type,
                 operation: 'provider.initialise',
                 latencyMs: Date.now() - startedAt,
                 status: 'error',
-                errorCode: getLlmErrorCode(err),
+                errorCode: getLlmErrorCode(normalizedError),
+                ...safeErrorDiagnostic(err),
             });
-            this.throwProviderError(`Ollama unreachable: ${(err as Error).message}`, 'CONNECTION_ERROR');
+            throw normalizedError;
         }
     }
 
@@ -164,8 +173,7 @@ export class OllamaProvider extends AbstractLlmProvider {
                 });
 
                 if (!res.ok) {
-                    const text = await res.text().catch(() => '');
-                    this.throwProviderError(`Ollama embedding error: ${text}`, `HTTP_${res.status}`, res.status);
+                    this.throwProviderError(`Ollama embedding failed with status ${res.status}`, `HTTP_${res.status}`, res.status);
                 }
 
                 try {
@@ -184,6 +192,7 @@ export class OllamaProvider extends AbstractLlmProvider {
                 latencyMs: Date.now() - startedAt,
                 status: 'error',
                 errorCode: getLlmErrorCode(normalizedError),
+                ...safeErrorDiagnostic(error),
             });
             throw normalizedError;
         }
@@ -236,13 +245,19 @@ export class OllamaProvider extends AbstractLlmProvider {
                 });
 
                 if (!res.ok) {
-                    const text = await res.text().catch(() => '');
-                    this.throwProviderError(`Ollama completion error: ${text}`, `HTTP_${res.status}`, res.status);
+                    this.throwProviderError(`Ollama completion failed with status ${res.status}`, `HTTP_${res.status}`, res.status);
                 }
 
                 return (await res.json()) as OllamaGenerateResponse;
             });
         } catch (error) {
+            const normalizedError = error instanceof LlmProviderError
+                ? error
+                : new LlmProviderError(
+                    'Ollama completion failed',
+                    this.id,
+                    isAbortError(error) ? 'REQUEST_TIMEOUT' : 'UPSTREAM_ERROR',
+                );
             logLlmEvent({
                 providerId: this.id,
                 providerType: this.config.type,
@@ -250,9 +265,10 @@ export class OllamaProvider extends AbstractLlmProvider {
                 operation: 'provider.complete',
                 latencyMs: Date.now() - startedAt,
                 status: 'error',
-                errorCode: getLlmErrorCode(error),
+                errorCode: getLlmErrorCode(normalizedError),
+                ...safeErrorDiagnostic(error),
             });
-            throw error;
+            throw normalizedError;
         }
 
         const { value: raw, latencyMs } = result;
@@ -319,9 +335,8 @@ export class OllamaProvider extends AbstractLlmProvider {
             });
 
             if (!res.ok) {
-                const text = await res.text().catch(() => '');
                 throw new LlmStreamingError(
-                    `Ollama streaming error: ${text}`,
+                    `Ollama streaming failed with status ${res.status}`,
                     this.id,
                     `HTTP_${res.status}`,
                     res.status,
@@ -406,6 +421,7 @@ export class OllamaProvider extends AbstractLlmProvider {
                 latencyMs: Date.now() - startedAt,
                 status: 'error',
                 errorCode: getLlmErrorCode(normalizedError),
+                ...safeErrorDiagnostic(error),
             });
             throw normalizedError;
         } finally {
@@ -436,7 +452,7 @@ export class OllamaProvider extends AbstractLlmProvider {
                 signal: this.buildAbortSignal(),
             });
             if (!res.ok) {
-                this.throwProviderError(`Failed to list Ollama models`, 'LIST_MODELS_FAILED', res.status);
+                this.throwProviderError(`Ollama model listing failed with status ${res.status}`, `HTTP_${res.status}`, res.status);
             }
             const json = (await res.json()) as { models?: Array<{ name: string }> };
             const models = json.models?.map((m) => ({
@@ -453,15 +469,23 @@ export class OllamaProvider extends AbstractLlmProvider {
             });
             return models;
         } catch (error) {
+            const normalizedError = error instanceof LlmProviderError
+                ? error
+                : new LlmProviderError(
+                    'Failed to list Ollama models',
+                    this.id,
+                    isAbortError(error) ? 'REQUEST_TIMEOUT' : 'LIST_MODELS_FAILED',
+                );
             logLlmEvent({
                 providerId: this.id,
                 providerType: this.config.type,
                 operation: 'provider.listModels',
                 latencyMs: Date.now() - startedAt,
                 status: 'error',
-                errorCode: getLlmErrorCode(error),
+                errorCode: getLlmErrorCode(normalizedError),
+                ...safeErrorDiagnostic(error),
             });
-            throw error;
+            throw normalizedError;
         }
     }
 
@@ -482,7 +506,7 @@ export class OllamaProvider extends AbstractLlmProvider {
                 signal: this.buildAbortSignal(),
             });
             if (!res.ok) {
-                this.throwProviderError(`Failed to pull model ${model}`, `HTTP_${res.status}`, res.status);
+                this.throwProviderError(`Failed to pull Ollama model with status ${res.status}`, `HTTP_${res.status}`, res.status);
             }
             logLlmEvent({
                 providerId: this.id,
@@ -493,6 +517,13 @@ export class OllamaProvider extends AbstractLlmProvider {
                 status: 'success',
             });
         } catch (error) {
+            const normalizedError = error instanceof LlmProviderError
+                ? error
+                : new LlmProviderError(
+                    'Failed to pull Ollama model',
+                    this.id,
+                    isAbortError(error) ? 'REQUEST_TIMEOUT' : 'PULL_MODEL_FAILED',
+                );
             logLlmEvent({
                 providerId: this.id,
                 providerType: this.config.type,
@@ -500,9 +531,10 @@ export class OllamaProvider extends AbstractLlmProvider {
                 operation: 'provider.pullModel',
                 latencyMs: Date.now() - startedAt,
                 status: 'error',
-                errorCode: getLlmErrorCode(error),
+                errorCode: getLlmErrorCode(normalizedError),
+                ...safeErrorDiagnostic(error),
             });
-            throw error;
+            throw normalizedError;
         }
     }
 
@@ -552,14 +584,6 @@ export class OllamaProvider extends AbstractLlmProvider {
             );
         }
 
-        if (error instanceof Error) {
-            return new LlmProviderError(
-                `Ollama embedding failed: ${error.message}`,
-                this.id,
-                'EMBEDDINGS_FAILED',
-            );
-        }
-
         return new LlmProviderError(
             'Ollama embedding failed',
             this.id,
@@ -581,14 +605,6 @@ export class OllamaProvider extends AbstractLlmProvider {
                 'Ollama stream timed out or was aborted',
                 this.id,
                 'REQUEST_TIMEOUT',
-            );
-        }
-
-        if (error instanceof Error) {
-            return new LlmStreamingError(
-                `Ollama stream failed: ${error.message}`,
-                this.id,
-                'UPSTREAM_STREAM_ERROR',
             );
         }
 

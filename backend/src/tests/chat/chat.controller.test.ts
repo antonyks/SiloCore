@@ -4,6 +4,7 @@ import { ChatGenerationStreamEvent } from '../../modules/chat/chat.types';
 import { UserRole, UserStatus } from '../../modules/user/user.model';
 import { createAuthenticatedMockRequest, createMockResponse } from '../testUtils';
 import { WorkspaceStatus, WorkspaceType } from '@prisma/client';
+import { LlmProviderError } from '../../modules/llm/llm.types';
 
 jest.mock('node-fetch', () => jest.fn());
 
@@ -224,7 +225,7 @@ describe('ChatController', () => {
       jest.useRealTimers();
     });
 
-    it('writes an SSE error event when streaming fails after the first event', async () => {
+    it('writes a safe provider status after streaming fails without exposing exception text', async () => {
       async function* events(): AsyncIterable<ChatGenerationStreamEvent> {
         yield {
           event: 'user_message' as const,
@@ -237,7 +238,7 @@ describe('ChatController', () => {
             createdAt: new Date('2026-01-01T00:00:00.000Z'),
           },
         };
-        throw new Error('provider offline');
+        throw new LlmProviderError('Authorization: Bearer private-api-key', 'provider-1', 'HTTP_503', 503);
       }
 
       jest.spyOn(ChatService, 'streamAssistantResponse').mockReturnValue(events());
@@ -260,7 +261,8 @@ describe('ChatController', () => {
       await ChatController.streamAssistantResponse(req, res as never);
 
       expect(res.write.mock.calls.map(([chunk]) => chunk)).toContain('event: error\n');
-      expect(res.write.mock.calls.map(([chunk]) => chunk)).toContain('data: {"message":"provider offline"}\n\n');
+      expect(res.write.mock.calls.map(([chunk]) => chunk)).toContain('data: {"message":"Provider returned HTTP 503"}\n\n');
+      expect(JSON.stringify(res.write.mock.calls)).not.toContain('private-api-key');
       expect(res.end).toHaveBeenCalledTimes(1);
     });
 
@@ -289,7 +291,7 @@ describe('ChatController', () => {
             createdAt: new Date('2026-01-01T00:00:01.000Z'),
           },
         };
-        throw new Error('provider timeout');
+        throw new Error('provider timeout: Authorization: Bearer private-api-key');
       }
 
       jest.spyOn(ChatService, 'streamAssistantResponse').mockReturnValue(events());
@@ -315,7 +317,7 @@ describe('ChatController', () => {
       expect(writtenChunks.indexOf('event: assistant_message\n')).toBeLessThan(
         writtenChunks.indexOf('event: error\n'),
       );
-      expect(writtenChunks).toContain('data: {"message":"provider timeout"}\n\n');
+      expect(writtenChunks).toContain('data: {"message":"Streaming failed"}\n\n');
       expect(res.end).toHaveBeenCalledTimes(1);
     });
   });

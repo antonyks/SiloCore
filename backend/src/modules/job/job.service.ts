@@ -1,6 +1,7 @@
 import type { JobMetricServiceContract } from '../jobMetric/jobMetric.service';
 import { Prisma, JobStatus } from '@prisma/client';
 import { logger } from '../../config/logger';
+import { safeErrorDiagnostic } from '../../config/safeErrorDiagnostic';
 import { InvalidInputError, NotFoundError } from '../../errors';
 import {
   assertValidJobProgress,
@@ -496,13 +497,13 @@ export function createJobService(dependencies: Partial<JobServiceDependencies> =
       }, db);
     } catch (error) {
       logger.error({
-        err: error,
         jobId: job.id,
         workspaceId: job.workspaceId,
         jobType: job.type,
         outcome,
         operation: 'jobMetric.record',
         status: 'error',
+        ...safeErrorDiagnostic(error),
       }, 'Job metric recording failed.');
     }
   }

@@ -1,6 +1,7 @@
 import type { ProviderHealthSampleServiceContract } from '../providerHealthSample/providerHealthSample.service';
 import { ENV } from '../../config/env';
 import { logger } from '../../config/logger';
+import { safeErrorDiagnostic } from '../../config/safeErrorDiagnostic';
 import { InvalidInputError, NotFoundError } from '../../errors';
 import { ILlmProvider } from './llm.interface';
 import { LlmProviderConfigRepository } from './llmProviderConfig.repository';
@@ -25,23 +26,12 @@ import {
 } from './llm.types';
 import { coreProviderFactories, ProviderAdapterFactories } from '../../composition/providerAdapters';
 import { getLlmErrorCode, logLlmEvent } from './llm.logging';
+import { getPublicLlmErrorCode, getPublicLlmErrorMessage, normalizeAdapterError } from './llm.safeError';
 import {
   ProviderHealthSampleOperation,
   ProviderHealthSampleService,
   ProviderHealthSampleStatus,
 } from '../providerHealthSample';
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unknown provider error';
-}
-
-function getErrorCode(error: unknown): string | undefined {
-  if (typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string') {
-    return error.code;
-  }
-
-  return undefined;
-}
 
 function normalizeExtraHeaders(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -119,7 +109,11 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
   const healthSamples = dependencies.healthSamples ?? ProviderHealthSampleService;
 
   function createAdapter(config: LlmProviderConfig): ILlmProvider | null {
-    return adapterFactories[config.type]?.(config) ?? null;
+    try {
+      return adapterFactories[config.type]?.(config) ?? null;
+    } catch (error) {
+      throw normalizeAdapterError(error, config.id);
+    }
   }
 
   function adapterUnavailable(config: LlmProviderConfig): LlmProviderOperationResult {
@@ -137,6 +131,7 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
       providerType: config.type,
       status: 'error',
       errorMessage: `No adapter is available for provider type ${config.type}`,
+      errorCode: 'ADAPTER_UNAVAILABLE',
     };
   }
 
@@ -292,21 +287,23 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
         await recordProviderOperationSampleSafely(result, Date.now() - startedAt);
         return result;
       } catch (error) {
+        const safeError = normalizeAdapterError(error, adapter.id);
         logLlmEvent({
           providerId: adapter.id,
           providerType: adapter.config.type,
           operation: 'provider.test',
           latencyMs: Date.now() - startedAt,
           status: 'error',
-          errorCode: getLlmErrorCode(error),
+          errorCode: getLlmErrorCode(safeError),
+          ...safeErrorDiagnostic(error),
         });
         const result: LlmProviderOperationResult = {
           providerId: adapter.id,
           providerName: adapter.config.name,
           providerType: adapter.config.type,
           status: 'error',
-          errorMessage: getErrorMessage(error),
-          errorCode: getErrorCode(error),
+          errorMessage: getPublicLlmErrorMessage(safeError),
+          errorCode: getPublicLlmErrorCode(safeError),
         };
         await recordProviderOperationSampleSafely(result, Date.now() - startedAt);
         return result;
@@ -326,13 +323,14 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
       try {
         ensureLlmProviderCapability(adapter, 'modelPulling');
       } catch (error) {
+        const safeError = normalizeAdapterError(error, adapter.id);
         return {
           providerId: adapter.id,
           providerName: adapter.config.name,
           providerType: adapter.config.type,
           status: 'error',
-          errorMessage: getErrorMessage(error),
-          errorCode: getErrorCode(error),
+          errorMessage: getPublicLlmErrorMessage(safeError),
+          errorCode: getPublicLlmErrorCode(safeError),
         };
       }
 
@@ -343,6 +341,7 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
           providerType: adapter.config.type,
           status: 'error',
           errorMessage: `Provider type ${adapter.config.type} does not support model pull`,
+          errorCode: 'LLM_PROVIDER_CAPABILITY_UNSUPPORTED',
         };
       }
 
@@ -371,6 +370,7 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
           status: 'success',
         };
       } catch (error) {
+        const safeError = normalizeAdapterError(error, adapter.id);
         logLlmEvent({
           providerId: adapter.id,
           providerType: adapter.config.type,
@@ -378,14 +378,16 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
           operation: 'provider.pullModel.runtime',
           latencyMs: Date.now() - startedAt,
           status: 'error',
-          errorCode: getLlmErrorCode(error),
+          errorCode: getLlmErrorCode(safeError),
+          ...safeErrorDiagnostic(error),
         });
         return {
           providerId: adapter.id,
           providerName: adapter.config.name,
           providerType: adapter.config.type,
           status: 'error',
-          errorMessage: getErrorMessage(error),
+          errorMessage: getPublicLlmErrorMessage(safeError),
+          errorCode: getPublicLlmErrorCode(safeError),
         };
       }
     },
@@ -405,9 +407,17 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
         throw new InvalidInputError(`No adapter is available for provider type ${fromDbProviderType(providerConfig.type)}`);
       }
 
-      ensureLlmProviderCapability(provider, 'embeddings');
+      try {
+        ensureLlmProviderCapability(provider, 'embeddings');
+      } catch (error) {
+        throw normalizeAdapterError(error, provider.id);
+      }
 
-      return provider.embed(params.request);
+      try {
+        return await provider.embed(params.request);
+      } catch (error) {
+        throw normalizeAdapterError(error, provider.id);
+      }
     },
 
     async resolveGenerationProvider(params: {
@@ -438,7 +448,11 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
       }
 
       const operation = params.operation ?? 'completion';
-      ensureLlmProviderCapability(provider, operation);
+      try {
+        ensureLlmProviderCapability(provider, operation);
+      } catch (error) {
+        throw normalizeAdapterError(error, provider.id);
+      }
 
       return {
         providerConfig,
@@ -487,12 +501,12 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
       await healthSamples.recordSample(input);
     } catch (error) {
       logger.error({
-        err: error,
         providerId: input.providerId,
         providerType: input.providerType,
         operation: input.operation,
         status: input.status,
         errorCode: input.errorCode,
+        ...safeErrorDiagnostic(error),
       }, 'Provider health sample recording failed.');
     }
   }

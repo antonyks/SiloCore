@@ -2,7 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 import jwt from 'jsonwebtoken';
 import { AuthenticationError, NotFoundError } from '../../errors';
 import { authenticate, authorizeRoles } from '../../middleware';
-import { UserRole, UserStatus } from '../../modules/user/user.model';
+import { SelectedUserFields, UserRole, UserStatus } from '../../modules/user/user.model';
 import { WorkspaceStatus, WorkspaceType } from '@prisma/client';
 import {
   createAuthenticatedMockRequest,
@@ -54,6 +54,10 @@ async function expectAuthenticationFailureForJwtError(message: string) {
 }
 
 describe('auth middleware', () => {
+  beforeEach(() => {
+    mockPrisma.user.findUnique.mockResolvedValue(createDecodedUser());
+  });
+
   afterEach(() => {
     jest.restoreAllMocks();
   });
@@ -82,6 +86,7 @@ describe('auth middleware', () => {
     it('adds the decoded user, workspace context, and calls next for valid requests', async () => {
       const decodedUser = createDecodedUser();
       (jwt.verify as jest.Mock).mockReturnValue(decodedUser);
+      mockPrisma.user.findUnique.mockResolvedValue(decodedUser);
       const workspace = createWorkspace();
       mockPrisma.workspace.findFirst.mockResolvedValue(workspace);
       const req = createAuthenticatedMockRequest({
@@ -101,7 +106,68 @@ describe('auth middleware', () => {
         userId: decodedUser.id,
         role: decodedUser.role,
       });
+      expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
+        where: { id: decodedUser.id },
+        select: SelectedUserFields,
+      });
       expect(next).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([UserStatus.BANNED, UserStatus.DELETED])(
+      'rejects an old token when the account is now %s',
+      async (status) => {
+        (jwt.verify as jest.Mock).mockReturnValue(createDecodedUser());
+        mockPrisma.user.findUnique.mockResolvedValue(createDecodedUser({ status }));
+        const req = createAuthenticatedMockRequest({
+          headers: { authorization: 'Bearer old-token', 'x-workspace-id': '25' },
+        });
+
+        await expect(authenticate(req, createMockResponse(), createMockNext())).rejects.toThrow(
+          new AuthenticationError('Unauthorized: Account inactive'),
+        );
+        expect(mockPrisma.workspace.findFirst).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects a token whose user no longer exists', async () => {
+      (jwt.verify as jest.Mock).mockReturnValue(createDecodedUser());
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      const req = createAuthenticatedMockRequest({
+        headers: { authorization: 'Bearer old-token', 'x-workspace-id': '25' },
+      });
+
+      await expect(authenticate(req, createMockResponse(), createMockNext())).rejects.toThrow(
+        new AuthenticationError('Unauthorized: Account inactive'),
+      );
+      expect(mockPrisma.workspace.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('uses the current database role instead of an old admin claim', async () => {
+      (jwt.verify as jest.Mock).mockReturnValue(createDecodedUser({ role: UserRole.ADMIN }));
+      mockPrisma.user.findUnique.mockResolvedValue(createDecodedUser({ role: UserRole.USER }));
+      mockPrisma.workspace.findFirst.mockResolvedValue(createWorkspace());
+      const req = createAuthenticatedMockRequest({
+        headers: { authorization: 'Bearer old-admin-token', 'x-workspace-id': '25' },
+      });
+
+      await authenticate(req, createMockResponse(), createMockNext());
+
+      expect(req.user?.role).toBe(UserRole.USER);
+      expect(() => authorizeRoles(UserRole.ADMIN)(req, createMockResponse(), createMockNext())).toThrow(
+        AuthenticationError,
+      );
+    });
+
+    it('rejects a verified token without a valid user ID', async () => {
+      (jwt.verify as jest.Mock).mockReturnValue({ id: '1' });
+      const req = createAuthenticatedMockRequest({
+        headers: { authorization: 'Bearer invalid-subject', 'x-workspace-id': '25' },
+      });
+
+      await expect(authenticate(req, createMockResponse(), createMockNext())).rejects.toThrow(
+        new AuthenticationError('Unauthorized: Invalid or expired JWT token'),
+      );
+      expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
     });
 
     it('returns not found when the workspace header is missing', async () => {
@@ -189,6 +255,15 @@ describe('auth middleware', () => {
   });
 
   describe('authorizeRoles', () => {
+    it('rejects a request without an authenticated user', () => {
+      const req = createAuthenticatedMockRequest({});
+      req.user = undefined;
+
+      expect(() => authorizeRoles(UserRole.ADMIN)(req, createMockResponse(), createMockNext())).toThrow(
+        AuthenticationError,
+      );
+    });
+
     it('allows permitted roles', () => {
       const req = createAuthenticatedMockRequest({
         user: createDecodedUser({ role: UserRole.ADMIN }),

@@ -1,5 +1,6 @@
 import { ILlmProvider } from './llm.interface';
 import { ensureLlmProviderCapability } from './llm.capabilities';
+import { getPublicLlmErrorCode, getPublicLlmErrorMessage, normalizeAdapterError } from './llm.safeError';
 import {
   LlmListedModel,
   LlmModelListResult,
@@ -14,18 +15,6 @@ export interface LlmProviderModelListObservation {
 export type LlmProviderModelListObserver = (
   observation: LlmProviderModelListObservation,
 ) => Promise<void> | void;
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unknown provider error';
-}
-
-function getErrorCode(error: unknown): string | undefined {
-  if (typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string') {
-    return error.code;
-  }
-
-  return undefined;
-}
 
 export class LlmRegistryService {
   constructor(
@@ -91,6 +80,7 @@ export class LlmRegistryService {
         },
       }, startedAt);
     } catch (error) {
+      const safeError = normalizeAdapterError(error, provider.id);
       return this.observeProviderResult({
         models: [],
         provider: {
@@ -98,8 +88,8 @@ export class LlmRegistryService {
           status: 'error',
           modelCount: 0,
           capabilities: provider.capabilities,
-          errorMessage: getErrorMessage(error),
-          errorCode: getErrorCode(error),
+          errorMessage: getPublicLlmErrorMessage(safeError),
+          errorCode: getPublicLlmErrorCode(safeError),
         },
       }, startedAt);
     }

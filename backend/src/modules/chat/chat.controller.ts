@@ -12,6 +12,7 @@ import {
   IChatWorkspaceContext,
 } from './chat.types';
 import { MessageAuthor } from './chat.model';
+import { getPublicLlmErrorMessage } from '../llm/llm.safeError';
 
 const SSE_HEARTBEAT_INTERVAL_MS = 15000;
 
@@ -242,8 +243,7 @@ export function createChatController(dependencies: Partial<ChatControllerDepende
           writeSseEvent(res, event.event, event.data);
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Streaming failed';
-        writeSseEvent(res, 'error', { message });
+        writeSseEvent(res, 'error', { message: getPublicLlmErrorMessage(error, 'Streaming failed') });
       } finally {
         if (!res.writableEnded) {
           res.end();

@@ -320,7 +320,7 @@ describe('OpenAiCompatibleProvider completion', () => {
       providerId: 'cloud-openai-compatible',
       code,
       statusCode: status,
-      message: 'OpenAI-compatible authentication failed: invalid api key',
+      message: 'OpenAI-compatible authentication failed',
     });
     await expect(createProvider().complete({
       model: TEST_MODEL_ID,
@@ -348,7 +348,7 @@ describe('OpenAiCompatibleProvider completion', () => {
       providerId: 'cloud-openai-compatible',
       code: 'RATE_LIMITED',
       statusCode: 429,
-      message: 'OpenAI-compatible rate limit exceeded: too many requests',
+      message: 'OpenAI-compatible rate limit exceeded',
     });
   });
 
@@ -357,7 +357,7 @@ describe('OpenAiCompatibleProvider completion', () => {
       ok: false,
       status: 500,
       json: jest.fn<() => Promise<unknown>>().mockResolvedValue({
-        error: { message: 'upstream unavailable' },
+        error: { message: 'Authorization: Bearer private-api-key' },
       }),
     }));
 
@@ -368,7 +368,7 @@ describe('OpenAiCompatibleProvider completion', () => {
       providerId: 'cloud-openai-compatible',
       code: 'HTTP_500',
       statusCode: 500,
-      message: 'OpenAI-compatible completion failed with status 500: upstream unavailable',
+      message: 'OpenAI-compatible completion failed with status 500',
     });
   });
 
@@ -443,7 +443,7 @@ describe('OpenAiCompatibleProvider completion', () => {
       providerId: 'cloud-openai-compatible',
       code,
       statusCode: status,
-      message: 'OpenAI-compatible authentication failed: invalid api key',
+      message: 'OpenAI-compatible authentication failed',
     });
   });
 
@@ -467,7 +467,7 @@ describe('OpenAiCompatibleProvider completion', () => {
       providerId: 'cloud-openai-compatible',
       code: 'RATE_LIMITED',
       statusCode: 429,
-      message: 'OpenAI-compatible rate limit exceeded: too many requests',
+      message: 'OpenAI-compatible rate limit exceeded',
     });
   });
 
@@ -487,7 +487,7 @@ describe('OpenAiCompatibleProvider completion', () => {
       providerId: 'cloud-openai-compatible',
       code: 'HTTP_500',
       statusCode: 500,
-      message: 'OpenAI-compatible embedding failed with status 500: upstream unavailable',
+      message: 'OpenAI-compatible embedding failed with status 500',
     });
   });
 
@@ -642,7 +642,7 @@ describe('OpenAiCompatibleProvider completion', () => {
       providerId: 'cloud-openai-compatible',
       code: 'HTTP_502',
       statusCode: 502,
-      message: 'OpenAI-compatible streaming failed with status 502: bad gateway',
+      message: 'OpenAI-compatible streaming failed with status 502',
     });
   });
 
@@ -744,7 +744,7 @@ describe('OpenAiCompatibleProvider completion', () => {
       providerId: 'cloud-openai-compatible',
       code: 'MODEL_LISTING_UNSUPPORTED',
       statusCode: status,
-      message: 'OpenAI-compatible model listing is unsupported: not found',
+      message: 'OpenAI-compatible model listing is unsupported',
     });
   });
 
@@ -789,7 +789,7 @@ describe('OpenAiCompatibleProvider completion', () => {
       providerId: 'cloud-openai-compatible',
       code,
       statusCode: status,
-      message: 'OpenAI-compatible authentication failed: invalid api key',
+      message: 'OpenAI-compatible authentication failed',
     });
   });
 
@@ -807,7 +807,7 @@ describe('OpenAiCompatibleProvider completion', () => {
       providerId: 'cloud-openai-compatible',
       code: 'RATE_LIMITED',
       statusCode: 429,
-      message: 'OpenAI-compatible rate limit exceeded: too many requests',
+      message: 'OpenAI-compatible rate limit exceeded',
     });
   });
 
@@ -824,7 +824,7 @@ describe('OpenAiCompatibleProvider completion', () => {
       providerId: 'cloud-openai-compatible',
       code: 'HTTP_502',
       statusCode: 502,
-      message: 'OpenAI-compatible model listing failed with status 502: bad gateway',
+      message: 'OpenAI-compatible model listing failed with status 502',
     });
   });
 
@@ -846,7 +846,7 @@ describe('OpenAiCompatibleProvider completion', () => {
     await expect(createProvider().listModels()).rejects.toMatchObject({
       providerId: 'cloud-openai-compatible',
       code: 'LIST_MODELS_FAILED',
-      message: 'OpenAI-compatible model listing failed: connection reset',
+      message: 'OpenAI-compatible model listing failed',
     });
   });
 

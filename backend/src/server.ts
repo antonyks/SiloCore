@@ -3,6 +3,7 @@ dotenv.config();
 import { createApp } from './app';
 import { connectDatabase, prisma } from './config/database';
 import { logger } from './config/logger';
+import { safeErrorDiagnostic } from './config/safeErrorDiagnostic';
 import { createApiComposition } from './composition/api';
 
 const composition = createApiComposition();
@@ -32,8 +33,8 @@ async function startServer() {
         await composition.stop();
         await prisma.$disconnect();
         process.exit(0);
-      } catch (error: unknown) {
-        logger.error({ err: error }, 'Failed to shut down server cleanly.');
+      } catch (error) {
+        logger.error({ ...safeErrorDiagnostic(error), operation: 'server.shutdown' }, 'Failed to shut down server cleanly.');
         process.exit(1);
       }
     }
@@ -44,9 +45,8 @@ async function startServer() {
     process.on('SIGTERM', () => {
       void shutdown();
     });
-  } catch (error:unknown) {
-    if(error instanceof Error)
-    logger.error(`❌ Failed to start server: ${error.message}`);
+  } catch (error) {
+    logger.error({ ...safeErrorDiagnostic(error), operation: 'server.start' }, 'Failed to start server.');
     await composition.stop().catch(() => undefined);
     await prisma.$disconnect().catch(() => undefined);
     process.exit(1);

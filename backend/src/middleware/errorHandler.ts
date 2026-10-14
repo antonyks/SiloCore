@@ -1,7 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../config/logger';
+import { safeErrorDiagnostic } from '../config/safeErrorDiagnostic';
 import { DuplicateResourceError, NotFoundError, InvalidInputError, AuthenticationError } from '../errors';
 import { getOrCreateRequestId } from './requestId.middleware';
+import { LlmProviderError } from '../modules/llm/llm.types';
+import { getPublicLlmErrorCode, getPublicLlmErrorMessage } from '../modules/llm/llm.safeError';
+import { LlmCapabilityError } from '../modules/llm/llm.capabilities';
 
 const ErrorCode = {
     DUPLICATE_RESOURCE: 'DUPLICATE_RESOURCE',
@@ -10,14 +14,6 @@ const ErrorCode = {
     AUTHENTICATION_ERROR: 'AUTHENTICATION_ERROR',
     INTERNAL_ERROR: 'INTERNAL_ERROR',
 } as const;
-
-function getErrorMessage(err: unknown): string {
-    if (typeof err === 'object' && err !== null && 'message' in err && typeof err.message === 'string') {
-        return err.message;
-    }
-
-    return 'An unexpected error occurred.';
-}
 
 export function errorHandler(err: unknown, _req: Request, res: Response, next: NextFunction): void {
     void next;
@@ -38,6 +34,13 @@ export function errorHandler(err: unknown, _req: Request, res: Response, next: N
                 requestId,
             });
             return;
+        case (err instanceof LlmCapabilityError):
+            res.status(400).json({
+                message: getPublicLlmErrorMessage(err),
+                code: getPublicLlmErrorCode(err),
+                requestId,
+            });
+            return;
         case (err instanceof InvalidInputError):
             res.status(400).json({
                 message: err.message,
@@ -52,20 +55,28 @@ export function errorHandler(err: unknown, _req: Request, res: Response, next: N
                 requestId,
             });
             return;
+        case (err instanceof LlmProviderError):
+            logger.error({ requestId, errorCode: getPublicLlmErrorCode(err) ?? ErrorCode.INTERNAL_ERROR, ...safeErrorDiagnostic(err) }, 'Provider operation failed');
+            res.status(500).json({
+                message: getPublicLlmErrorMessage(err),
+                code: getPublicLlmErrorCode(err) ?? ErrorCode.INTERNAL_ERROR,
+                requestId,
+            });
+            return;
         case (err instanceof Error): {
-            logger.error({ err, requestId, errorCode: ErrorCode.INTERNAL_ERROR }, err.message);
+            logger.error({ requestId, errorCode: ErrorCode.INTERNAL_ERROR, ...safeErrorDiagnostic(err) }, 'Unhandled API error');
             const status = 500;
             res.status(status).json({
-                message: err.message || 'Internal server error',
+                message: 'Internal server error',
                 code: ErrorCode.INTERNAL_ERROR,
                 requestId,
             });
             return;
         }
         default:
-            logger.error({ err, requestId, errorCode: ErrorCode.INTERNAL_ERROR }, 'Unknown, non-Error object thrown in error handler');
+            logger.error({ requestId, errorCode: ErrorCode.INTERNAL_ERROR, ...safeErrorDiagnostic(err) }, 'Unknown, non-Error object thrown in error handler');
             res.status(500).json({
-                message: getErrorMessage(err),
+                message: 'An unexpected error occurred.',
                 code: ErrorCode.INTERNAL_ERROR,
                 requestId,
             });

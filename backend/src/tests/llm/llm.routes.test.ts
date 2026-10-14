@@ -96,6 +96,10 @@ describe('LLM route authorization boundary', () => {
       createdAt: new Date(),
     });
     mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
+    mockPrisma.user.findUnique.mockResolvedValue({
+      id: 1, email: 'user@example.com', name: 'User', role: UserRole.USER,
+      status: UserStatus.ACTIVE, createdAt: new Date(),
+    });
     mockPrisma.workspace.findFirst.mockResolvedValue(createWorkspace());
     const req = createAuthenticatedMockRequest({
       headers: { authorization: 'Bearer valid-user-token', 'x-workspace-id': '25' },
@@ -127,6 +131,10 @@ describe('LLM route authorization boundary', () => {
       createdAt: new Date(),
     });
     mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider());
+    mockPrisma.user.findUnique.mockResolvedValue({
+      id: 1, email: 'user@example.com', name: 'User', role: UserRole.USER,
+      status: UserStatus.ACTIVE, createdAt: new Date(),
+    });
     mockPrisma.workspace.findFirst.mockResolvedValue(createWorkspace());
     const req = createAuthenticatedMockRequest({
       headers: { authorization: 'Bearer valid-user-token', 'x-workspace-id': '25' },

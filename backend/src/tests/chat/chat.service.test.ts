@@ -881,7 +881,7 @@ describe('ChatService', () => {
           totalTokens: undefined,
           tokenCountSource: GenerationUsageTokenCountSource.UNKNOWN,
           outcome: GenerationUsageOutcome.FAILED,
-          errorCode: 'Error',
+          errorCode: 'UNKNOWN_ERROR',
           latencyMs: expect.any(Number),
         }),
         select: expect.any(Object),
@@ -893,9 +893,44 @@ describe('ChatService', () => {
         model: TEST_MODEL_ID,
         operation: 'chat.complete',
         status: 'error',
-        errorCode: 'Error',
+        errorCode: 'UNKNOWN_ERROR',
         latencyMs: expect.any(Number),
       }), 'chat.complete.error');
+    });
+
+    it('normalizes adapter validation failures before returning them from completion', async () => {
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
+      mockPrisma.chatMessage.create.mockResolvedValueOnce({
+        id: 1,
+        content: 'Hello',
+        author: 'USER',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      });
+      jest.spyOn(OllamaProvider.prototype, 'complete')
+        .mockRejectedValue(new InvalidInputError('Bearer private-token; prompt: private chat'));
+
+      await expect(ChatService.generateAssistantResponse({
+        sessionId: 1,
+        content: 'Hello',
+        requestId: 'req-chat-private-error',
+      }, createWorkspaceContextFor(25))).rejects.toMatchObject({
+        message: 'Provider rejected the request',
+        code: 'PROVIDER_INVALID_REQUEST',
+      });
+
+      expect(mockPrisma.generationUsage.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ errorCode: 'PROVIDER_INVALID_REQUEST' }),
+        select: expect.any(Object),
+      });
+      expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+        requestId: 'req-chat-private-error',
+        errorCode: 'PROVIDER_INVALID_REQUEST',
+      }), 'chat.complete.error');
+      expect(JSON.stringify(loggedPayloads())).not.toContain('private-token');
+      expect(JSON.stringify(mockPrisma.generationUsage.create.mock.calls)).not.toContain('private-token');
     });
   });
 
@@ -1166,7 +1201,7 @@ describe('ChatService', () => {
             reasoning: 'Partial reasoning.',
             finishReason: 'error',
             incomplete: true,
-            errorMessage: 'provider timeout',
+            errorMessage: 'Streaming failed',
           }),
         }),
         select: SelectedChatMessageFields,
@@ -1179,7 +1214,7 @@ describe('ChatService', () => {
           streaming: true,
           tokenCountSource: GenerationUsageTokenCountSource.UNKNOWN,
           outcome: GenerationUsageOutcome.FAILED,
-          errorCode: 'Error',
+          errorCode: 'UNKNOWN_ERROR',
           latencyMs: expect.any(Number),
         }),
         select: expect.any(Object),
@@ -1191,11 +1226,74 @@ describe('ChatService', () => {
         model: TEST_MODEL_ID,
         operation: 'chat.stream',
         status: 'error',
-        errorCode: 'Error',
+        errorCode: 'UNKNOWN_ERROR',
         latencyMs: expect.any(Number),
       }), 'chat.stream.error');
       expect(JSON.stringify(loggedPayloads())).not.toContain('Partial answer');
       expect(JSON.stringify(loggedPayloads())).not.toContain('Partial reasoning');
+    });
+
+    it('keeps streamed adapter validation text out of persisted metadata and logs', async () => {
+      async function* failingChunks() {
+        yield { content: 'Partial answer ' };
+        throw new InvalidInputError('Bearer private-token; prompt: private chat');
+      }
+      const userMessage: SelectedChatMessage = {
+        id: 1,
+        content: 'Hello',
+        author: 'USER',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      };
+      const assistantMessage: SelectedChatMessage = {
+        id: 2,
+        content: 'Partial answer ',
+        author: 'ASSISTANT',
+        sessionId: 1,
+        metadata: null,
+        createdAt: new Date(),
+      };
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
+      mockPrisma.chatMessage.create
+        .mockResolvedValueOnce(userMessage)
+        .mockResolvedValueOnce(assistantMessage);
+      jest.spyOn(OllamaProvider.prototype, 'streamComplete').mockReturnValue(failingChunks());
+
+      const events = [];
+      let caughtError: unknown;
+      try {
+        for await (const event of ChatService.streamAssistantResponse({
+          sessionId: 1,
+          content: 'Hello',
+          requestId: 'req-chat-private-stream',
+        }, createWorkspaceContextFor(25))) events.push(event);
+      } catch (error) {
+        caughtError = error;
+      }
+
+      expect(caughtError).toMatchObject({
+        message: 'Provider rejected the request',
+        code: 'PROVIDER_INVALID_REQUEST',
+      });
+      expect(events).toEqual([
+        { event: 'user_message', data: userMessage },
+        { event: 'delta', data: { content: 'Partial answer ' } },
+        { event: 'assistant_message', data: assistantMessage },
+      ]);
+      expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, {
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({ errorMessage: 'Provider rejected the request' }),
+        }),
+        select: SelectedChatMessageFields,
+      });
+      expect(mockPrisma.generationUsage.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ errorCode: 'PROVIDER_INVALID_REQUEST' }),
+        select: expect.any(Object),
+      });
+      expect(JSON.stringify(mockPrisma.chatMessage.create.mock.calls)).not.toContain('private-token');
+      expect(JSON.stringify(loggedPayloads())).not.toContain('private-token');
     });
 
     it('should persist OpenAI-compatible partial assistant output when upstream streaming fails', async () => {
@@ -1264,7 +1362,7 @@ describe('ChatService', () => {
             reasoning: 'Cloud partial reasoning.',
             finishReason: 'error',
             incomplete: true,
-            errorMessage: 'provider stream failed',
+            errorMessage: 'Streaming failed',
           }),
         }),
         select: SelectedChatMessageFields,

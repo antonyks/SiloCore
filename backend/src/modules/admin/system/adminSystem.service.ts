@@ -7,6 +7,7 @@ import {
   ProviderHealthSampleStatus,
 } from '@prisma/client';
 import { logger } from '../../../config/logger';
+import { safeErrorDiagnostic } from '../../../config/safeErrorDiagnostic';
 import { prisma } from '../../../config/database';
 import { ENV } from '../../../config/env';
 import { LlmRuntimeService } from '../../llm/llmRuntime.service';
@@ -194,7 +195,7 @@ export function createAdminSystemService(dependencies: Partial<AdminSystemServic
       try {
         await database.$queryRaw`SELECT 1`;
       } catch (error) {
-        logger.error({ err: error }, 'Admin system database health check failed');
+        logger.error({ ...safeErrorDiagnostic(error), operation: 'adminSystem.databaseHealth' }, 'Admin system database health check failed');
 
         return {
           backend: {

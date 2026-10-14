@@ -484,7 +484,63 @@ describe('OllamaProvider embeddings', () => {
       providerId: 'local-ollama',
       code: 'HTTP_500',
       statusCode: 500,
-      message: 'Ollama embedding error: embedding failed',
+      message: 'Ollama embedding failed with status 500',
+    });
+  });
+});
+
+describe('OllamaProvider upstream failure privacy', () => {
+  beforeEach(() => mockedFetch.mockReset());
+
+  it('preserves the safe HTTP status for a failed health check', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({ ok: false, status: 503 }));
+
+    await expect(createProvider().initialise()).rejects.toMatchObject({
+      code: 'HEALTH_CHECK_FAILED',
+      statusCode: 503,
+      message: 'Ollama health check failed with status 503',
+    });
+  });
+
+  it('exposes the HTTP status, but not the upstream body, when model listing fails', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      ok: false,
+      status: 503,
+      text: jest.fn<() => Promise<string>>().mockResolvedValue('Bearer private-api-key'),
+    }));
+
+    await expect(createProvider().listModels()).rejects.toMatchObject({
+      code: 'HTTP_503',
+      statusCode: 503,
+      message: 'Ollama model listing failed with status 503',
+    });
+  });
+
+  it('does not expose fetch error details from completion', async () => {
+    mockedFetch.mockRejectedValue(new Error('Authorization: Bearer private-api-key'));
+
+    await expect(createProvider().complete({
+      model: TEST_MODEL_ID,
+      messages: [{ role: 'user', content: 'Hi' }],
+    })).rejects.toMatchObject({
+      providerId: 'local-ollama',
+      code: 'UPSTREAM_ERROR',
+      message: 'Ollama completion failed',
+    });
+  });
+
+  it.each(['listModels', 'pullModel'] as const)('does not expose fetch error details from %s', async (operation) => {
+    mockedFetch.mockRejectedValue(new Error('Authorization: Bearer private-api-key'));
+
+    const provider = createProvider();
+    const result = operation === 'listModels'
+      ? provider.listModels()
+      : provider.pullModel(TEST_MODEL_ID);
+
+    await expect(result).rejects.toMatchObject({
+      providerId: 'local-ollama',
+      code: operation === 'listModels' ? 'LIST_MODELS_FAILED' : 'PULL_MODEL_FAILED',
+      message: operation === 'listModels' ? 'Failed to list Ollama models' : 'Failed to pull Ollama model',
     });
   });
 });
@@ -514,7 +570,7 @@ describe('OllamaProvider streaming errors', () => {
       providerId: 'local-ollama',
       code: 'HTTP_503',
       statusCode: 503,
-      message: 'Ollama streaming error: model unavailable',
+      message: 'Ollama streaming failed with status 503',
     });
     expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
       providerId: 'local-ollama',

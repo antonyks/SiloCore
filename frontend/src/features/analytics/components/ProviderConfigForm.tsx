@@ -247,7 +247,7 @@ const ProviderConfigForm: React.FC<ProviderConfigFormProps> = ({
             {provider ? "Edit Provider" : "Add Provider"}
           </h2>
           <p className="text-xs text-slate-500">
-            Provider secrets are write-only and are never displayed after save.
+            API keys are write-only. Custom header values are visible to all admins.
           </p>
         </div>
         <button

@@ -1,20 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { WorkspaceStatus } from '@prisma/client';
-import { SelectedUser, UserRole, UserStatus } from '../modules/user/user.model';
+import { SelectedUserFields, UserRole, UserStatus } from '../modules/user/user.model';
 import { AuthenticationError, NotFoundError } from '../errors'
 import {AuthenticatedRequest} from '../types/authenticatedRequest'
 import { prisma } from '../config/database';
 import { CoreSingleOwnerWorkspaceAuthorizationPolicy, WorkspaceAuthorizationPolicy } from '../modules/workspace';
-
-type AuthTokenPayload = {
-  id: number;
-  email: string;
-  name: string;
-  role: UserRole;
-  status: UserStatus;
-  createdAt: Date;
-};
 
 const WORKSPACE_NOT_FOUND_MESSAGE = 'Workspace not found';
 
@@ -48,7 +39,7 @@ function parseWorkspaceId(req: AuthenticatedRequest): number {
 
 export interface AuthenticateDependencies {
   policy: WorkspaceAuthorizationPolicy;
-  database: Pick<typeof prisma, 'workspace'>;
+  database: Pick<typeof prisma, 'user' | 'workspace'>;
 }
 
 export function createAuthenticate(dependencies: Partial<AuthenticateDependencies> = {}) {
@@ -97,16 +88,27 @@ export function createAuthenticate(dependencies: Partial<AuthenticateDependencie
       const token = authHeader.split(' ')[1];
       const JWT_SECRET:string = process.env.JWT_SECRET as string;
 
-      let decoded: AuthTokenPayload;
+      let userId: number;
 
       try {
-        decoded = jwt.verify(token, JWT_SECRET) as AuthTokenPayload;
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (typeof decoded === 'string' || !Number.isSafeInteger(decoded.id) || decoded.id <= 0) {
+          throw new Error('Invalid token subject');
+        }
+        userId = decoded.id;
       } catch {
         throw new AuthenticationError('Unauthorized: Invalid or expired JWT token');
       }
 
-      const user:SelectedUser=decoded;
-      req.user = { token:token,...user};
+      const user = await database.user.findUnique({
+        where: { id: userId },
+        select: SelectedUserFields,
+      });
+      if (!user || user.status !== UserStatus.ACTIVE) {
+        throw new AuthenticationError('Unauthorized: Account inactive');
+      }
+
+      req.user = { token, ...user };
       await attachWorkspaceContext(req);
 
       next();
@@ -121,15 +123,13 @@ export const authenticate = createAuthenticate();
 export const authorizeRoles =
   (...allowedRoles: UserRole[]) =>
   (req: Request, res: Response, next: NextFunction) => {
-    if (req.user) {
-      const user:SelectedUser = req.user;
-      if (!user) throw new AuthenticationError('Unauthorized');
-
-      if (!allowedRoles.includes(user.role)) {
-        throw new AuthenticationError('Forbidden: Insufficient privileges');
-      }
+    if (!req.user) {
+      throw new AuthenticationError('Unauthorized');
     }
 
+    if (!allowedRoles.includes(req.user.role)) {
+      throw new AuthenticationError('Forbidden: Insufficient privileges');
+    }
 
     next();
   };
