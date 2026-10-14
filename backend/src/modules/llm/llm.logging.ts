@@ -8,6 +8,9 @@ import {
 type LlmLogStatus = 'started' | 'success' | 'error' | 'aborted' | 'skipped';
 
 type LlmLogFields = {
+  layer?: 'provider' | 'chat' | 'runtime';
+  operationId?: string;
+  jobId?: number;
   requestId?: string;
   providerId?: string;
   providerType?: string;
@@ -36,6 +39,15 @@ function allowedLogFields(fields: LlmLogFields): Record<string, unknown> {
   ] as const;
   for (const key of strings) {
     if (typeof fields[key] === 'string') result[key] = fields[key];
+  }
+  if (fields.layer === 'provider' || fields.layer === 'chat' || fields.layer === 'runtime') {
+    result.layer = fields.layer;
+  }
+  if (typeof fields.operationId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(fields.operationId)) {
+    result.operationId = fields.operationId;
+  }
+  if (typeof fields.jobId === 'number' && Number.isSafeInteger(fields.jobId) && fields.jobId > 0) {
+    result.jobId = fields.jobId;
   }
   if (typeof fields.latencyMs === 'number' && Number.isFinite(fields.latencyMs)) {
     result.latencyMs = fields.latencyMs;

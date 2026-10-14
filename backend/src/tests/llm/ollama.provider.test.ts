@@ -3,6 +3,7 @@ import { jest } from '@jest/globals';
 import { logger } from '../../config/logger';
 import { OllamaProvider } from '../../modules/llm/providers/ollama.provider';
 import { LlmProviderConfig, LlmStreamingError } from '../../modules/llm/llm.types';
+import { createLlmOperationContext } from '../../modules/llm/llm.operation';
 
 jest.mock('node-fetch', () => jest.fn());
 jest.mock('../../config/logger', () => ({
@@ -610,6 +611,171 @@ describe('OllamaProvider streaming errors', () => {
       errorCode: 'HTTP_503',
       latencyMs: expect.any(Number),
     }), 'provider.stream.error');
+  });
+});
+
+describe('OllamaProvider shared lifecycle', () => {
+  beforeEach(() => {
+    mockedFetch.mockReset();
+    jest.clearAllMocks();
+  });
+
+  function events(operation: string): Array<Record<string, unknown>> {
+    return [...mockedLogger.info.mock.calls, ...mockedLogger.error.mock.calls]
+      .map(([fields]) => fields as Record<string, unknown>)
+      .filter((fields) => fields.operation === `provider.${operation}`);
+  }
+
+  it('generates its own operation ID even when runtime correlation has a forged ID', () => {
+    const forgedId = '00000000-0000-4000-8000-000000000000';
+    const runtimeCorrelation = {
+      requestId: 'trusted-request', jobId: 42, operationId: forgedId, privateText: 'private payload',
+    };
+    const context = createLlmOperationContext(runtimeCorrelation);
+    expect(context).toEqual({
+      operationId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+      requestId: 'trusted-request',
+      jobId: 42,
+    });
+    expect(context.operationId).not.toBe(forgedId);
+  });
+
+  it.each(['initialise', 'listModels', 'complete', 'embed', 'pullModel'] as const)(
+    'pairs %s events with a generated operation ID and terminal latency', async (operation) => {
+      mockedFetch.mockResolvedValue(mockResponse({
+        json: jest.fn<() => Promise<unknown>>().mockResolvedValue(
+          operation === 'embed' ? { embeddings: [[0.1, 0.2]] }
+            : operation === 'complete' ? { message: { content: 'private answer' } }
+              : { models: [{ name: TEST_MODEL_ID }] },
+        ),
+      }));
+      const provider = createProvider();
+      if (operation === 'initialise') await provider.initialise();
+      if (operation === 'listModels') await provider.listModels();
+      if (operation === 'complete') await provider.complete({ model: TEST_MODEL_ID, messages: [] });
+      if (operation === 'embed') await provider.embed({ model: TEST_MODEL_ID, input: 'private prompt' });
+      if (operation === 'pullModel') await provider.pullModel(TEST_MODEL_ID);
+
+      const logged = events(operation);
+      expect(logged).toHaveLength(2);
+      expect(logged.map((event) => event.status)).toEqual(['started', 'success']);
+      expect(logged[0]).toMatchObject({ layer: 'provider', providerId: 'local-ollama', providerType: 'ollama' });
+      expect(logged[0].operationId).toEqual(expect.stringMatching(/^[0-9a-f-]{36}$/));
+      expect(logged[1]).toMatchObject({ operationId: logged[0].operationId, latencyMs: expect.any(Number) });
+      expect(logged[0].requestId).toBeUndefined();
+      expect(logged[0].model).toBe(['complete', 'embed', 'pullModel'].includes(operation) ? TEST_MODEL_ID : undefined);
+      expect(JSON.stringify(logged)).not.toContain('private prompt');
+      expect(JSON.stringify(logged)).not.toContain('private answer');
+    },
+  );
+
+  it('carries a trusted request ID and job ID without inventing either for direct calls', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({ message: { content: 'okay' } }),
+    }));
+    const context = createLlmOperationContext({ requestId: 'trusted-request', jobId: 42 });
+    await createProvider().complete({ model: TEST_MODEL_ID, messages: [] }, context);
+    expect(events('complete')).toEqual([
+      expect.objectContaining({ operationId: context.operationId, requestId: 'trusted-request', jobId: 42, status: 'started' }),
+      expect.objectContaining({ operationId: context.operationId, requestId: 'trusted-request', jobId: 42, status: 'success' }),
+    ]);
+  });
+
+  it('does not start an unconsumed stream and marks an early close aborted', async () => {
+    let readerClosed = false;
+    mockedFetch.mockResolvedValue(mockResponse({
+      body: (async function* cancellableStream() {
+        try {
+          yield Buffer.from('{"message":{"content":"first"},"done":false}\n');
+          yield Buffer.from('{"message":{"content":"second"},"done":false}\n');
+        } finally {
+          readerClosed = true;
+        }
+      })() as unknown as NodeJS.ReadableStream,
+    }));
+    const iterator = createProvider().streamComplete({ model: TEST_MODEL_ID, messages: [] })[Symbol.asyncIterator]();
+    expect(events('stream')).toHaveLength(0);
+    expect(mockedFetch).not.toHaveBeenCalled();
+    await iterator.next();
+    await iterator.return?.();
+    expect(readerClosed).toBe(true);
+    const logged = events('stream');
+    expect(logged.map((event) => event.status)).toEqual(['started', 'aborted']);
+    expect(logged[1]).toMatchObject({ operationId: logged[0].operationId, latencyMs: expect.any(Number), stage: 'local_abort' });
+    expect(logged[0].model).toBe(TEST_MODEL_ID);
+  });
+
+  it('pairs a fully consumed stream with one success event', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      body: streamFromLines([{ message: { content: 'done' }, done: true }]),
+    }));
+    const chunks = [];
+    for await (const chunk of createProvider().streamComplete({ model: TEST_MODEL_ID, messages: [] })) chunks.push(chunk);
+    expect(chunks).toHaveLength(1);
+    const logged = events('stream');
+    expect(logged.map((event) => event.status)).toEqual(['started', 'success']);
+    expect(logged[1]).toMatchObject({ operationId: logged[0].operationId, latencyMs: expect.any(Number) });
+  });
+
+  it('keeps skipped initialization free of lifecycle events', async () => {
+    await createProvider({ enabled: false }).initialise();
+    expect(events('initialise')).toHaveLength(0);
+    expect(mockedFetch).not.toHaveBeenCalled();
+  });
+
+  it('records a confirmed deadline without exposing the abort reason', async () => {
+    const controller = new AbortController();
+    controller.abort(new DOMException('private timeout reason', 'TimeoutError'));
+    const timeoutSpy = jest.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+    try {
+      const abortError = new Error('private upstream abort');
+      abortError.name = 'AbortError';
+      mockedFetch.mockRejectedValue(abortError);
+      await expect(createProvider().complete({ model: TEST_MODEL_ID, messages: [] }))
+        .rejects.toMatchObject({ code: 'REQUEST_TIMEOUT', message: 'Ollama completion failed' });
+      const logged = events('complete');
+      expect(logged.map((event) => event.status)).toEqual(['started', 'error']);
+      expect(logged[1]).toMatchObject({
+        operationId: logged[0].operationId, failureCategory: 'timeout', providerFailureCode: 'TIMEOUT',
+        retryable: true, latencyMs: expect.any(Number),
+      });
+      expect(JSON.stringify(logged)).not.toContain('private timeout reason');
+      expect(JSON.stringify(logged)).not.toContain('private upstream abort');
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  });
+
+  it('emits one safe terminal error after a partial stream and retains the original public error', async () => {
+    const privateError = new Error('Bearer private-token\nprivate prompt');
+    mockedFetch.mockResolvedValue(mockResponse({
+      body: (async function* brokenStream() {
+        yield Buffer.from('{"message":{"content":"first"},"done":false}\n');
+        throw privateError;
+      })() as unknown as NodeJS.ReadableStream,
+    }));
+    const iterator = createProvider().streamComplete({ model: TEST_MODEL_ID, messages: [] })[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({ value: { content: 'first' } });
+    await expect(iterator.next()).rejects.toMatchObject({ code: 'UPSTREAM_STREAM_ERROR', message: 'Ollama stream failed' });
+    const logged = events('stream');
+    expect(logged.map((event) => event.status)).toEqual(['started', 'error']);
+    expect(logged[1]).toMatchObject({
+      operationId: logged[0].operationId, stage: 'stream_read', failureCategory: 'stream',
+      providerFailureCode: 'STREAM_ERROR', failureSite: expect.any(String), latencyMs: expect.any(Number),
+    });
+    expect(JSON.stringify(logged)).not.toContain('private-token');
+  });
+
+  it('retains status and diagnostic category for an upstream HTTP failure', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({ ok: false, status: 503 }));
+    await expect(createProvider().listModels()).rejects.toMatchObject({ code: 'HTTP_503', statusCode: 503 });
+    const logged = events('listModels');
+    expect(logged.map((event) => event.status)).toEqual(['started', 'error']);
+    expect(logged[1]).toMatchObject({
+      operationId: logged[0].operationId, errorCode: 'HTTP_503', upstreamStatus: 503,
+      failureCategory: 'http', providerFailureCode: 'HTTP_ERROR', retryable: true,
+      failureSite: expect.any(String), latencyMs: expect.any(Number),
+    });
   });
 });
 

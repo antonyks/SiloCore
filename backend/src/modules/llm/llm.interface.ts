@@ -13,6 +13,7 @@ import {
   LlmProviderConfig,
   LlmProviderListedModel,
 } from './llm.types';
+import { LlmOperationContext } from './llm.operation';
 
 /**
  * Every concrete LLM provider adapter must implement this interface.
@@ -38,7 +39,7 @@ export interface ILlmProvider {
   // ------------------------------------------------------------------------
 
   /** Initialise or validate the connection to the upstream service. */
-  initialise(): Promise<void>;
+  initialise(context?: LlmOperationContext): Promise<void>;
 
   /** Gracefully shut down resources (caches, keep-alive connections, etc.). */
   destroy(): Promise<void>;
@@ -50,19 +51,20 @@ export interface ILlmProvider {
   /**
    * Send a non-streaming completion request and return the full response.
    */
-  complete(request: LlmCompletionRequest): Promise<LlmCompletionResponse>;
+  complete(request: LlmCompletionRequest, context?: LlmOperationContext): Promise<LlmCompletionResponse>;
 
   /**
    * Return an async iterable that yields chunks for streaming responses.
    */
   streamComplete(
     request: LlmCompletionRequest,
+    context?: LlmOperationContext,
   ): AsyncIterable<LlmStreamChunk>;
 
   /**
    * Generate vector embeddings for one or more text inputs.
    */
-  embed(request: LlmEmbeddingRequest): Promise<LlmEmbeddingResponse>;
+  embed(request: LlmEmbeddingRequest, context?: LlmOperationContext): Promise<LlmEmbeddingResponse>;
 
   // ------------------------------------------------------------------------
   // Model Management (optional but recommended)
@@ -72,11 +74,11 @@ export interface ILlmProvider {
    * List available models from the upstream service.
    * Returns an empty array if not supported.
    */
-  listModels(): Promise<LlmProviderListedModel[]>;
+  listModels(context?: LlmOperationContext): Promise<LlmProviderListedModel[]>;
 
   /**
    * Pull / ensure a model exists on the remote side.
    * Implemented only by providers that require explicit model pulling (e.g., Ollama).
    */
-  pullModel?(model: string): Promise<void>;
+  pullModel?(model: string, context?: LlmOperationContext): Promise<void>;
 }

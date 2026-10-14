@@ -4,6 +4,7 @@
  */
 
 import { ILlmProvider } from './llm.interface';
+import { LlmOperationContext } from './llm.operation';
 import {
   LlmCompletionRequest,
   LlmCompletionResponse,
@@ -39,7 +40,8 @@ export abstract class AbstractLlmProvider implements ILlmProvider {
   // Lifecycle (default no-op implementations)
   // ------------------------------------------------------------------------
 
-  async initialise(): Promise<void> {
+  async initialise(context?: LlmOperationContext): Promise<void> {
+    void context;
     // Sub-class may override to perform health-check or pre-warming.
   }
 
@@ -51,10 +53,10 @@ export abstract class AbstractLlmProvider implements ILlmProvider {
   // Core methods – MUST be implemented by subclasses
   // ------------------------------------------------------------------------
 
-  abstract complete(request: LlmCompletionRequest): Promise<LlmCompletionResponse>;
-  abstract streamComplete(request: LlmCompletionRequest): AsyncIterable<LlmStreamChunk>;
-  abstract embed(request: LlmEmbeddingRequest): Promise<LlmEmbeddingResponse>;
-  abstract listModels(): Promise<LlmProviderListedModel[]>;
+  abstract complete(request: LlmCompletionRequest, context?: LlmOperationContext): Promise<LlmCompletionResponse>;
+  abstract streamComplete(request: LlmCompletionRequest, context?: LlmOperationContext): AsyncIterable<LlmStreamChunk>;
+  abstract embed(request: LlmEmbeddingRequest, context?: LlmOperationContext): Promise<LlmEmbeddingResponse>;
+  abstract listModels(context?: LlmOperationContext): Promise<LlmProviderListedModel[]>;
 
   // ------------------------------------------------------------------------
   // Shared Helpers
