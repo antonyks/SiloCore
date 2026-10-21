@@ -20,6 +20,16 @@ const PUBLIC_PROVIDER_ERRORS: Record<string, string> = {
   PROVIDER_INVALID_REQUEST: 'Provider rejected the request',
 };
 
+/** Validate codes copied from a public provider result into operational logs. */
+export function isPublicLlmErrorCode(code: unknown): code is string {
+  if (typeof code !== 'string') return false;
+  if (Object.prototype.hasOwnProperty.call(PUBLIC_PROVIDER_ERRORS, code)) return true;
+  if (code === 'PROVIDER_AUTHENTICATION_ERROR' || code === 'HEALTH_CHECK_FAILED'
+    || code === LLM_PROVIDER_CAPABILITY_UNSUPPORTED_CODE || code === 'ADAPTER_UNAVAILABLE') return true;
+  const httpStatus = /^HTTP_([1-5]\d\d)$/.exec(code);
+  return httpStatus !== null && Number(httpStatus[1]) <= 599;
+}
+
 function safeHttpStatus(error: LlmProviderError): number | undefined {
   try {
     const status = error.statusCode;

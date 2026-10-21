@@ -405,7 +405,7 @@ describe('AdminSystemService', () => {
         ],
       });
 
-      const result = await AdminSystemService.getSystemStatus();
+      const result = await AdminSystemService.getSystemStatus({ requestId: 'req-admin-status' });
 
       expect(result.inference).toEqual({
         status: 'review',
@@ -413,6 +413,7 @@ describe('AdminSystemService', () => {
         errors: 1,
         skipped: 0,
       });
+      expect(mockListAvailableModels).toHaveBeenCalledWith({ requestId: 'req-admin-status' });
     });
 
     it('returns offline inference status when no providers succeed', async () => {

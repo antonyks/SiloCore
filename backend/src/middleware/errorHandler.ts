@@ -5,6 +5,7 @@ import { DuplicateResourceError, NotFoundError, InvalidInputError, Authenticatio
 import { getOrCreateRequestId } from './requestId.middleware';
 import { LlmProviderError } from '../modules/llm/llm.types';
 import { getPublicLlmErrorCode, getPublicLlmErrorMessage } from '../modules/llm/llm.safeError';
+import { logLlmEvent } from '../modules/llm/llm.logging';
 import { LlmCapabilityError } from '../modules/llm/llm.capabilities';
 
 const ErrorCode = {
@@ -56,7 +57,14 @@ export function errorHandler(err: unknown, _req: Request, res: Response, next: N
             });
             return;
         case (err instanceof LlmProviderError):
-            logger.error({ requestId, errorCode: getPublicLlmErrorCode(err) ?? ErrorCode.INTERNAL_ERROR, ...safeErrorDiagnostic(err) }, 'Provider operation failed');
+            logLlmEvent({
+                layer: 'runtime',
+                operation: 'api.providerError',
+                status: 'error',
+                requestId,
+                errorCode: getPublicLlmErrorCode(err) ?? ErrorCode.INTERNAL_ERROR,
+                ...safeErrorDiagnostic(err),
+            });
             res.status(500).json({
                 message: getPublicLlmErrorMessage(err),
                 code: getPublicLlmErrorCode(err) ?? ErrorCode.INTERNAL_ERROR,

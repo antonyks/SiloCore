@@ -11,6 +11,7 @@ import { safeErrorDiagnostic } from '../../../config/safeErrorDiagnostic';
 import { prisma } from '../../../config/database';
 import { ENV } from '../../../config/env';
 import { LlmRuntimeService } from '../../llm/llmRuntime.service';
+import { LlmOperationCorrelation } from '../../llm/llm.operation';
 import { UserRole, UserStatus } from '../../user/user.model';
 import { JobQueueTransport } from '../../job';
 import { getJobQueueTransport } from '../../job/jobQueue.client';
@@ -191,7 +192,7 @@ export function createAdminSystemService(dependencies: Partial<AdminSystemServic
       };
     },
 
-    async getSystemStatus(): Promise<AdminSystemStatus> {
+    async getSystemStatus(correlation: LlmOperationCorrelation = {}): Promise<AdminSystemStatus> {
       try {
         await database.$queryRaw`SELECT 1`;
       } catch (error) {
@@ -210,7 +211,7 @@ export function createAdminSystemService(dependencies: Partial<AdminSystemServic
       }
 
       const recentInference = await getRecentProviderHealthInferenceStatus(ENV.PROVIDER_HEALTH_SAMPLE_RECENT_MS);
-      const inference = recentInference ?? await getLiveProviderInferenceStatus();
+      const inference = recentInference ?? await getLiveProviderInferenceStatus(correlation);
 
       return {
         backend: {
@@ -384,8 +385,8 @@ export function createAdminSystemService(dependencies: Partial<AdminSystemServic
     };
   }
 
-  async function getLiveProviderInferenceStatus(): Promise<InferenceStatusSummary> {
-    const modelRegistry = await llm.listAvailableModels();
+  async function getLiveProviderInferenceStatus(correlation: LlmOperationCorrelation): Promise<InferenceStatusSummary> {
+    const modelRegistry = await llm.listAvailableModels(correlation);
     const providerStatuses = modelRegistry.providers;
     const errorProviders = providerStatuses.filter((provider) => provider.status === 'error').length;
     const skippedProviders = providerStatuses.filter((provider) => provider.status === 'skipped').length;

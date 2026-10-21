@@ -262,6 +262,14 @@ describe('LlmProviderService', () => {
         operation: 'provider.test',
         status: 'success',
       }), 'provider.test.success');
+      const runtimeStart = mockedLogger.info.mock.calls
+        .map(([payload]) => payload as Record<string, unknown>)
+        .find((payload) => payload.operation === 'provider.test' && payload.status === 'started');
+      const adapterStart = mockedLogger.info.mock.calls
+        .map(([payload]) => payload as Record<string, unknown>)
+        .find((payload) => payload.operation === 'provider.initialise' && payload.status === 'started');
+      expect(runtimeStart).toMatchObject({ layer: 'runtime', operationId: expect.any(String) });
+      expect(adapterStart).toMatchObject({ layer: 'provider', operationId: runtimeStart?.operationId });
       expect(mockedFetch).toHaveBeenCalledWith(
         'http://localhost:11434/models',
         expect.objectContaining({
@@ -428,9 +436,16 @@ describe('LlmProviderService', () => {
 
       mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(provider);
 
-      const result = await LlmProviderService.pullProviderModel(provider.id, TEST_MODEL_ID);
+      const result = await LlmProviderService.pullProviderModel(provider.id, TEST_MODEL_ID, { requestId: 'req-model-pull' });
 
-      expect(pullModel).toHaveBeenCalledWith(TEST_MODEL_ID);
+      expect(pullModel).toHaveBeenCalledWith(TEST_MODEL_ID, expect.objectContaining({
+        operationId: expect.any(String), requestId: 'req-model-pull',
+      }));
+      const pullContext = pullModel.mock.calls[0][1];
+      expect(mockedLogger.info).toHaveBeenCalledWith(expect.objectContaining({
+        layer: 'runtime', operation: 'provider.pullModel.runtime', status: 'success',
+        operationId: pullContext?.operationId, requestId: 'req-model-pull',
+      }), 'provider.pullModel.runtime.success');
       expect(result).toEqual(expect.objectContaining({
         providerId: String(provider.id),
         status: 'success',

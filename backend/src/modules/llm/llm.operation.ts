@@ -11,7 +11,9 @@ export type LlmOperationContext = {
   jobId?: number;
 };
 
-export function createLlmOperationContext(correlation: Pick<LlmOperationContext, 'requestId' | 'jobId'> = {}): LlmOperationContext {
+export type LlmOperationCorrelation = Pick<LlmOperationContext, 'requestId' | 'jobId'>;
+
+export function createLlmOperationContext(correlation: LlmOperationCorrelation = {}): LlmOperationContext {
   return {
     operationId: randomUUID(),
     requestId: correlation.requestId,

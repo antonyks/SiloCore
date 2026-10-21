@@ -69,4 +69,24 @@ describe('provider model identity and safe LLM log fields', () => {
       operation: 'provider.embed', status: 'error',
     }, 'provider.embed.error');
   });
+
+  it('allows only known health-sample diagnostic fields', () => {
+    logLlmEvent({
+      operation: 'providerHealthSample.record', status: 'error',
+      sampleOperation: 'MODEL_REGISTRY', sampleStatus: 'ERROR',
+      sampleErrorCode: 'HTTP_503',
+    });
+    expect(logger.error).toHaveBeenLastCalledWith(expect.objectContaining({
+      sampleOperation: 'MODEL_REGISTRY', sampleStatus: 'ERROR', sampleErrorCode: 'HTTP_503',
+    }), 'providerHealthSample.record.error');
+
+    logLlmEvent({
+      operation: 'providerHealthSample.record', status: 'error',
+      sampleOperation: 'Bearer private operation', sampleStatus: 'private status',
+      sampleErrorCode: 'Bearer private code',
+    } as never);
+    expect(logger.error).toHaveBeenLastCalledWith({
+      operation: 'providerHealthSample.record', status: 'error',
+    }, 'providerHealthSample.record.error');
+  });
 });

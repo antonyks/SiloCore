@@ -63,14 +63,18 @@ describe('LlmController', () => {
   });
 
   it('returns common model listing without provider secrets or config-only fields', async () => {
-    jest.spyOn(OllamaProvider.prototype, 'listModels')
+    const listModels = jest.spyOn(OllamaProvider.prototype, 'listModels')
       .mockResolvedValue([createListedModel(TEST_MODEL_ID)]);
     const provider = createProvider();
     mockPrisma.llmProviderConfig.count.mockResolvedValue(1);
     mockPrisma.llmProviderConfig.findMany.mockResolvedValue([provider]);
     const res = createMockResponse();
 
-    await LlmController.listAvailableModels(createAuthenticatedMockRequest(), res);
+    await LlmController.listAvailableModels(createAuthenticatedMockRequest({ requestId: 'req-model-list' }), res);
+
+    expect(listModels).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'req-model-list', operationId: expect.any(String),
+    }));
 
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({

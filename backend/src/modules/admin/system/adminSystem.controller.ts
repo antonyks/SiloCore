@@ -16,8 +16,8 @@ export function createAdminSystemController(dependencies: Partial<AdminSystemCon
       res.status(200).json({ data: summary });
     },
 
-    async getSystemStatus(_req: AuthenticatedRequest, res: Response): Promise<void> {
-      const status = await serviceDependency.getSystemStatus();
+    async getSystemStatus(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const status = await serviceDependency.getSystemStatus({ requestId: req.requestId });
       res.status(200).json({ data: status });
     },
 

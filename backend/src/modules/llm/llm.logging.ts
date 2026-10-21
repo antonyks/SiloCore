@@ -1,5 +1,6 @@
 import { logger } from '../../config/logger';
-import { getPublicLlmErrorCode } from './llm.safeError';
+import { getPublicLlmErrorCode, isPublicLlmErrorCode } from './llm.safeError';
+import { ProviderHealthSampleOperation, ProviderHealthSampleStatus } from '@prisma/client';
 import {
   PROVIDER_FAILURE_CATEGORIES, PROVIDER_FAILURE_CODES, PROVIDER_FAILURE_STAGES,
   ProviderFailureCategory, ProviderFailureCode, ProviderFailureStage,
@@ -20,6 +21,9 @@ type LlmLogFields = {
   latencyMs?: number;
   status: LlmLogStatus;
   errorCode?: string;
+  sampleOperation?: ProviderHealthSampleOperation;
+  sampleStatus?: ProviderHealthSampleStatus;
+  sampleErrorCode?: string;
   failureKind?: string;
   failureCode?: string;
   failureReason?: string;
@@ -57,6 +61,16 @@ function allowedLogFields(fields: LlmLogFields): Record<string, unknown> {
     result.upstreamStatus = fields.upstreamStatus;
   }
   if (fields.providerModelMismatch === true) result.providerModelMismatch = true;
+  if (fields.sampleOperation === ProviderHealthSampleOperation.MODEL_REGISTRY
+    || fields.sampleOperation === ProviderHealthSampleOperation.PROVIDER_TEST) {
+    result.sampleOperation = fields.sampleOperation;
+  }
+  if (fields.sampleStatus === ProviderHealthSampleStatus.SUCCESS
+    || fields.sampleStatus === ProviderHealthSampleStatus.ERROR
+    || fields.sampleStatus === ProviderHealthSampleStatus.SKIPPED) {
+    result.sampleStatus = fields.sampleStatus;
+  }
+  if (isPublicLlmErrorCode(fields.sampleErrorCode)) result.sampleErrorCode = fields.sampleErrorCode;
   if (typeof fields.stage === 'string' && (PROVIDER_FAILURE_STAGES as readonly string[]).includes(fields.stage)) {
     result.stage = fields.stage;
   }

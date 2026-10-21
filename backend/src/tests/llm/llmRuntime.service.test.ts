@@ -6,6 +6,7 @@ import {
 } from '@prisma/client';
 import { describe, expect, it, jest, afterEach, beforeEach } from '@jest/globals';
 import { InvalidInputError } from '../../errors';
+import { logger } from '../../config/logger';
 import { createLlmRuntimeService, LlmRuntimeService } from '../../modules/llm/llmRuntime.service';
 import { ILlmProvider } from '../../modules/llm/llm.interface';
 import {
@@ -240,5 +241,77 @@ describe('LlmRuntimeService embeddings', () => {
       }),
       select: expect.any(Object),
     });
+  });
+
+  it('links a failed health-sample write to the provider operation without logging the database error text', async () => {
+    const info = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+    const errors = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProviderConfig({ id: 7 }));
+    mockPrisma.providerHealthSample.create.mockRejectedValue(new Error('Bearer private database detail'));
+    mockedFetch.mockResolvedValue(mockModelListResponse());
+
+    await expect(LlmRuntimeService.listProviderModels(7, { requestId: 'req-sample-failure' }))
+      .resolves.toMatchObject({ providers: [expect.objectContaining({ status: 'success' })] });
+
+    const providerStart = info.mock.calls
+      .map(([payload]) => payload as Record<string, unknown>)
+      .find((payload) => payload.operation === 'provider.listModels' && payload.status === 'started');
+    expect(errors).toHaveBeenCalledWith(expect.objectContaining({
+      layer: 'runtime', operation: 'providerHealthSample.record', status: 'error',
+      requestId: 'req-sample-failure', operationId: providerStart?.operationId,
+      errorCode: 'PROVIDER_HEALTH_SAMPLE_RECORD_FAILED', failureKind: 'Error',
+      sampleOperation: ProviderHealthSampleOperation.MODEL_REGISTRY,
+      sampleStatus: ProviderHealthSampleStatus.SUCCESS,
+    }), 'providerHealthSample.record.error');
+    expect(JSON.stringify(errors.mock.calls)).not.toContain('private database detail');
+  });
+
+  it.each([
+    [{ requestId: 'req-unavailable' }],
+    [{ jobId: 42 }],
+  ])('correlates unavailable-adapter and failed-sample events for %p', async (correlation) => {
+    const errors = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    const repository = {
+      ...LlmProviderConfigRepository,
+      findActive: async () => [createProviderConfig({ id: 7 })],
+    };
+    const recordSample = jest.fn(async () => { throw new Error('Bearer private database detail'); });
+    const runtime = createLlmRuntimeService({
+      repository,
+      adapterFactories: {},
+      healthSamples: { recordSample },
+    });
+
+    const result = await runtime.listAvailableModels(correlation);
+
+    expect(result.providers[0]).toMatchObject({
+      status: 'error', errorCode: LLM_PROVIDER_CAPABILITY_UNSUPPORTED_CODE,
+    });
+    const logged = errors.mock.calls.map(([payload]) => payload as Record<string, unknown>);
+    const registry = logged.find((entry) => entry.operation === 'provider.modelRegistry');
+    const unavailable = logged.find((entry) => entry.operation === 'provider.adapterUnavailable');
+    const sampleFailure = logged.find((entry) => entry.operation === 'providerHealthSample.record');
+    expect(registry).toMatchObject({
+      ...correlation, providerId: '7', status: 'error',
+      errorCode: LLM_PROVIDER_CAPABILITY_UNSUPPORTED_CODE,
+      operationId: expect.any(String),
+    });
+    expect(unavailable).toMatchObject({
+      ...correlation, providerId: '7', errorCode: 'ADAPTER_UNAVAILABLE',
+      operationId: registry?.operationId,
+    });
+    expect(sampleFailure).toMatchObject({
+      ...correlation, providerId: '7', operationId: registry?.operationId,
+      errorCode: 'PROVIDER_HEALTH_SAMPLE_RECORD_FAILED',
+      sampleOperation: ProviderHealthSampleOperation.MODEL_REGISTRY,
+      sampleStatus: ProviderHealthSampleStatus.ERROR,
+      sampleErrorCode: LLM_PROVIDER_CAPABILITY_UNSUPPORTED_CODE,
+    });
+    expect(recordSample).toHaveBeenCalledWith(expect.objectContaining({
+      operation: ProviderHealthSampleOperation.MODEL_REGISTRY,
+      status: ProviderHealthSampleStatus.ERROR,
+      errorCode: LLM_PROVIDER_CAPABILITY_UNSUPPORTED_CODE,
+    }));
+    expect(JSON.stringify(errors.mock.calls)).not.toContain('private database detail');
   });
 });

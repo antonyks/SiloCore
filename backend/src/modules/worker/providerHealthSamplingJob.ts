@@ -83,7 +83,7 @@ export function createProviderHealthSampling(dependencies: Partial<ProviderHealt
       await jobService.updateProgress(job.id, 10, 'provider_health_sampling_started');
       await heartbeat();
 
-      const result = await sampleProviderHealth();
+      const result = await sampleProviderHealth(job.id);
 
       await checkpointCancellation();
       await jobService.updateProgress(job.id, 90, 'provider_health_sampling_recorded');
@@ -139,8 +139,8 @@ export function createProviderHealthSampling(dependencies: Partial<ProviderHealt
     };
   }
 
-  async function sampleProviderHealth(): Promise<Prisma.JsonObject> {
-    const modelRegistry = await llm.listAvailableModels();
+  async function sampleProviderHealth(jobId: number): Promise<Prisma.JsonObject> {
+    const modelRegistry = await llm.listAvailableModels({ jobId });
     const success = modelRegistry.providers.filter((provider) => provider.status === 'success').length;
     const error = modelRegistry.providers.filter((provider) => provider.status === 'error').length;
     const skipped = modelRegistry.providers.filter((provider) => provider.status === 'skipped').length;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { InvalidInputError } from '../../../errors';
 import { LlmProviderController } from '../../../modules/admin/llm/llmProvider.controller';
+import { LlmProviderService } from '../../../modules/admin/llm/llmProvider.service';
 import { SelectedLlmProviderConfig } from '../../../modules/llm/llmProviderConfig.model';
 import { createAuthenticatedMockRequest, createMockResponse } from '../../testUtils';
 import { mockPrisma } from '../../setup';
@@ -41,6 +42,25 @@ function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): Sel
 }
 
 describe('LlmProviderController', () => {
+  it('forwards the validated HTTP request ID for provider test and pull', async () => {
+    const result = {
+      providerId: '1', providerName: 'Local Ollama', providerType: 'ollama' as const,
+      status: 'success' as const,
+    };
+    const testProvider = jest.spyOn(LlmProviderService, 'testProvider').mockResolvedValue(result);
+    const pullProviderModel = jest.spyOn(LlmProviderService, 'pullProviderModel').mockResolvedValue(result);
+    const request = createAuthenticatedMockRequest({
+      requestId: 'req-admin-operations', params: { id: '1' }, body: { model: TEST_MODEL_ID },
+    });
+
+    await LlmProviderController.testProvider(request, createMockResponse());
+    await LlmProviderController.pullProviderModel(request, createMockResponse());
+
+    expect(testProvider).toHaveBeenCalledWith(1, { requestId: 'req-admin-operations' });
+    expect(pullProviderModel).toHaveBeenCalledWith(1, TEST_MODEL_ID, { requestId: 'req-admin-operations' });
+    jest.restoreAllMocks();
+  });
+
   it('creates a provider and returns sanitized data', async () => {
     const provider = createProvider();
     mockPrisma.llmProviderConfig.create.mockResolvedValue(provider);

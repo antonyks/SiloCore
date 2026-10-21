@@ -19,14 +19,14 @@ export function createLlmController(dependencies: Partial<LlmControllerDependenc
   const serviceDependency = dependencies.serviceDependency ?? LlmRuntimeService;
 
   const service = {
-    async listAvailableModels(_req: AuthenticatedRequest, res: Response): Promise<void> {
-      const result = await serviceDependency.listAvailableModels();
+    async listAvailableModels(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const result = await serviceDependency.listAvailableModels({ requestId: req.requestId });
       res.status(200).json({ data: result });
     },
 
     async listProviderModels(req: AuthenticatedRequest, res: Response): Promise<void> {
       const id = parseProviderId(req.params.id);
-      const result = await serviceDependency.listProviderModels(id);
+      const result = await serviceDependency.listProviderModels(id, { requestId: req.requestId });
       res.status(200).json({ data: result });
     },
   };

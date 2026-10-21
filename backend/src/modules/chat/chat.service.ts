@@ -20,6 +20,7 @@ import { LlmRuntimeService } from '../llm/llmRuntime.service';
 import { ILlmProvider } from '../llm/llm.interface';
 import { LlmCompletionRequest, LlmMessage, TokenUsage } from '../llm/llm.types';
 import { getLlmErrorCode, logLlmEvent } from '../llm/llm.logging';
+import { createLlmOperationContext, LlmOperationContext } from '../llm/llm.operation';
 import { getPublicLlmErrorMessage, normalizeAdapterError } from '../llm/llm.safeError';
 import { CoreSingleOwnerWorkspaceAuthorizationPolicy, WorkspaceAuthorizationPolicy, WorkspaceAction } from '../workspace';
 import { GenerationUsageOutcome, GenerationUsageService } from '../generationUsage';
@@ -38,6 +39,7 @@ type PreparedGeneration = {
   userMessage: SelectedChatMessage;
   startedAt: number;
   params: IChatGenerationParams;
+  operationContext: LlmOperationContext;
 };
 
 const WORKSPACE_NOT_FOUND_MESSAGE = 'Workspace not found';
@@ -55,17 +57,17 @@ function toLlmMessages(messages: Array<{ author: MessageAuthor; content: string 
   }));
 }
 
-async function completeFromAdapter(provider: ILlmProvider, request: LlmCompletionRequest) {
+async function completeFromAdapter(provider: ILlmProvider, request: LlmCompletionRequest, context: LlmOperationContext) {
   try {
-    return await provider.complete(request);
+    return await provider.complete(request, context);
   } catch (error) {
     throw normalizeAdapterError(error, provider.id);
   }
 }
 
-async function* streamFromAdapter(provider: ILlmProvider, request: LlmCompletionRequest) {
+async function* streamFromAdapter(provider: ILlmProvider, request: LlmCompletionRequest, context: LlmOperationContext) {
   try {
-    yield* provider.streamComplete(request);
+    yield* provider.streamComplete(request, context);
   } catch (error) {
     throw normalizeAdapterError(error, provider.id);
   }
@@ -192,6 +194,9 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
       });
     } catch (error) {
       logLlmEvent({
+        layer: 'chat',
+        operationId: data.prepared.operationContext.operationId,
+        requestId: data.prepared.operationContext.requestId,
         providerId: data.prepared.providerMetadata.providerId,
         providerType: data.prepared.providerMetadata.providerType,
         model: data.prepared.request.model,
@@ -308,7 +313,8 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
       ensureAuthorizedWorkspace(context, WorkspaceAction.CREATE_RESOURCE);
       const prepared = await this.prepareGeneration(input, context, 'completion');
       logLlmEvent({
-        requestId: input.requestId,
+        layer: 'chat',
+        ...prepared.operationContext,
         providerId: prepared.providerMetadata.providerId,
         providerType: prepared.providerMetadata.providerType,
         model: prepared.request.model,
@@ -317,7 +323,7 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
       });
 
       try {
-        const completion = await completeFromAdapter(prepared.provider, prepared.request);
+        const completion = await completeFromAdapter(prepared.provider, prepared.request, prepared.operationContext);
         const latencyMs = Date.now() - prepared.startedAt;
         const assistantMessage = await repository.createMessage({
           content: completion.content,
@@ -346,7 +352,8 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
           usage: completion.usage,
         });
         logLlmEvent({
-          requestId: input.requestId,
+          layer: 'chat',
+          ...prepared.operationContext,
           providerId: prepared.providerMetadata.providerId,
           providerType: prepared.providerMetadata.providerType,
           model: prepared.request.model,
@@ -369,7 +376,8 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
           errorCode: getLlmErrorCode(error),
         });
         logLlmEvent({
-          requestId: input.requestId,
+          layer: 'chat',
+          ...prepared.operationContext,
           providerId: prepared.providerMetadata.providerId,
           providerType: prepared.providerMetadata.providerType,
           model: prepared.request.model,
@@ -390,7 +398,8 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
       ensureAuthorizedWorkspace(context, WorkspaceAction.CREATE_RESOURCE);
       const prepared = await this.prepareGeneration(input, context, 'streaming');
       logLlmEvent({
-        requestId: input.requestId,
+        layer: 'chat',
+        ...prepared.operationContext,
         providerId: prepared.providerMetadata.providerId,
         providerType: prepared.providerMetadata.providerType,
         model: prepared.request.model,
@@ -441,7 +450,7 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
       };
 
       try {
-        for await (const chunk of streamFromAdapter(prepared.provider, prepared.request)) {
+        for await (const chunk of streamFromAdapter(prepared.provider, prepared.request, prepared.operationContext)) {
           if (chunk.usage) {
             usage = chunk.usage;
           }
@@ -485,7 +494,8 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
           usage,
         });
         logLlmEvent({
-          requestId: input.requestId,
+          layer: 'chat',
+          ...prepared.operationContext,
           providerId: prepared.providerMetadata.providerId,
           providerType: prepared.providerMetadata.providerType,
           model: prepared.request.model,
@@ -515,7 +525,8 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
           errorCode: getLlmErrorCode(error),
         });
         logLlmEvent({
-          requestId: input.requestId,
+          layer: 'chat',
+          ...prepared.operationContext,
           providerId: prepared.providerMetadata.providerId,
           providerType: prepared.providerMetadata.providerType,
           model: prepared.request.model,
@@ -541,7 +552,8 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
             usage,
           });
           logLlmEvent({
-            requestId: input.requestId,
+            layer: 'chat',
+            ...prepared.operationContext,
             providerId: prepared.providerMetadata.providerId,
             providerType: prepared.providerMetadata.providerType,
             model: prepared.request.model,
@@ -577,6 +589,7 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
       return {
         provider: resolved.provider,
         workspaceId,
+        operationContext: createLlmOperationContext({ requestId: input.requestId }),
         providerMetadata: {
           providerId: String(resolved.providerConfig.id),
           providerName: resolved.providerConfig.name,

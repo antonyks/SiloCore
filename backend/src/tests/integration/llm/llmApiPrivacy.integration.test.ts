@@ -179,6 +179,23 @@ function loggedPayloadText(): string {
   ]);
 }
 
+function loggedEvents(operation: string): Array<Record<string, unknown>> {
+  return [...jest.mocked(logger.info).mock.calls, ...jest.mocked(logger.error).mock.calls]
+    .map(([payload]) => payload as Record<string, unknown>)
+    .filter((payload) => payload.operation === operation);
+}
+
+function expectCorrelatedEvents(callerOperation: string, adapterOperation: string, requestId: string): void {
+  const caller = loggedEvents(callerOperation);
+  const adapter = loggedEvents(adapterOperation);
+  expect(caller).toHaveLength(2);
+  expect(adapter).toHaveLength(2);
+  expect(caller[0]).toMatchObject({ requestId, operationId: expect.any(String), status: 'started' });
+  expect(caller[1]).toMatchObject({ requestId, operationId: caller[0].operationId, status: 'success' });
+  expect(adapter[0]).toMatchObject({ requestId, operationId: caller[0].operationId, status: 'started' });
+  expect(adapter[1]).toMatchObject({ requestId, operationId: caller[0].operationId, status: 'success' });
+}
+
 beforeEach(async () => {
   jest.spyOn(logger, 'info').mockImplementation(() => undefined);
   jest.spyOn(logger, 'error').mockImplementation(() => undefined);
@@ -242,7 +259,7 @@ describe('LLM API response privacy integration', () => {
       });
       const testResponse = await requestJson(server, `/api/admin/llm/providers/${providerId}/test`, {
         method: 'POST',
-        headers: admin.headers,
+        headers: { ...admin.headers, 'x-request-id': 'req-admin-provider-test' },
       });
 
       expect(updateResponse.status).toBe(200);
@@ -265,6 +282,7 @@ describe('LLM API response privacy integration', () => {
         testResponse.body,
       ]);
       expectNoApiSecrets(loggedPayloadText());
+      expectCorrelatedEvents('provider.test', 'provider.initialise', 'req-admin-provider-test');
     } finally {
       await Promise.all([upstream.close(), server.close()]);
     }
@@ -283,7 +301,7 @@ describe('LLM API response privacy integration', () => {
         '/api/llm/models',
         {
           method: 'GET',
-          headers: user.headers,
+          headers: { ...user.headers, 'x-request-id': 'req-user-model-registry' },
         },
       );
       const providerRegistryResponse = await requestJson<{ data: { models: unknown[]; providers: unknown[] } }>(
@@ -326,6 +344,9 @@ describe('LLM API response privacy integration', () => {
       expect(providerRegistryResponse.body.data).toEqual(registryResponse.body.data);
       expectNoApiSecrets([registryResponse.body, providerRegistryResponse.body]);
       expectNoApiSecrets(loggedPayloadText());
+      expect(loggedEvents('provider.listModels')).toEqual(expect.arrayContaining([
+        expect.objectContaining({ requestId: 'req-user-model-registry', operationId: expect.any(String) }),
+      ]));
     } finally {
       await Promise.all([upstream.close(), server.close()]);
     }
@@ -352,7 +373,7 @@ describe('LLM API response privacy integration', () => {
         `/api/chat/${session.id}/generate`,
         {
           method: 'POST',
-          headers: owner.headers,
+          headers: { ...owner.headers, 'x-request-id': 'req-owner-chat-complete' },
           body: JSON.stringify({
             content: PRIVATE_PROMPT,
             providerId: provider.id,
@@ -409,6 +430,10 @@ describe('LLM API response privacy integration', () => {
       expect(deniedText).not.toContain(PRIVATE_OTHER_WORKSPACE_CONTENT);
       expectNoApiSecrets([intruderGenerateResponse.body, intruderMessagesResponse.body]);
       expectNoApiSecrets(loggedPayloadText());
+      expectCorrelatedEvents('chat.complete', 'provider.complete', 'req-owner-chat-complete');
+      expect(loggedPayloadText()).not.toContain(PRIVATE_PROMPT);
+      expect(loggedPayloadText()).not.toContain(PRIVATE_ANSWER);
+      expect(loggedPayloadText()).not.toContain(PRIVATE_REASONING);
     } finally {
       await Promise.all([upstream.close(), server.close()]);
     }
@@ -427,7 +452,7 @@ describe('LLM API response privacy integration', () => {
 
       const response = await fetch(`${server.baseUrl}/api/chat/${session.id}/generate/stream`, {
         method: 'POST',
-        headers: owner.headers,
+        headers: { ...owner.headers, 'x-request-id': 'req-owner-chat-stream' },
         body: JSON.stringify({
           content: PRIVATE_PROMPT,
           providerId: provider.id,
@@ -445,6 +470,10 @@ describe('LLM API response privacy integration', () => {
       expect(body).toContain(PRIVATE_REASONING);
       expectNoApiSecrets(body);
       expectNoApiSecrets(loggedPayloadText());
+      expectCorrelatedEvents('chat.stream', 'provider.stream', 'req-owner-chat-stream');
+      expect(loggedPayloadText()).not.toContain(PRIVATE_PROMPT);
+      expect(loggedPayloadText()).not.toContain(PRIVATE_ANSWER);
+      expect(loggedPayloadText()).not.toContain(PRIVATE_REASONING);
     } finally {
       await Promise.all([upstream.close(), server.close()]);
     }

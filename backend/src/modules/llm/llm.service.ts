@@ -1,6 +1,8 @@
 import { ILlmProvider } from './llm.interface';
 import { ensureLlmProviderCapability } from './llm.capabilities';
 import { getPublicLlmErrorCode, getPublicLlmErrorMessage, normalizeAdapterError } from './llm.safeError';
+import { createLlmOperationContext, LlmOperationContext, LlmOperationCorrelation } from './llm.operation';
+import { logLlmEvent } from './llm.logging';
 import {
   LlmListedModel,
   LlmModelListResult,
@@ -10,6 +12,7 @@ import {
 export interface LlmProviderModelListObservation {
   provider: LlmProviderModelListResult;
   latencyMs: number;
+  context: LlmOperationContext;
 }
 
 export type LlmProviderModelListObserver = (
@@ -22,9 +25,9 @@ export class LlmRegistryService {
     private readonly observer?: LlmProviderModelListObserver,
   ) {}
 
-  async listAvailableModels(): Promise<LlmModelListResult> {
+  async listAvailableModels(correlation: LlmOperationCorrelation = {}): Promise<LlmModelListResult> {
     const providerResults = await Promise.all(
-      this.providers.map((provider) => this.listProviderModels(provider)),
+      this.providers.map((provider) => this.listProviderModels(provider, createLlmOperationContext(correlation))),
     );
 
     return {
@@ -33,7 +36,7 @@ export class LlmRegistryService {
     };
   }
 
-  private async listProviderModels(provider: ILlmProvider): Promise<{
+  private async listProviderModels(provider: ILlmProvider, context: LlmOperationContext): Promise<{
     models: LlmListedModel[];
     provider: LlmProviderModelListResult;
   }> {
@@ -57,12 +60,12 @@ export class LlmRegistryService {
           modelCount: 0,
           capabilities: provider.capabilities,
         },
-      }, startedAt);
+      }, startedAt, context);
     }
 
     try {
       ensureLlmProviderCapability(provider, 'modelListing');
-      const listedModels = await provider.listModels();
+      const listedModels = await provider.listModels(context);
       const models = listedModels.map((model) => ({
         ...baseModelResult,
         modelId: model.modelId,
@@ -78,7 +81,7 @@ export class LlmRegistryService {
           modelCount: models.length,
           capabilities: provider.capabilities,
         },
-      }, startedAt);
+      }, startedAt, context);
     } catch (error) {
       const safeError = normalizeAdapterError(error, provider.id);
       return this.observeProviderResult({
@@ -91,21 +94,34 @@ export class LlmRegistryService {
           errorMessage: getPublicLlmErrorMessage(safeError),
           errorCode: getPublicLlmErrorCode(safeError),
         },
-      }, startedAt);
+      }, startedAt, context);
     }
   }
 
   private async observeProviderResult(result: {
     models: LlmListedModel[];
     provider: LlmProviderModelListResult;
-  }, startedAt: number): Promise<{
+  }, startedAt: number, context: LlmOperationContext): Promise<{
     models: LlmListedModel[];
     provider: LlmProviderModelListResult;
   }> {
+    const latencyMs = Date.now() - startedAt;
+    logLlmEvent({
+      layer: 'runtime',
+      ...context,
+      providerId: result.provider.providerId,
+      providerType: result.provider.providerType,
+      operation: 'provider.modelRegistry',
+      status: result.provider.status,
+      latencyMs,
+      errorCode: result.provider.errorCode,
+    });
+
     if (this.observer) {
       await this.observer({
         provider: result.provider,
-        latencyMs: Date.now() - startedAt,
+        latencyMs,
+        context,
       });
     }
 

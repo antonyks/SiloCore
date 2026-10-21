@@ -1,4 +1,5 @@
 import { jest } from '@jest/globals';
+import { logger } from '../../config/logger';
 import { InvalidInputError } from '../../errors';
 import { ILlmProvider } from '../../modules/llm/llm.interface';
 import {
@@ -76,6 +77,42 @@ function createListedModel(modelName: string): LlmProviderListedModel {
 }
 
 describe('LlmRegistryService', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('uses distinct child operation IDs and one request ID for a provider fan-out', async () => {
+    const info = jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+    const first = jest.fn<ILlmProvider['listModels']>().mockResolvedValue([]);
+    const second = jest.fn<ILlmProvider['listModels']>().mockResolvedValue([]);
+    const observer = jest.fn<LlmProviderModelListObserver>();
+    const service = new LlmRegistryService([
+      createProvider({ id: 'ollama', name: 'Local Ollama', type: 'ollama' }, first),
+      createProvider({ id: 'cloud', name: 'Cloud', type: 'openai-compatible' }, second),
+    ], observer);
+
+    await service.listAvailableModels({ requestId: 'registry-request' });
+
+    const firstContext = first.mock.calls[0][0];
+    const secondContext = second.mock.calls[0][0];
+    expect(firstContext).toMatchObject({ requestId: 'registry-request', operationId: expect.any(String) });
+    expect(secondContext).toMatchObject({ requestId: 'registry-request', operationId: expect.any(String) });
+    expect(firstContext?.operationId).not.toBe(secondContext?.operationId);
+    expect(observer.mock.calls.map(([observation]) => observation.context.operationId))
+      .toEqual([firstContext?.operationId, secondContext?.operationId]);
+    const registryEvents = info.mock.calls
+      .map(([payload]) => payload as Record<string, unknown>)
+      .filter((payload) => payload.operation === 'provider.modelRegistry');
+    expect(registryEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        requestId: 'registry-request', providerId: 'ollama', status: 'success',
+        operationId: firstContext?.operationId,
+      }),
+      expect.objectContaining({
+        requestId: 'registry-request', providerId: 'cloud', status: 'success',
+        operationId: secondContext?.operationId,
+      }),
+    ]));
+  });
+
   it('aggregates provider-qualified models from multiple enabled providers', async () => {
     const ollamaListModels = jest.fn<() => Promise<LlmProviderListedModel[]>>().mockResolvedValue([
       createListedModel(TEST_MODEL_ID),
@@ -236,6 +273,7 @@ describe('LlmRegistryService', () => {
   });
 
   it('fails unsupported model listing before calling the provider', async () => {
+    const errors = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
     const unsupportedCapabilities = {
       ...DEFAULT_CAPABILITIES,
       modelListing: false,
@@ -254,6 +292,10 @@ describe('LlmRegistryService', () => {
     const result = await service.listAvailableModels();
 
     expect(listModels).not.toHaveBeenCalled();
+    expect(errors).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'provider.modelRegistry', status: 'error', providerId: 'cloud',
+      errorCode: 'LLM_PROVIDER_CAPABILITY_UNSUPPORTED', operationId: expect.any(String),
+    }), 'provider.modelRegistry.error');
     expect(result).toEqual({
       models: [],
       providers: [
@@ -322,6 +364,7 @@ describe('LlmRegistryService', () => {
         modelCount: 1,
       }),
       latencyMs: expect.any(Number),
+      context: expect.objectContaining({ operationId: expect.any(String) }),
     });
   });
 });

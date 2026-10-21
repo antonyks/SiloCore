@@ -236,6 +236,7 @@ describe('provider health sampling job', () => {
     });
     expect(JSON.stringify(result)).not.toContain('secret-provider');
     expect(JSON.stringify(result)).not.toContain('raw timeout');
+    expect(LlmRuntimeService.listAvailableModels).toHaveBeenCalledWith({ jobId: 42 });
     expect(updateProgressSpy).toHaveBeenNthCalledWith(1, 42, 10, 'provider_health_sampling_started');
     expect(updateProgressSpy).toHaveBeenNthCalledWith(2, 42, 90, 'provider_health_sampling_recorded');
     expect(heartbeat).toHaveBeenCalledTimes(2);

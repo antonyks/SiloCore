@@ -174,7 +174,7 @@ describe('Core composition', () => {
           expect(graph.pullModel).not.toHaveBeenCalled();
         } else {
           expect(graph.pullModel).toHaveBeenCalledTimes(1);
-          expect(graph.pullModel).toHaveBeenCalledWith('requested-model');
+          expect(graph.pullModel).toHaveBeenCalledWith('requested-model', expect.objectContaining({ operationId: expect.any(String) }));
           expect(graph.initialise).not.toHaveBeenCalled();
         }
       }

@@ -1,6 +1,5 @@
 import type { ProviderHealthSampleServiceContract } from '../providerHealthSample/providerHealthSample.service';
 import { ENV } from '../../config/env';
-import { logger } from '../../config/logger';
 import { safeErrorDiagnostic } from '../../config/safeErrorDiagnostic';
 import { InvalidInputError, NotFoundError } from '../../errors';
 import { ILlmProvider } from './llm.interface';
@@ -26,6 +25,7 @@ import {
 } from './llm.types';
 import { coreProviderFactories, ProviderAdapterFactories } from '../../composition/providerAdapters';
 import { getLlmErrorCode, logLlmEvent } from './llm.logging';
+import { createLlmOperationContext, LlmOperationContext, LlmOperationCorrelation } from './llm.operation';
 import { getPublicLlmErrorCode, getPublicLlmErrorMessage, normalizeAdapterError } from './llm.safeError';
 import {
   ProviderHealthSampleOperation,
@@ -116,8 +116,10 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
     }
   }
 
-  function adapterUnavailable(config: LlmProviderConfig): LlmProviderOperationResult {
+  function adapterUnavailable(config: LlmProviderConfig, context: LlmOperationContext): LlmProviderOperationResult {
     logLlmEvent({
+      layer: 'runtime',
+      ...context,
       providerId: config.id,
       providerType: config.type,
       operation: 'provider.adapterUnavailable',
@@ -191,13 +193,15 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
       return createAdapter(toProviderConfig(provider));
     },
 
-    async listAvailableModels(): Promise<LlmModelListResult> {
+    async listAvailableModels(correlation: LlmOperationCorrelation = {}): Promise<LlmModelListResult> {
       const providers = await repository.findActive();
+      const unavailableProviderIds = new Set<string>();
       const adapters = providers.map((provider) => {
         const config = toProviderConfig(provider);
         const adapter = createAdapter(config);
 
         if (adapter) return adapter;
+        unavailableProviderIds.add(config.id);
 
         return {
           id: config.id,
@@ -222,22 +226,38 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
         } satisfies ILlmProvider;
       });
 
-      return new LlmRegistryService(adapters, (observation) => recordModelRegistrySampleSafely(
-        observation.provider,
-        observation.latencyMs,
-      )).listAvailableModels();
+      return new LlmRegistryService(adapters, (observation) => {
+        if (observation.provider.status === 'error'
+          && unavailableProviderIds.has(observation.provider.providerId)) {
+          logLlmEvent({
+            layer: 'runtime',
+            ...observation.context,
+            providerId: observation.provider.providerId,
+            providerType: observation.provider.providerType,
+            operation: 'provider.adapterUnavailable',
+            status: 'error',
+            errorCode: 'ADAPTER_UNAVAILABLE',
+          });
+        }
+        return recordModelRegistrySampleSafely(
+          observation.provider,
+          observation.latencyMs,
+          observation.context,
+        );
+      }).listAvailableModels(correlation);
     },
 
-    async listProviderModels(id: number): Promise<LlmModelListResult> {
+    async listProviderModels(id: number, correlation: LlmOperationCorrelation = {}): Promise<LlmModelListResult> {
       const provider = await this.getProviderConfigById(id);
       const config = toProviderConfig(provider);
       const adapter = createAdapter(config);
       const startedAt = Date.now();
 
       if (!adapter) {
-        const unavailable = adapterUnavailable(config);
+        const context = createLlmOperationContext(correlation);
+        const unavailable = adapterUnavailable(config, context);
         const providerResult = toProviderModelListResult(unavailable);
-        await recordModelRegistrySampleSafely(providerResult, Date.now() - startedAt);
+        await recordModelRegistrySampleSafely(providerResult, Date.now() - startedAt, context);
         return {
           models: [],
           providers: [providerResult],
@@ -247,22 +267,26 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
       return new LlmRegistryService([adapter], (observation) => recordModelRegistrySampleSafely(
         observation.provider,
         observation.latencyMs,
-      )).listAvailableModels();
+        observation.context,
+      )).listAvailableModels(correlation);
     },
 
-    async testProvider(id: number): Promise<LlmProviderOperationResult> {
+    async testProvider(id: number, correlation: LlmOperationCorrelation = {}): Promise<LlmProviderOperationResult> {
       const provider = await this.getProviderConfigById(id);
       const config = toProviderConfig(provider);
       const adapter = createAdapter(config);
       const startedAt = Date.now();
+      const context = createLlmOperationContext(correlation);
 
       if (!adapter) {
-        const result = adapterUnavailable(config);
-        await recordProviderOperationSampleSafely(result, Date.now() - startedAt);
+        const result = adapterUnavailable(config, context);
+        await recordProviderOperationSampleSafely(result, Date.now() - startedAt, context);
         return result;
       }
 
       logLlmEvent({
+        layer: 'runtime',
+        ...context,
         providerId: adapter.id,
         providerType: adapter.config.type,
         operation: 'provider.test',
@@ -270,8 +294,10 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
       });
 
       try {
-        await adapter.initialise();
+        await adapter.initialise(context);
         logLlmEvent({
+          layer: 'runtime',
+          ...context,
           providerId: adapter.id,
           providerType: adapter.config.type,
           operation: 'provider.test',
@@ -284,11 +310,13 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
           providerType: adapter.config.type,
           status: 'success',
         };
-        await recordProviderOperationSampleSafely(result, Date.now() - startedAt);
+        await recordProviderOperationSampleSafely(result, Date.now() - startedAt, context);
         return result;
       } catch (error) {
         const safeError = normalizeAdapterError(error, adapter.id);
         logLlmEvent({
+          layer: 'runtime',
+          ...context,
           providerId: adapter.id,
           providerType: adapter.config.type,
           operation: 'provider.test',
@@ -305,25 +333,32 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
           errorMessage: getPublicLlmErrorMessage(safeError),
           errorCode: getPublicLlmErrorCode(safeError),
         };
-        await recordProviderOperationSampleSafely(result, Date.now() - startedAt);
+        await recordProviderOperationSampleSafely(result, Date.now() - startedAt, context);
         return result;
       }
     },
 
-    async pullProviderModel(id: number, model: string): Promise<LlmProviderOperationResult> {
+    async pullProviderModel(id: number, model: string, correlation: LlmOperationCorrelation = {}): Promise<LlmProviderOperationResult> {
       const provider = await this.getProviderConfigById(id);
       const config = toProviderConfig(provider);
       const adapter = createAdapter(config);
       const startedAt = Date.now();
+      const context = createLlmOperationContext(correlation);
 
       if (!adapter) {
-        return adapterUnavailable(config);
+        return adapterUnavailable(config, context);
       }
 
       try {
         ensureLlmProviderCapability(adapter, 'modelPulling');
       } catch (error) {
         const safeError = normalizeAdapterError(error, adapter.id);
+        logLlmEvent({
+          layer: 'runtime', ...context,
+          providerId: adapter.id, providerType: adapter.config.type, model,
+          operation: 'provider.pullModel.runtime', status: 'error',
+          errorCode: getLlmErrorCode(safeError), ...safeErrorDiagnostic(error),
+        });
         return {
           providerId: adapter.id,
           providerName: adapter.config.name,
@@ -335,6 +370,12 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
       }
 
       if (!adapter.pullModel) {
+        logLlmEvent({
+          layer: 'runtime', ...context,
+          providerId: adapter.id, providerType: adapter.config.type, model,
+          operation: 'provider.pullModel.runtime', status: 'error',
+          errorCode: 'LLM_PROVIDER_CAPABILITY_UNSUPPORTED',
+        });
         return {
           providerId: adapter.id,
           providerName: adapter.config.name,
@@ -346,6 +387,8 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
       }
 
       logLlmEvent({
+        layer: 'runtime',
+        ...context,
         providerId: adapter.id,
         providerType: adapter.config.type,
         model,
@@ -354,8 +397,10 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
       });
 
       try {
-        await adapter.pullModel(model);
+        await adapter.pullModel(model, context);
         logLlmEvent({
+          layer: 'runtime',
+          ...context,
           providerId: adapter.id,
           providerType: adapter.config.type,
           model,
@@ -372,6 +417,8 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
       } catch (error) {
         const safeError = normalizeAdapterError(error, adapter.id);
         logLlmEvent({
+          layer: 'runtime',
+          ...context,
           providerId: adapter.id,
           providerType: adapter.config.type,
           model,
@@ -395,6 +442,7 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
     async embedWithProvider(params: {
       providerId: number;
       request: LlmEmbeddingRequest;
+      correlation?: LlmOperationCorrelation;
     }): Promise<LlmEmbeddingResponse> {
       const providerConfig = await this.getProviderConfigById(params.providerId);
 
@@ -414,7 +462,7 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
       }
 
       try {
-        return await provider.embed(params.request);
+        return await provider.embed(params.request, createLlmOperationContext(params.correlation));
       } catch (error) {
         throw normalizeAdapterError(error, provider.id);
       }
@@ -466,6 +514,7 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
   async function recordModelRegistrySampleSafely(
     provider: LlmProviderModelListResult,
     latencyMs: number,
+    context: LlmOperationContext,
   ): Promise<void> {
     await recordProviderSampleSafely({
       providerId: Number(provider.providerId),
@@ -475,12 +524,13 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
       latencyMs,
       modelCount: provider.modelCount,
       errorCode: provider.errorCode,
-    });
+    }, context);
   }
 
   async function recordProviderOperationSampleSafely(
     result: LlmProviderOperationResult,
     latencyMs: number,
+    context: LlmOperationContext,
   ): Promise<void> {
     await recordProviderSampleSafely({
       providerId: Number(result.providerId),
@@ -489,25 +539,30 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
       status: toProviderHealthSampleStatus(result.status),
       latencyMs,
       errorCode: result.errorCode,
-    });
+    }, context);
   }
 
   async function recordProviderSampleSafely(input: Parameters<
     typeof healthSamples.recordSample
-  >[0]): Promise<void> {
+  >[0], context: LlmOperationContext): Promise<void> {
     if (!Number.isInteger(input.providerId)) return;
 
     try {
       await healthSamples.recordSample(input);
     } catch (error) {
-      logger.error({
-        providerId: input.providerId,
-        providerType: input.providerType,
-        operation: input.operation,
-        status: input.status,
-        errorCode: input.errorCode,
+      logLlmEvent({
+        layer: 'runtime',
+        ...context,
+        providerId: String(input.providerId),
+        providerType: fromDbProviderType(input.providerType),
+        operation: 'providerHealthSample.record',
+        status: 'error',
+        errorCode: 'PROVIDER_HEALTH_SAMPLE_RECORD_FAILED',
+        sampleOperation: input.operation,
+        sampleStatus: input.status,
+        sampleErrorCode: input.errorCode,
         ...safeErrorDiagnostic(error),
-      }, 'Provider health sample recording failed.');
+      });
     }
   }
 

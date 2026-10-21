@@ -1,5 +1,6 @@
 import { JobStatus, LlmProviderConfigType, ProviderHealthSampleStatus, UserRole } from '@prisma/client';
 import { ENV } from '../../../config/env';
+import { logger } from '../../../config/logger';
 import { importPgBoss } from '../../../modules/job/pgBoss.loader.cjs';
 import {
   createJobWorkerHandler,
@@ -111,8 +112,14 @@ async function waitForJobStatus(
 }
 
 beforeEach(async () => {
+  jest.spyOn(logger, 'info').mockImplementation(() => undefined);
+  jest.spyOn(logger, 'error').mockImplementation(() => undefined);
   await resetIntegrationDatabase();
   await clearProviderHealthSamplingQueue();
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
 });
 
 describe('provider health sampling worker integration', () => {
@@ -217,6 +224,18 @@ describe('provider health sampling worker integration', () => {
       expect(successUpstream.requests).toHaveLength(1);
       expect(errorUpstream.requests).toHaveLength(1);
 
+      const providerEvents = [...jest.mocked(logger.info).mock.calls, ...jest.mocked(logger.error).mock.calls]
+        .map(([payload]) => payload as Record<string, unknown>)
+        .filter((payload) => payload.operation === 'provider.listModels');
+      expect(providerEvents).toHaveLength(4);
+      const operationIds = new Set(providerEvents.map((event) => event.operationId));
+      expect(operationIds.size).toBe(2);
+      expect(providerEvents.map((event) => event.status).sort()).toEqual(['error', 'started', 'started', 'success']);
+      for (const event of providerEvents) {
+        expect(event).toMatchObject({ jobId: completedJob.id, operationId: expect.any(String) });
+        expect(event.requestId).toBeUndefined();
+      }
+
       const persistedText = JSON.stringify({
         job: completedJob,
         samples,
@@ -227,6 +246,8 @@ describe('provider health sampling worker integration', () => {
       expect(persistedText).not.toContain('deleted-secret-api-key');
       expect(persistedText).not.toContain('secret-extra-header');
       expect(persistedText).not.toContain('secret raw provider failure');
+      expect(JSON.stringify(providerEvents)).not.toContain('secret raw provider failure');
+      expect(JSON.stringify(providerEvents)).not.toContain('secret-extra-header');
     } finally {
       await worker.close();
       await successUpstream.close();

@@ -52,14 +52,14 @@ export function createLlmProviderController(dependencies: Partial<LlmProviderCon
 
     async testProvider(req: AuthenticatedRequest, res: Response): Promise<void> {
       const id = parseProviderId(req.params.id);
-      const result = await serviceDependency.testProvider(id);
+      const result = await serviceDependency.testProvider(id, { requestId: req.requestId });
       res.status(200).json({ data: result });
     },
 
     async pullProviderModel(req: AuthenticatedRequest, res: Response): Promise<void> {
       const id = parseProviderId(req.params.id);
       const { model } = req.body;
-      const result = await serviceDependency.pullProviderModel(id, model);
+      const result = await serviceDependency.pullProviderModel(id, model, { requestId: req.requestId });
       res.status(200).json({ data: result });
     },
   };

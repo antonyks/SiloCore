@@ -557,7 +557,7 @@ describe('ChatService', () => {
           { role: 'user', content: 'Previous' },
           { role: 'user', content: 'Hello' },
         ],
-      }));
+      }), expect.objectContaining({ operationId: expect.any(String), requestId: 'req-chat-complete' }));
       expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, {
         data: expect.objectContaining({
           content: 'Hi there',
@@ -607,6 +607,15 @@ describe('ChatService', () => {
         status: 'success',
         latencyMs: expect.any(Number),
       }), 'chat.complete.success');
+      const completionContext = jest.mocked(complete).mock.calls[0][1];
+      expect(completionContext).toEqual(expect.objectContaining({
+        operationId: expect.any(String), requestId: 'req-chat-complete',
+      }));
+      expect(loggedPayloads().filter((payload) => payload.operation === 'chat.complete'))
+        .toEqual(expect.arrayContaining([
+          expect.objectContaining({ layer: 'chat', operationId: completionContext?.operationId, status: 'started' }),
+          expect.objectContaining({ layer: 'chat', operationId: completionContext?.operationId, status: 'success' }),
+        ]));
       expect(JSON.stringify(loggedPayloads())).not.toContain('Hello');
       expect(JSON.stringify(loggedPayloads())).not.toContain('private-upstream-reported-model');
       expect(JSON.stringify(mockPrisma.chatMessage.create.mock.calls)).not.toContain('private-upstream-reported-model');
@@ -687,7 +696,7 @@ describe('ChatService', () => {
         where: { id: 2 },
         select: expect.any(Object),
       });
-      expect(complete).toHaveBeenCalledWith(expect.objectContaining({ model: EXPLICIT_TEST_MODEL_ID }));
+      expect(complete).toHaveBeenCalledWith(expect.objectContaining({ model: EXPLICIT_TEST_MODEL_ID }), expect.objectContaining({ operationId: expect.any(String) }));
     });
 
     it('should complete through an OpenAI-compatible provider', async () => {
@@ -734,7 +743,7 @@ describe('ChatService', () => {
       expect(complete).toHaveBeenCalledWith(expect.objectContaining({
         model: TEST_MODEL_ID,
         messages: [{ role: 'user', content: 'Hello' }],
-      }));
+      }), expect.objectContaining({ operationId: expect.any(String) }));
       expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, {
         data: expect.objectContaining({
           content: 'Cloud response',
@@ -799,7 +808,7 @@ describe('ChatService', () => {
         topP: 0.9,
         maxTokens: 4096,
         stopSequences: ['END'],
-      }));
+      }), expect.objectContaining({ operationId: expect.any(String) }));
       expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, {
         data: expect.objectContaining({
           metadata: expect.objectContaining({
@@ -1005,7 +1014,7 @@ describe('ChatService', () => {
       mockPrisma.chatMessage.create
         .mockResolvedValueOnce(userMessage)
         .mockResolvedValueOnce(assistantMessage);
-      jest.spyOn(OllamaProvider.prototype, 'streamComplete').mockReturnValue(streamChunks());
+      const streamComplete = jest.spyOn(OllamaProvider.prototype, 'streamComplete').mockReturnValue(streamChunks());
 
       const events = [];
       for await (const event of ChatService.streamAssistantResponse({
@@ -1070,6 +1079,13 @@ describe('ChatService', () => {
         status: 'success',
         latencyMs: expect.any(Number),
       }), 'chat.stream.success');
+      const streamContext = streamComplete.mock.calls[0][1];
+      expect(streamContext).toEqual(expect.objectContaining({ operationId: expect.any(String), requestId: 'req-chat-stream' }));
+      expect(loggedPayloads().filter((payload) => payload.operation === 'chat.stream'))
+        .toEqual(expect.arrayContaining([
+          expect.objectContaining({ layer: 'chat', operationId: streamContext?.operationId, status: 'started' }),
+          expect.objectContaining({ layer: 'chat', operationId: streamContext?.operationId, status: 'success' }),
+        ]));
       expect(JSON.stringify(loggedPayloads())).not.toContain('Hello');
       expect(JSON.stringify(loggedPayloads())).not.toContain('Hi there');
       expect(JSON.stringify(loggedPayloads())).not.toContain('Think first.');

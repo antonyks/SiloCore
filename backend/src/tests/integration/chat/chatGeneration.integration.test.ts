@@ -22,6 +22,8 @@ import {
 } from '../helpers/mockLlmUpstream';
 
 const MODEL_ID = 'integration-chat-model';
+const UPSTREAM_MODEL = 'private-upstream-model-alias';
+const UPSTREAM_ERROR_BODY = 'Bearer private-upstream-error-body';
 const SECRET_API_KEY = 'chat-secret-api-key';
 const SECRET_HEADER_VALUE = 'chat-secret-header-value';
 const USER_PROMPT = 'Private integration prompt';
@@ -71,7 +73,7 @@ function createOpenAiChatRoutes() {
       }
 
       sendJson(res, 200, {
-        model: MODEL_ID,
+        model: UPSTREAM_MODEL,
         choices: [
           {
             finish_reason: 'stop',
@@ -99,6 +101,24 @@ function createPartialStreamFailureRoutes() {
   };
 }
 
+function createOllamaChatRoutes(status = 200) {
+  return {
+    'POST /api/chat': (_request: unknown, res: ServerResponse) => {
+      if (status !== 200) {
+        sendJson(res, status, { error: UPSTREAM_ERROR_BODY });
+        return;
+      }
+      sendJson(res, 200, {
+        model: UPSTREAM_MODEL,
+        message: { content: ASSISTANT_CONTENT, thinking: ASSISTANT_REASONING },
+        done_reason: 'stop',
+        prompt_eval_count: 5,
+        eval_count: 7,
+      });
+    },
+  };
+}
+
 async function createPersistedOpenAiProvider(upstream: MockLlmUpstream, generationDefaults?: Prisma.InputJsonObject) {
   return integrationPrisma.llmProviderConfig.create({
     data: {
@@ -113,6 +133,40 @@ async function createPersistedOpenAiProvider(upstream: MockLlmUpstream, generati
       apiKey: SECRET_API_KEY,
     },
   });
+}
+
+async function createPersistedOllamaProvider(upstream: MockLlmUpstream) {
+  return integrationPrisma.llmProviderConfig.create({
+    data: {
+      name: 'Integration Ollama',
+      type: 'OLLAMA',
+      baseUrl: upstream.baseUrl,
+      enabled: true,
+      defaultModel: MODEL_ID,
+      timeoutMs: 5000,
+      generationDefaults: {},
+      extraHeaders: { 'X-Chat-Secret': SECRET_HEADER_VALUE },
+      apiKey: SECRET_API_KEY,
+    },
+  });
+}
+
+function loggedEvents(operation: string) {
+  return [...jest.mocked(logger.info).mock.calls, ...jest.mocked(logger.error).mock.calls]
+    .map(([payload]) => payload as Record<string, unknown>)
+    .filter((payload) => payload.operation === operation);
+}
+
+function expectPairedEvents(chatOperation: string, providerOperation: string, requestId: string) {
+  const chat = loggedEvents(chatOperation);
+  const adapter = loggedEvents(providerOperation);
+  expect(chat.map((event) => event.status)).toEqual(['started', 'success']);
+  expect(adapter.map((event) => event.status)).toEqual(['started', 'success']);
+  expect(chat[0]).toMatchObject({ layer: 'chat', requestId, model: MODEL_ID, operationId: expect.any(String) });
+  expect(chat[1].operationId).toBe(chat[0].operationId);
+  for (const event of adapter) {
+    expect(event).toMatchObject({ layer: 'provider', requestId, model: MODEL_ID, operationId: chat[0].operationId });
+  }
 }
 
 function loggedPayloadText(): string {
@@ -275,6 +329,9 @@ describe('Chat generation PostgreSQL integration', () => {
       expect(JSON.stringify(usageRows)).not.toContain(ASSISTANT_CONTENT);
       expect(JSON.stringify(usageRows)).not.toContain(ASSISTANT_REASONING);
       expect(JSON.stringify(usageRows)).not.toContain('END');
+      expectPairedEvents('chat.complete', 'provider.complete', 'req-integration-complete');
+      expect(loggedEvents('provider.complete')[1]).toMatchObject({ providerModelMismatch: true });
+      expect(loggedPayloadText()).not.toContain(UPSTREAM_MODEL);
       expect(loggedPayloadText()).not.toContain(SECRET_API_KEY);
       expect(loggedPayloadText()).not.toContain(SECRET_HEADER_VALUE);
       expect(loggedPayloadText()).not.toContain(USER_PROMPT);
@@ -284,6 +341,82 @@ describe('Chat generation PostgreSQL integration', () => {
       await closeUpstream(upstream);
     }
   });
+
+  it('correlates Ollama chat, adapter, and selected-model usage without logging upstream content', async () => {
+    const upstream = await createMockLlmUpstream(createOllamaChatRoutes());
+    try {
+      const owner = await createIntegrationTestUser({ email: 'chat-ollama-observability@example.com' });
+      const { workspace } = await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(owner.id);
+      const provider = await createPersistedOllamaProvider(upstream);
+      const session = await createIntegrationChatSession(owner.id, {
+        workspace: { connect: { id: workspace.id } },
+      });
+      const result = await ChatService.generateAssistantResponse({
+        sessionId: session.id, content: USER_PROMPT, providerId: provider.id,
+        requestId: 'req-ollama-complete',
+      }, createChatWorkspaceContext({ workspace, actorUserId: owner.id }));
+
+      expect(result.assistantMessage).toMatchObject({
+        content: ASSISTANT_CONTENT,
+        metadata: expect.objectContaining({ model: MODEL_ID, reasoning: ASSISTANT_REASONING }),
+      });
+      expect(await getGenerationUsageRows()).toEqual([
+        expect.objectContaining({ model: MODEL_ID, outcome: GenerationUsageOutcome.SUCCEEDED }),
+      ]);
+      expectPairedEvents('chat.complete', 'provider.complete', 'req-ollama-complete');
+      expect(loggedPayloadText()).not.toContain(UPSTREAM_MODEL);
+      expect(loggedPayloadText()).not.toContain(USER_PROMPT);
+      expect(loggedPayloadText()).not.toContain(ASSISTANT_CONTENT);
+      expect(loggedPayloadText()).not.toContain(ASSISTANT_REASONING);
+      expectNoSecrets(loggedPayloadText());
+    } finally {
+      await closeUpstream(upstream);
+    }
+  });
+
+  it.each(['ollama', 'openai-compatible'] as const)(
+    'keeps %s upstream HTTP failure bodies out of correlated logs and usage', async (providerType) => {
+      const upstream = await createMockLlmUpstream(providerType === 'ollama'
+        ? createOllamaChatRoutes(503)
+        : { 'POST /chat/completions': (_request: unknown, res: ServerResponse) => {
+          sendJson(res, 503, { error: { message: UPSTREAM_ERROR_BODY } });
+        } });
+      try {
+        const owner = await createIntegrationTestUser({ email: `chat-${providerType}-failure@example.com` });
+        const { workspace } = await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(owner.id);
+        const provider = providerType === 'ollama'
+          ? await createPersistedOllamaProvider(upstream)
+          : await createPersistedOpenAiProvider(upstream);
+        const session = await createIntegrationChatSession(owner.id, {
+          workspace: { connect: { id: workspace.id } },
+        });
+        const requestId = `req-${providerType}-failure`;
+
+        await expect(ChatService.generateAssistantResponse({
+          sessionId: session.id, content: USER_PROMPT, providerId: provider.id, requestId,
+        }, createChatWorkspaceContext({ workspace, actorUserId: owner.id })))
+          .rejects.toMatchObject({ code: 'HTTP_503', statusCode: 503 });
+
+        expect(await getGenerationUsageRows()).toEqual([
+          expect.objectContaining({ model: MODEL_ID, outcome: GenerationUsageOutcome.FAILED, errorCode: 'HTTP_503' }),
+        ]);
+        const chat = loggedEvents('chat.complete');
+        const adapter = loggedEvents('provider.complete');
+        expect(chat.map((event) => event.status)).toEqual(['started', 'error']);
+        expect(adapter.map((event) => event.status)).toEqual(['started', 'error']);
+        expect(adapter[1]).toMatchObject({
+          layer: 'provider', operationId: chat[0].operationId, requestId,
+          providerId: String(provider.id), failureCategory: 'http',
+          errorCode: 'HTTP_503', upstreamStatus: 503, latencyMs: expect.any(Number),
+        });
+        expect(loggedPayloadText()).not.toContain(UPSTREAM_ERROR_BODY);
+        expect(loggedPayloadText()).not.toContain(USER_PROMPT);
+        expectNoSecrets(loggedPayloadText());
+      } finally {
+        await closeUpstream(upstream);
+      }
+    },
+  );
 
   it('persists successful streaming output with accumulated metadata', async () => {
     const upstream = await createMockLlmUpstream(createOpenAiChatRoutes());
@@ -363,11 +496,49 @@ describe('Chat generation PostgreSQL integration', () => {
       expect(JSON.stringify(usageRows)).not.toContain(USER_PROMPT);
       expect(JSON.stringify(usageRows)).not.toContain(STREAM_CONTENT);
       expect(JSON.stringify(usageRows)).not.toContain(STREAM_REASONING);
+      expectPairedEvents('chat.stream', 'provider.stream', 'req-integration-stream');
       expect(loggedPayloadText()).not.toContain(SECRET_API_KEY);
       expect(loggedPayloadText()).not.toContain(SECRET_HEADER_VALUE);
       expect(loggedPayloadText()).not.toContain(USER_PROMPT);
       expect(loggedPayloadText()).not.toContain(STREAM_CONTENT);
       expect(loggedPayloadText()).not.toContain(STREAM_REASONING);
+    } finally {
+      await closeUpstream(upstream);
+    }
+  });
+
+  it('correlates an early stream close and records only selected-model abort usage', async () => {
+    const upstream = await createMockLlmUpstream(createOpenAiChatRoutes());
+    try {
+      const owner = await createIntegrationTestUser({ email: 'chat-stream-abort-observability@example.com' });
+      const { workspace } = await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(owner.id);
+      const provider = await createPersistedOpenAiProvider(upstream);
+      const session = await createIntegrationChatSession(owner.id, {
+        workspace: { connect: { id: workspace.id } },
+      });
+      const iterator = ChatService.streamAssistantResponse({
+        sessionId: session.id, content: USER_PROMPT, providerId: provider.id,
+        requestId: 'req-integration-abort',
+      }, createChatWorkspaceContext({ workspace, actorUserId: owner.id }))[Symbol.asyncIterator]();
+
+      await expect(iterator.next()).resolves.toMatchObject({ value: { event: 'user_message' } });
+      await expect(iterator.next()).resolves.toMatchObject({ value: { event: 'delta' } });
+      await iterator.return?.();
+
+      expect(await getGenerationUsageRows()).toEqual([
+        expect.objectContaining({ model: MODEL_ID, outcome: GenerationUsageOutcome.ABORTED }),
+      ]);
+      const chat = loggedEvents('chat.stream');
+      const adapter = loggedEvents('provider.stream');
+      expect(chat.map((event) => event.status)).toEqual(['started', 'aborted']);
+      expect(adapter.map((event) => event.status)).toEqual(['started', 'aborted']);
+      expect(adapter[1]).toMatchObject({
+        operationId: chat[0].operationId, requestId: 'req-integration-abort',
+        stage: 'local_abort', latencyMs: expect.any(Number),
+      });
+      expect(loggedPayloadText()).not.toContain(USER_PROMPT);
+      expect(loggedPayloadText()).not.toContain(STREAM_REASONING);
+      expectNoSecrets(loggedPayloadText());
     } finally {
       await closeUpstream(upstream);
     }
@@ -443,6 +614,17 @@ describe('Chat generation PostgreSQL integration', () => {
       expectNoSecrets(usageRows);
       expect(JSON.stringify(usageRows)).not.toContain(USER_PROMPT);
       expect(JSON.stringify(usageRows)).not.toContain(PARTIAL_CONTENT);
+      const chatFailure = loggedEvents('chat.stream');
+      const adapterFailure = loggedEvents('provider.stream');
+      expect(chatFailure.map((event) => event.status)).toEqual(['started', 'error']);
+      expect(adapterFailure.map((event) => event.status)).toEqual(['started', 'error']);
+      expect(adapterFailure[1]).toMatchObject({
+        operationId: chatFailure[0].operationId,
+        requestId: 'req-integration-partial-stream',
+        failureCategory: 'stream',
+        errorCode: 'UPSTREAM_STREAM_ERROR',
+        latencyMs: expect.any(Number),
+      });
       expect(loggedPayloadText()).not.toContain(SECRET_API_KEY);
       expect(loggedPayloadText()).not.toContain(SECRET_HEADER_VALUE);
       expect(loggedPayloadText()).not.toContain(USER_PROMPT);
