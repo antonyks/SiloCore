@@ -2,6 +2,8 @@ import fetch, { Response } from 'node-fetch';
 import { jest } from '@jest/globals';
 import { logger } from '../../config/logger';
 import { OpenAiCompatibleProvider } from '../../modules/llm/providers/openaiCompatible.provider';
+import { OllamaProvider } from '../../modules/llm/providers/ollama.provider';
+import { createLlmOperationContext } from '../../modules/llm/llm.operation';
 import {
   LlmAuthenticationError,
   LlmProviderConfig,
@@ -943,6 +945,140 @@ describe('OpenAiCompatibleProvider completion', () => {
       providerId: 'cloud-openai-compatible',
       code: 'MALFORMED_MODEL_LIST',
       message: 'OpenAI-compatible model list response was malformed',
+    });
+  });
+});
+
+describe('OpenAI-compatible shared lifecycle', () => {
+  beforeEach(() => {
+    mockedFetch.mockReset();
+    jest.clearAllMocks();
+  });
+
+  function events(operation: string): Array<Record<string, unknown>> {
+    return [...mockedLogger.info.mock.calls, ...mockedLogger.error.mock.calls]
+      .map(([fields]) => fields as Record<string, unknown>)
+      .filter((fields) => fields.operation === `provider.${operation}`);
+  }
+
+  it.each(['initialise', 'listModels', 'complete', 'embed'] as const)(
+    'pairs %s start and success events with a generated operation ID', async (operation) => {
+      mockedFetch.mockResolvedValue(mockResponse({
+        json: jest.fn<() => Promise<unknown>>().mockResolvedValue(
+          operation === 'embed'
+            ? { model: 'private-upstream-model', data: [{ embedding: [0.1, 0.2], index: 0 }] }
+            : operation === 'complete'
+              ? { model: 'private-upstream-model', choices: [{ message: { content: 'private answer' } }] }
+              : { data: [{ id: TEST_MODEL_ID }] },
+        ),
+      }));
+      const provider = createProvider();
+      if (operation === 'initialise') await provider.initialise();
+      if (operation === 'listModels') await provider.listModels();
+      if (operation === 'complete') await provider.complete({ model: TEST_MODEL_ID, messages: [] });
+      if (operation === 'embed') await provider.embed({ model: TEST_MODEL_ID, input: 'private prompt' });
+
+      const logged = events(operation);
+      expect(logged.map((event) => event.status)).toEqual(['started', 'success']);
+      expect(logged[0]).toMatchObject({ layer: 'provider', providerId: 'cloud-openai-compatible', providerType: 'openai-compatible' });
+      expect(logged[0].operationId).toEqual(expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/));
+      expect(logged[1]).toMatchObject({ operationId: logged[0].operationId, latencyMs: expect.any(Number) });
+      expect(logged[0].requestId).toBeUndefined();
+      expect(logged[0].model).toBe(['complete', 'embed'].includes(operation) ? TEST_MODEL_ID : undefined);
+      if (operation === 'complete' || operation === 'embed') expect(logged[1].providerModelMismatch).toBe(true);
+      expect(JSON.stringify(logged)).not.toContain('private-upstream-model');
+      expect(JSON.stringify(logged)).not.toContain('private prompt');
+      expect(JSON.stringify(logged)).not.toContain('private answer');
+    },
+  );
+
+  it('uses the same successful provider event schema as Ollama', async () => {
+    mockedFetch.mockResolvedValueOnce(mockResponse());
+    await createProvider().complete({ model: TEST_MODEL_ID, messages: [] });
+    const openAiKeys = events('complete').map((event) => Object.keys(event).sort());
+
+    jest.clearAllMocks();
+    mockedFetch.mockResolvedValueOnce(mockResponse({
+      json: jest.fn<() => Promise<unknown>>().mockResolvedValue({ message: { content: 'okay' } }),
+    }));
+    await new OllamaProvider({
+      id: 'ollama-parity', name: 'Ollama', type: 'ollama', enabled: true,
+      baseUrl: 'http://localhost:11434', defaultModel: TEST_MODEL_ID,
+    }).complete({ model: TEST_MODEL_ID, messages: [] });
+    expect(events('complete').map((event) => Object.keys(event).sort())).toEqual(openAiKeys);
+  });
+
+  it('preserves a supplied request/job context on both events', async () => {
+    mockedFetch.mockResolvedValue(mockResponse());
+    const context = createLlmOperationContext({ requestId: 'trusted-request', jobId: 19 });
+    await createProvider().complete({ model: TEST_MODEL_ID, messages: [] }, context);
+    expect(events('complete')).toEqual([
+      expect.objectContaining({ operationId: context.operationId, requestId: 'trusted-request', jobId: 19, status: 'started' }),
+      expect.objectContaining({ operationId: context.operationId, requestId: 'trusted-request', jobId: 19, status: 'success' }),
+    ]);
+  });
+
+  it('does not emit events for disabled initialization', async () => {
+    await createProvider({ enabled: false }).initialise();
+    expect(events('initialise')).toHaveLength(0);
+    expect(mockedFetch).not.toHaveBeenCalled();
+  });
+
+  it('leaves an unconsumed stream idle and aborts an early-closed SSE reader', async () => {
+    let readerClosed = false;
+    mockedFetch.mockResolvedValue(mockResponse({
+      body: (async function* cancellableSse() {
+        try {
+          yield Buffer.from('data: {"choices":[{"delta":{"content":"first"}}]}\n\n');
+          yield Buffer.from('data: {"choices":[{"delta":{"content":"second"}}]}\n\n');
+        } finally {
+          readerClosed = true;
+        }
+      })() as unknown as NodeJS.ReadableStream,
+    }));
+    const iterator = createProvider().streamComplete({ model: TEST_MODEL_ID, messages: [] })[Symbol.asyncIterator]();
+    expect(events('stream')).toHaveLength(0);
+    expect(mockedFetch).not.toHaveBeenCalled();
+    await iterator.next();
+    await iterator.return?.();
+    expect(readerClosed).toBe(true);
+    const logged = events('stream');
+    expect(logged.map((event) => event.status)).toEqual(['started', 'aborted']);
+    expect(logged[1]).toMatchObject({ operationId: logged[0].operationId, stage: 'local_abort', latencyMs: expect.any(Number) });
+  });
+
+  it('logs one safe terminal error after a partial SSE response', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      body: (async function* brokenSse() {
+        yield Buffer.from('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n');
+        throw new Error('Bearer private-token\nprivate answer');
+      })() as unknown as NodeJS.ReadableStream,
+    }));
+    const iterator = createProvider().streamComplete({ model: TEST_MODEL_ID, messages: [] })[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({ value: { content: 'partial' } });
+    await expect(iterator.next()).rejects.toMatchObject({ code: 'UPSTREAM_STREAM_ERROR', message: 'OpenAI-compatible stream failed' });
+    const logged = events('stream');
+    expect(logged.map((event) => event.status)).toEqual(['started', 'error']);
+    expect(logged[1]).toMatchObject({
+      operationId: logged[0].operationId, stage: 'stream_read', failureCategory: 'stream',
+      providerFailureCode: 'STREAM_ERROR', failureSite: expect.any(String), latencyMs: expect.any(Number),
+    });
+    expect(JSON.stringify(logged)).not.toContain('private-token');
+  });
+
+  it.each([
+    [401, 'PROVIDER_AUTHENTICATION_ERROR', 'authentication', false],
+    [403, 'PROVIDER_AUTHENTICATION_ERROR', 'authentication', false],
+    [429, 'RATE_LIMITED', 'rate_limit', true],
+  ] as const)('keeps HTTP %i public and internal failure details separate', async (status, code, category, retryable) => {
+    mockedFetch.mockResolvedValue(mockResponse({ ok: false, status }));
+    await expect(createProvider().complete({ model: TEST_MODEL_ID, messages: [] }))
+      .rejects.toMatchObject({ statusCode: status });
+    const logged = events('complete');
+    expect(logged.map((event) => event.status)).toEqual(['started', 'error']);
+    expect(logged[1]).toMatchObject({
+      operationId: logged[0].operationId, errorCode: code, upstreamStatus: status,
+      failureCategory: category, retryable, latencyMs: expect.any(Number),
     });
   });
 });
