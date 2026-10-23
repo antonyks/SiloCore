@@ -9,8 +9,10 @@ import {
   RefreshCw,
   TestTube2,
   Trash2,
+  X,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import ProviderActionDialog from "../components/ProviderActionDialog";
 import ProviderConfigForm from "../components/ProviderConfigForm";
 import {
   useCreateProviderConfig,
@@ -27,9 +29,7 @@ import type {
   SanitizedLlmProviderConfig,
 } from "../types";
 
-interface ActionMessage {
-  providerId: number;
-  providerName: string;
+interface Notice {
   message: string;
   tone: "success" | "error";
 }
@@ -114,18 +114,52 @@ const ProviderConfigsPage: React.FC = () => {
   const [pullingProvider, setPullingProvider] = useState<SanitizedLlmProviderConfig | null>(null);
   const [pullModelName, setPullModelName] = useState("");
   const [pullValidationError, setPullValidationError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [actionMessage, setActionMessage] = useState<ActionMessage | null>(null);
+  const [pullOperationError, setPullOperationError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [testingProviderId, setTestingProviderId] = useState<number | null>(null);
   const [pullingProviderId, setPullingProviderId] = useState<number | null>(null);
+  const actionTriggerRef = useRef<HTMLElement | null>(null);
+  const addProviderButtonRef = useRef<HTMLButtonElement>(null);
 
   const providerMutationError = createProvider.error || updateProvider.error;
   const providers = providersQuery.data;
   const isSaving = createProvider.isPending || updateProvider.isPending;
+  const metricValue = (count: number | undefined) =>
+    providersQuery.isError ? "—" : count === undefined ? "..." : String(count);
+  const providerMetrics = [
+    {
+      label: "Total Providers",
+      value: metricValue(providers?.length),
+      detail: "Non-deleted configurations",
+    },
+    {
+      label: "Enabled",
+      value: metricValue(providers?.filter((provider) => provider.enabled).length),
+      detail: "Enabled in settings",
+    },
+    {
+      label: "Disabled",
+      value: metricValue(providers?.filter((provider) => !provider.enabled).length),
+      detail: "Disabled in settings",
+    },
+    {
+      label: "Pull-Capable",
+      value: metricValue(providers?.filter(canPullProviderModel).length),
+      detail: "Includes disabled providers",
+    },
+  ];
+
+  const rememberTrigger = () => {
+    actionTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+  };
 
   const openCreateForm = () => {
-    setSuccessMessage(null);
-    setActionMessage(null);
+    rememberTrigger();
+    setNotice(null);
+    createProvider.reset();
+    updateProvider.reset();
     setDeletingProvider(null);
     setPullingProvider(null);
     setEditingProvider(null);
@@ -133,8 +167,10 @@ const ProviderConfigsPage: React.FC = () => {
   };
 
   const openEditForm = (provider: SanitizedLlmProviderConfig) => {
-    setSuccessMessage(null);
-    setActionMessage(null);
+    rememberTrigger();
+    setNotice(null);
+    createProvider.reset();
+    updateProvider.reset();
     setDeletingProvider(null);
     setPullingProvider(null);
     setEditingProvider(provider);
@@ -150,10 +186,10 @@ const ProviderConfigsPage: React.FC = () => {
     try {
       if (editingProvider) {
         await updateProvider.mutateAsync({ id: editingProvider.id, input });
-        setSuccessMessage(`${input.name} was updated.`);
+        setNotice({ message: `${input.name} was updated.`, tone: "success" });
       } else {
         await createProvider.mutateAsync(input);
-        setSuccessMessage(`${input.name} was created.`);
+        setNotice({ message: `${input.name} was created.`, tone: "success" });
       }
 
       closeForm();
@@ -169,7 +205,7 @@ const ProviderConfigsPage: React.FC = () => {
 
     try {
       await deleteProvider.mutateAsync(deletingProvider.id);
-      setSuccessMessage(`${deletingProvider.name} was deleted.`);
+      setNotice({ message: `${deletingProvider.name} was deleted.`, tone: "success" });
       setDeletingProvider(null);
     } catch {
       // React Query exposes the error state rendered by the delete confirmation.
@@ -177,25 +213,20 @@ const ProviderConfigsPage: React.FC = () => {
   };
 
   const handleTestProvider = async (provider: SanitizedLlmProviderConfig) => {
-    setSuccessMessage(null);
-    setActionMessage(null);
+    setNotice(null);
     setTestingProviderId(provider.id);
 
     try {
       const result = await testProvider.mutateAsync(provider.id);
       const isError = result.status === "error";
 
-      setActionMessage({
-        providerId: provider.id,
-        providerName: provider.name,
-        message: buildOperationMessage("test", result),
+      setNotice({
+        message: `${provider.name}: ${buildOperationMessage("test", result)}`,
         tone: isError ? "error" : "success",
       });
     } catch (error) {
-      setActionMessage({
-        providerId: provider.id,
-        providerName: provider.name,
-        message: getErrorMessage(error),
+      setNotice({
+        message: `${provider.name}: ${getErrorMessage(error)}`,
         tone: "error",
       });
     } finally {
@@ -208,19 +239,32 @@ const ProviderConfigsPage: React.FC = () => {
       return;
     }
 
-    setSuccessMessage(null);
-    setActionMessage(null);
+    rememberTrigger();
+    setNotice(null);
+    pullModel.reset();
     setIsFormOpen(false);
     setDeletingProvider(null);
     setPullingProvider(provider);
     setPullModelName(provider.defaultModel || "");
     setPullValidationError(null);
+    setPullOperationError(null);
   };
 
   const closePullPanel = () => {
     setPullingProvider(null);
     setPullModelName("");
     setPullValidationError(null);
+    setPullOperationError(null);
+  };
+
+  const openDeleteConfirm = (provider: SanitizedLlmProviderConfig) => {
+    rememberTrigger();
+    setNotice(null);
+    deleteProvider.reset();
+    setIsFormOpen(false);
+    setEditingProvider(null);
+    setPullingProvider(null);
+    setDeletingProvider(provider);
   };
 
   const handlePullModel = async () => {
@@ -236,30 +280,24 @@ const ProviderConfigsPage: React.FC = () => {
     }
 
     setPullValidationError(null);
-    setActionMessage(null);
+    setPullOperationError(null);
     setPullingProviderId(pullingProvider.id);
 
     try {
       const result = await pullModel.mutateAsync({ id: pullingProvider.id, model });
       const isError = result.status === "error";
 
-      setActionMessage({
-        providerId: pullingProvider.id,
-        providerName: pullingProvider.name,
-        message: buildOperationMessage("pull", result),
-        tone: isError ? "error" : "success",
-      });
-
-      if (!isError) {
+      if (isError) {
+        setPullOperationError(buildOperationMessage("pull", result));
+      } else {
+        setNotice({
+          message: `${pullingProvider.name}: ${buildOperationMessage("pull", result)}`,
+          tone: "success",
+        });
         closePullPanel();
       }
     } catch (error) {
-      setActionMessage({
-        providerId: pullingProvider.id,
-        providerName: pullingProvider.name,
-        message: getErrorMessage(error),
-        tone: "error",
-      });
+      setPullOperationError(getErrorMessage(error));
     } finally {
       setPullingProviderId(null);
     }
@@ -267,6 +305,20 @@ const ProviderConfigsPage: React.FC = () => {
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
+      <section aria-label="Provider configuration summary" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {providerMetrics.map((metric) => (
+          <div key={metric.label} className="rounded-md border border-slate-200 bg-white px-4 py-3">
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
+              {metric.label}
+            </div>
+            <div className="mt-1 text-2xl font-semibold text-slate-950">{metric.value}</div>
+            <div className="mt-1 text-xs text-slate-500">
+              {providersQuery.isError ? "Provider list unavailable" : metric.detail}
+            </div>
+          </div>
+        ))}
+      </section>
+
       <section className="rounded-md border border-slate-200 bg-white">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
           <div>
@@ -285,6 +337,7 @@ const ProviderConfigsPage: React.FC = () => {
               Refresh
             </button>
             <button
+              ref={addProviderButtonRef}
               type="button"
               onClick={openCreateForm}
               className="inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-950 px-3 text-xs font-semibold text-white hover:bg-slate-800"
@@ -294,31 +347,6 @@ const ProviderConfigsPage: React.FC = () => {
             </button>
           </div>
         </div>
-
-        {successMessage && (
-          <div className="flex items-center gap-2 border-b border-emerald-100 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
-            <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
-            {successMessage}
-          </div>
-        )}
-
-        {actionMessage && (
-          <div
-            className={`flex items-center gap-2 border-b px-4 py-2 text-sm ${
-              actionMessage.tone === "success"
-                ? "border-emerald-100 bg-emerald-50 text-emerald-800"
-                : "border-red-100 bg-red-50 text-red-800"
-            }`}
-          >
-            {actionMessage.tone === "success" ? (
-              <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
-            ) : (
-              <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
-            )}
-            <span className="font-medium">{actionMessage.providerName}:</span>
-            <span>{actionMessage.message}</span>
-          </div>
-        )}
 
         {providersQuery.isError && (
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-red-100 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -337,84 +365,65 @@ const ProviderConfigsPage: React.FC = () => {
           </div>
         )}
 
-        {deletingProvider && (
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            <span>
-              Delete <span className="font-semibold">{deletingProvider.name}</span>? This removes
-              the provider config from active use.
-            </span>
-            {deleteProvider.error && (
-              <span className="inline-flex items-center gap-2 text-red-700">
-                <AlertCircle className="h-4 w-4" aria-hidden="true" />
-                {getErrorMessage(deleteProvider.error)}
-              </span>
-            )}
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setDeletingProvider(null)}
-                disabled={deleteProvider.isPending}
-                className="inline-flex h-8 items-center rounded-md border border-amber-200 bg-white px-2.5 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-60"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void confirmDelete()}
-                disabled={deleteProvider.isPending}
-                className="inline-flex h-8 items-center rounded-md bg-red-700 px-2.5 text-xs font-semibold text-white hover:bg-red-800 disabled:bg-red-300"
-              >
-                {deleteProvider.isPending ? "Deleting..." : "Delete"}
-              </button>
-            </div>
-          </div>
-        )}
-
         {pullingProvider && (
-          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
-            <div>
-              <div className="text-sm font-semibold text-slate-950">
-                Pull model for {pullingProvider.name}
+          <ProviderActionDialog
+            label={`Pull model for ${pullingProvider.name}`}
+            busy={pullModel.isPending}
+            returnFocusTo={actionTriggerRef.current}
+            fallbackFocusTo={addProviderButtonRef.current}
+            onClose={closePullPanel}
+          >
+            <div className="flex flex-col gap-4 p-4">
+              <div className="pr-12">
+                <div className="text-sm font-semibold text-slate-950">
+                  Pull model for {pullingProvider.name}
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  The provider handles pull timing and failure details.
+                </div>
               </div>
-              <div className="mt-1 text-xs text-slate-500">
-                The provider handles pull timing and failure details.
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    data-dialog-initial-focus
+                    aria-label="Model name"
+                    value={pullModelName}
+                    onChange={(event) => {
+                      setPullModelName(event.target.value);
+                      setPullValidationError(null);
+                      setPullOperationError(null);
+                    }}
+                    className="h-8 min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
+                    placeholder="model-name"
+                    disabled={pullingProviderId === pullingProvider.id}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handlePullModel()}
+                    disabled={pullingProviderId === pullingProvider.id}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-950 px-3 text-xs font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
+                  >
+                    <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                    {pullingProviderId === pullingProvider.id ? "Pulling..." : "Pull"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closePullPanel}
+                    disabled={pullingProviderId === pullingProvider.id}
+                    className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                {pullValidationError && (
+                  <div className="text-xs text-red-700">{pullValidationError}</div>
+                )}
+                {pullOperationError && (
+                  <div role="alert" className="text-xs text-red-700">{pullOperationError}</div>
+                )}
               </div>
             </div>
-            <div className="flex min-w-[280px] flex-1 flex-col gap-1 sm:max-w-xl">
-              <div className="flex flex-wrap gap-2">
-                <input
-                  value={pullModelName}
-                  onChange={(event) => {
-                    setPullModelName(event.target.value);
-                    setPullValidationError(null);
-                  }}
-                  className="h-8 min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
-                  placeholder="model-name"
-                  disabled={pullingProviderId === pullingProvider.id}
-                />
-                <button
-                  type="button"
-                  onClick={() => void handlePullModel()}
-                  disabled={pullingProviderId === pullingProvider.id}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-950 px-3 text-xs font-semibold text-white hover:bg-slate-800 disabled:bg-slate-400"
-                >
-                  <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                  {pullingProviderId === pullingProvider.id ? "Pulling..." : "Pull"}
-                </button>
-                <button
-                  type="button"
-                  onClick={closePullPanel}
-                  disabled={pullingProviderId === pullingProvider.id}
-                  className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60"
-                >
-                  Cancel
-                </button>
-              </div>
-              {pullValidationError && (
-                <div className="text-xs text-red-700">{pullValidationError}</div>
-              )}
-            </div>
-          </div>
+          </ProviderActionDialog>
         )}
 
         <div className="overflow-x-auto">
@@ -494,13 +503,7 @@ const ProviderConfigsPage: React.FC = () => {
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          setSuccessMessage(null);
-                          setActionMessage(null);
-                          setIsFormOpen(false);
-                          setPullingProvider(null);
-                          setDeletingProvider(provider);
-                        }}
+                        onClick={() => openDeleteConfirm(provider)}
                         className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 px-2 text-xs font-medium text-red-700 hover:bg-red-50"
                       >
                         <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -522,14 +525,84 @@ const ProviderConfigsPage: React.FC = () => {
       </section>
 
       {isFormOpen && (
-        <ProviderConfigForm
-          key={editingProvider ? `edit-${editingProvider.id}` : "create"}
-          provider={editingProvider}
-          isSubmitting={isSaving}
-          serverError={providerMutationError ? getErrorMessage(providerMutationError) : undefined}
-          onCancel={closeForm}
-          onSubmit={(input) => void handleSubmit(input)}
-        />
+        <ProviderActionDialog
+          label={editingProvider ? `Edit provider ${editingProvider.name}` : "Add provider"}
+          busy={isSaving}
+          wide
+          returnFocusTo={actionTriggerRef.current}
+          fallbackFocusTo={addProviderButtonRef.current}
+          onClose={closeForm}
+        >
+          <ProviderConfigForm
+            key={editingProvider ? `edit-${editingProvider.id}` : "create"}
+            provider={editingProvider}
+            isSubmitting={isSaving}
+            serverError={providerMutationError ? getErrorMessage(providerMutationError) : undefined}
+            onCancel={closeForm}
+            onSubmit={(input) => void handleSubmit(input)}
+          />
+        </ProviderActionDialog>
+      )}
+
+      {deletingProvider && (
+        <ProviderActionDialog
+          label={`Delete provider ${deletingProvider.name}`}
+          busy={deleteProvider.isPending}
+          returnFocusTo={actionTriggerRef.current}
+          fallbackFocusTo={addProviderButtonRef.current}
+          onClose={() => setDeletingProvider(null)}
+        >
+          <div className="space-y-4 p-4">
+            <h2 className="pr-12 text-base font-semibold">Delete {deletingProvider.name}?</h2>
+            <p className="text-sm text-slate-600">This removes the provider config from active use.</p>
+            {deleteProvider.error && (
+              <p role="alert" className="text-sm text-red-700">{getErrorMessage(deleteProvider.error)}</p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                data-dialog-initial-focus
+                onClick={() => setDeletingProvider(null)}
+                disabled={deleteProvider.isPending}
+                className="rounded-md border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDelete()}
+                disabled={deleteProvider.isPending}
+                className="rounded-md bg-red-700 px-3 py-2 text-sm font-semibold text-white hover:bg-red-800 disabled:opacity-60"
+              >
+                {deleteProvider.isPending ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </ProviderActionDialog>
+      )}
+
+      {notice && (
+        <div
+          role={notice.tone === "error" ? "alert" : "status"}
+          className={`fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] items-start gap-3 rounded-md border bg-white p-4 text-sm shadow-lg sm:max-w-md ${
+            notice.tone === "error" ? "border-red-200 text-red-800" : "border-emerald-200 text-emerald-800"
+          }`}
+        >
+          {notice.tone === "error" ? (
+            <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+          ) : (
+            <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+          )}
+          <span className="flex-1">{notice.message}</span>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            aria-label="Dismiss notice"
+            className="rounded p-0.5 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-cyan-700"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
       )}
     </div>
   );

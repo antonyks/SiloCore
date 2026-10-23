@@ -104,7 +104,9 @@ const AdminLayout: React.FC = () => {
   const inferenceNeedsReview = inferenceStatus === "review";
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900">
+    <div className={`min-h-screen bg-slate-100 text-slate-900 [--admin-sidebar-width:0px] ${
+      isSidebarCollapsed ? "md:[--admin-sidebar-width:4rem]" : "md:[--admin-sidebar-width:16rem]"
+    }`}>
       <div className="flex min-h-screen">
         <aside
           className={`sticky top-0 hidden h-screen shrink-0 border-r border-slate-200 bg-slate-950 text-slate-100 transition-all duration-200 md:flex md:flex-col ${

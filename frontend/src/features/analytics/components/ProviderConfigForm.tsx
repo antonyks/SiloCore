@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { KeyRound, Save, X } from "lucide-react";
+import { KeyRound, Save } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -241,7 +241,7 @@ const ProviderConfigForm: React.FC<ProviderConfigFormProps> = ({
       className="rounded-md border border-slate-200 bg-white"
       onSubmit={handleSubmit((values) => onSubmit(toProviderConfigInput(values, provider)))}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 py-3 pl-4 pr-14">
         <div>
           <h2 className="text-sm font-semibold text-slate-950">
             {provider ? "Edit Provider" : "Add Provider"}
@@ -250,14 +250,6 @@ const ProviderConfigForm: React.FC<ProviderConfigFormProps> = ({
             API keys are write-only. Custom header values are visible to all admins.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-        >
-          <X className="h-3.5 w-3.5" aria-hidden="true" />
-          Cancel
-        </button>
       </div>
 
       {serverError && (
@@ -269,7 +261,7 @@ const ProviderConfigForm: React.FC<ProviderConfigFormProps> = ({
       <div className="grid gap-4 px-4 py-4 lg:grid-cols-2">
         <label className="block">
           <span className="text-xs font-medium text-slate-700">Name</span>
-          <input className={inputClassName} {...register("name")} disabled={isSubmitting} />
+          <input data-dialog-initial-focus className={inputClassName} {...register("name")} disabled={isSubmitting} />
           <div className={errorClassName}>{errors.name?.message}</div>
         </label>
 
@@ -457,6 +449,14 @@ const ProviderConfigForm: React.FC<ProviderConfigFormProps> = ({
       </div>
 
       <div className="flex justify-end gap-2 border-t border-slate-200 px-4 py-3">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={isSubmitting}
+          className="inline-flex h-9 items-center rounded-md border border-slate-200 px-3 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+        >
+          Cancel
+        </button>
         <button
           type="submit"
           disabled={isSubmitting}
