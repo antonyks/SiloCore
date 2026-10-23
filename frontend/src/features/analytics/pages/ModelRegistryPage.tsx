@@ -2,8 +2,10 @@ import axios from "axios";
 import { AlertCircle, ArrowRight, CheckCircle2, RefreshCw, ServerCog } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useModelRegistry } from "../hooks/useModelRegistry";
+import { useProviderConfigs } from "../hooks/useProviderConfigs";
 import type {
   LlmListedModel,
+  LlmModelCapabilities,
   LlmModelListResult,
   LlmProviderModelListResult,
   LlmProviderModelListStatus,
@@ -57,6 +59,11 @@ const getModelProviderStatus = (
   providers: LlmProviderModelListResult[],
 ): LlmProviderModelListStatus | "unknown" => {
   return providers.find((provider) => provider.providerId === model.providerId)?.status || "unknown";
+};
+
+const isDefaultModel = (model: LlmListedModel, defaultModel?: string): boolean => {
+  if (!defaultModel) return false;
+  return model.modelId.toLowerCase() === defaultModel.toLowerCase();
 };
 
 const buildMetrics = (registry: LlmModelListResult | undefined): MetricItem[] => {
@@ -150,11 +157,77 @@ const ProviderLink: React.FC<{ label: string }> = ({ label }) => (
   </Link>
 );
 
+const ProviderNameLink: React.FC<{ name: string }> = ({ name }) => (
+  <Link
+    to="/admin/llm/providers"
+    className="inline-flex min-h-8 items-center rounded-md border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
+  >
+    {name}
+  </Link>
+);
+
+const modelCapabilityLabels: { key: keyof LlmModelCapabilities; label: string }[] = [
+  { key: "completion", label: "Completion" },
+  { key: "streaming", label: "Streaming" },
+  { key: "reasoning", label: "Reasoning" },
+  { key: "embeddings", label: "Embeddings" },
+  { key: "toolCalling", label: "Tool calling" },
+  { key: "structuredOutput", label: "Structured output" },
+  { key: "tokenCounting", label: "Token counting" },
+];
+
+const capabilityStateClass = (status: LlmModelCapabilities[keyof LlmModelCapabilities]) => {
+  if (status === "SUPPORTED") return "text-emerald-700";
+  if (status === "UNSUPPORTED") return "text-rose-700";
+  return "text-slate-500";
+};
+
+const ModelCapabilities: React.FC<{ capabilities: LlmModelCapabilities }> = ({ capabilities }) => {
+  const counts = { SUPPORTED: 0, UNSUPPORTED: 0, UNKNOWN: 0 };
+  for (const { key } of modelCapabilityLabels) {
+    counts[capabilities[key] ?? "UNKNOWN"] += 1;
+  }
+
+  const summary = [
+    counts.SUPPORTED && `${counts.SUPPORTED} supported`,
+    counts.UNSUPPORTED && `${counts.UNSUPPORTED} unsupported`,
+    counts.UNKNOWN && `${counts.UNKNOWN} unknown`,
+  ].filter(Boolean).join(" · ");
+
+  return (
+    <details className="text-xs text-slate-700">
+      <summary className="cursor-pointer rounded-sm font-medium hover:text-slate-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500">
+        {summary}
+      </summary>
+      <dl className="mt-2 w-60 max-w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-1">
+        {modelCapabilityLabels.map(({ key, label }) => {
+          const status = capabilities[key] ?? "UNKNOWN";
+          return (
+            <div key={key} className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 border-b border-slate-200 py-1.5 last:border-b-0">
+              <dt className="text-slate-600">{label}:</dt>
+              <dd className={`font-medium ${capabilityStateClass(status)}`}>
+                {formatStatusLabel(status)}
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+    </details>
+  );
+};
+
 const ModelRegistryPage: React.FC = () => {
   const modelsQuery = useModelRegistry();
+  const providersQuery = useProviderConfigs();
   const modelRegistry = modelsQuery.data;
   const metrics = buildMetrics(modelRegistry);
-  const isRefreshing = modelsQuery.isFetching && !modelsQuery.isLoading;
+  const isFetching = modelsQuery.isFetching || providersQuery.isFetching;
+  const isRefreshing = isFetching && !modelsQuery.isLoading;
+  const defaultModelsByProviderId = new Map(
+    providersQuery.isSuccess
+      ? providersQuery.data.map((provider) => [String(provider.id), provider.defaultModel] as const)
+      : [],
+  );
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
@@ -180,9 +253,9 @@ const ModelRegistryPage: React.FC = () => {
           </div>
           <button
             type="button"
-            onClick={() => void modelsQuery.refetch()}
+            onClick={() => void Promise.all([modelsQuery.refetch(), providersQuery.refetch()])}
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
-            disabled={modelsQuery.isFetching}
+            disabled={isFetching}
           >
             <RefreshCw
               className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`}
@@ -192,14 +265,14 @@ const ModelRegistryPage: React.FC = () => {
           </button>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-sm">
+          <table className="w-full min-w-[980px] text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-2 font-semibold">Model Name</th>
-                <th className="px-4 py-2 font-semibold">Provider</th>
                 <th className="px-4 py-2 font-semibold">Type</th>
                 <th className="px-4 py-2 font-semibold">Provider Status</th>
-                <th className="px-4 py-2 text-right font-semibold">Config</th>
+                <th className="px-4 py-2 font-semibold">Capabilities</th>
+                <th className="px-4 py-2 font-semibold">Provider</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -209,16 +282,28 @@ const ModelRegistryPage: React.FC = () => {
 
                 return (
                   <tr key={`${model.providerId}-${model.modelId}`} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium text-slate-900">{model.modelName}</td>
-                    <td className="px-4 py-3 text-slate-700">{model.providerName}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap items-center gap-2 font-medium text-slate-900">
+                        <span>{model.modelName}</span>
+                        {isDefaultModel(model, defaultModelsByProviderId.get(model.providerId)) && (
+                          <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-xs font-medium text-cyan-800">
+                            Default
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 break-all text-xs text-slate-500">ID: {model.modelId}</div>
+                    </td>
                     <td className="px-4 py-3 text-xs text-slate-500">
                       {formatProviderType(model.providerType)}
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={providerStatus} />
                     </td>
-                    <td className="px-4 py-3 text-right">
-                      <ProviderLink label="Manage" />
+                    <td className="px-4 py-3">
+                      <ModelCapabilities capabilities={model.capabilities} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <ProviderNameLink name={model.providerName} />
                     </td>
                   </tr>
                 );
@@ -231,6 +316,11 @@ const ModelRegistryPage: React.FC = () => {
             message={getErrorMessage(modelsQuery.error)}
             onRetry={() => void modelsQuery.refetch()}
           />
+        )}
+        {providersQuery.isError && (
+          <div role="status" className="border-t border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Default model status is unavailable. Refresh to try again.
+          </div>
         )}
         {!modelsQuery.isLoading && !modelsQuery.isError && modelRegistry?.models.length === 0 && (
           <EmptyState message="No models were returned by enabled providers." />
@@ -256,14 +346,15 @@ const ModelRegistryPage: React.FC = () => {
                 <th className="px-4 py-2 font-semibold">Status</th>
                 <th className="px-4 py-2 font-semibold">Models</th>
                 <th className="px-4 py-2 font-semibold">Error</th>
-                <th className="px-4 py-2 text-right font-semibold">Config</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {modelsQuery.isLoading && <LoadingRows rows={4} columns={6} />}
+              {modelsQuery.isLoading && <LoadingRows rows={4} columns={5} />}
               {modelRegistry?.providers.map((provider) => (
                 <tr key={provider.providerId} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 font-medium text-slate-900">{provider.providerName}</td>
+                  <td className="px-4 py-3">
+                    <ProviderNameLink name={provider.providerName} />
+                  </td>
                   <td className="px-4 py-3 text-xs text-slate-500">
                     {formatProviderType(provider.providerType)}
                   </td>
@@ -277,9 +368,6 @@ const ModelRegistryPage: React.FC = () => {
                     ) : (
                       <span className="text-slate-400">None</span>
                     )}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <ProviderLink label="Manage" />
                   </td>
                 </tr>
               ))}
