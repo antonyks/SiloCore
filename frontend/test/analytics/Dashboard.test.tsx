@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Dashboard from '../../src/features/analytics/pages/Dashboard';
@@ -177,6 +177,121 @@ function registerDashboardHandlers(onSummaryRequest?: (url: URL) => void) {
 describe('Dashboard analytics summary', () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('shows at most ten models and users with links to their full lists', async () => {
+    registerDashboardHandlers();
+    const userRequests: URL[] = [];
+    server.use(
+      http.get(`${API_BASE_URL}/llm/models`, () =>
+        HttpResponse.json({
+          data: {
+            models: Array.from({ length: 12 }, (_, index) => ({
+              providerId: '1',
+              providerName: 'Analytics Provider',
+              providerType: 'openai-compatible',
+              modelId: `preview-model-${index + 1}`,
+              modelName: `Preview Model ${index + 1}`,
+            })),
+            providers: [{
+              providerId: '1',
+              providerName: 'Analytics Provider',
+              providerType: 'openai-compatible',
+              status: 'success',
+              modelCount: 12,
+              capabilities,
+            }],
+          },
+        }),
+      ),
+      http.get(`${API_BASE_URL}/users`, ({ request }) => {
+        userRequests.push(new URL(request.url));
+        return HttpResponse.json({
+          data: Array.from({ length: 12 }, (_, index) => ({
+            id: index + 1,
+            name: `Preview User ${index + 1}`,
+            email: `preview${index + 1}@example.com`,
+            role: 'USER',
+            status: 'ACTIVE',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          })),
+        });
+      }),
+    );
+
+    renderWithProviders(<Dashboard />, {
+      initialEntries: ['/analytics/dashboard'],
+      routePath: '/analytics/dashboard',
+    });
+
+    expect(await screen.findByText('Preview Model 10')).toBeInTheDocument();
+    expect(await screen.findByText('Preview User 10')).toBeInTheDocument();
+    const modelCard = screen.getByRole('heading', { name: 'Model Registry' }).closest('section');
+    expect(modelCard).not.toBeNull();
+    const modelTable = within(modelCard!).getByRole('table');
+    expect(within(modelTable).queryByRole('columnheader', { name: 'Action' })).not.toBeInTheDocument();
+    expect(within(modelTable).getAllByRole('link', { name: 'Analytics Provider' })).toHaveLength(10);
+    expect(within(modelTable).getAllByRole('link', { name: 'Analytics Provider' })[0]).toHaveAttribute('href', '/admin/llm/providers');
+    expect(screen.queryByText('Preview Model 11')).not.toBeInTheDocument();
+    expect(screen.queryByText('Preview User 11')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View all models' })).toHaveAttribute('href', '/admin/llm/models');
+    expect(screen.getByRole('link', { name: 'View all users' })).toHaveAttribute('href', '/admin/users');
+    expect(userRequests[0]?.searchParams.get('take')).toBe('10');
+  });
+
+  it('refreshes the user preview', async () => {
+    registerDashboardHandlers();
+    let userRequestCount = 0;
+    server.use(
+      http.get(`${API_BASE_URL}/users`, () => {
+        userRequestCount += 1;
+        return HttpResponse.json({
+          data: [{
+            id: 1,
+            name: userRequestCount === 1 ? 'Original User' : 'Updated User',
+            email: 'user@example.com',
+            role: 'USER',
+            status: 'ACTIVE',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          }],
+        });
+      }),
+    );
+
+    renderWithProviders(<Dashboard />, {
+      initialEntries: ['/analytics/dashboard'],
+      routePath: '/analytics/dashboard',
+    });
+
+    expect(await screen.findByText('Original User')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh user preview' }));
+
+    expect(await screen.findByText('Updated User')).toBeInTheDocument();
+    expect(screen.queryByText('Original User')).not.toBeInTheDocument();
+    expect(userRequestCount).toBe(2);
+  });
+
+  it('links each dashboard shortcut card to its admin page', async () => {
+    registerDashboardHandlers();
+
+    renderWithProviders(<Dashboard />, {
+      initialEntries: ['/analytics/dashboard'],
+      routePath: '/analytics/dashboard',
+    });
+
+    expect(await screen.findByText('Generations')).toBeInTheDocument();
+    const shortcuts = [
+      ['Provider Configs', '/admin/llm/providers'],
+      ['User Directory', '/admin/users'],
+      ['Access & Bans', '/admin/users/access'],
+    ] as const;
+
+    for (const [label, destination] of shortcuts) {
+      const link = screen.getByRole('link', { name: new RegExp(`^${label} `) });
+      expect(link).toHaveAttribute('href', destination);
+      link.focus();
+      expect(link).toHaveFocus();
+    }
   });
 
   it('renders operational aggregates and sends optional date-window params', async () => {

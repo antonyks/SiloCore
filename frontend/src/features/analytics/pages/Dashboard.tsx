@@ -5,7 +5,6 @@ import {
   Ban,
   CalendarDays,
   CheckCircle2,
-  Download,
   KeyRound,
   Plus,
   RefreshCw,
@@ -14,7 +13,6 @@ import {
   TestTube2,
 } from "lucide-react";
 import { useAdminDashboard } from "../hooks/useAdminDashboard";
-import { getModelProviderCapabilities } from "../lib/providerCapabilities";
 import type {
   AdminAnalyticsSummary,
   AdminUserPreview,
@@ -30,6 +28,8 @@ interface MetricItem {
   value: string;
   detail: string;
 }
+
+const DASHBOARD_PREVIEW_LIMIT = 10;
 
 const statusClass = (status: string) => {
   const normalizedStatus = status.toLowerCase();
@@ -490,45 +490,54 @@ const Dashboard: React.FC = () => {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
         <section className="rounded-md border border-slate-200 bg-white">
-          <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
             <div>
-              <h2 className="text-sm font-semibold text-slate-950">Model Registry & Pull Jobs</h2>
+              <h2 className="text-sm font-semibold text-slate-950">Model Registry</h2>
               <p className="text-xs text-slate-500">Read-only provider-qualified model inventory.</p>
             </div>
-            <button
-              type="button"
-              onClick={() => void modelsQuery.refetch()}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-            >
-              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-              Refresh
-            </button>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Link
+                to="/admin/llm/models"
+                className="inline-flex h-8 items-center rounded-md border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                View all models
+              </Link>
+              <button
+                type="button"
+                onClick={() => void modelsQuery.refetch()}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                Refresh
+              </button>
+            </div>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left text-sm">
+            <table className="w-full min-w-[560px] text-left text-sm">
               <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-2 font-semibold">Model Name</th>
                   <th className="px-4 py-2 font-semibold">Provider</th>
                   <th className="px-4 py-2 font-semibold">Type</th>
                   <th className="px-4 py-2 font-semibold">Status</th>
-                  <th className="px-4 py-2 text-right font-semibold">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {modelsQuery.isLoading && <LoadingRows rows={3} columns={5} />}
-                {modelRegistry?.models.map((model) => {
+                {modelsQuery.isLoading && <LoadingRows rows={3} columns={4} />}
+                {modelRegistry?.models.slice(0, DASHBOARD_PREVIEW_LIMIT).map((model) => {
                   const providerStatus = getModelProviderStatus(model, modelRegistry.providers);
-                  const providerCapabilities = getModelProviderCapabilities(
-                    model.providerId,
-                    modelRegistry.providers,
-                  );
-                  const actionLabel = providerCapabilities.modelPulling ? "Pull" : "Manage";
 
                   return (
                     <tr key={`${model.providerId}-${model.modelId}`} className="hover:bg-slate-50">
                       <td className="px-4 py-3 font-medium text-slate-900">{model.modelName}</td>
-                      <td className="px-4 py-3 text-slate-700">{model.providerName}</td>
+                      <td className="px-4 py-3 text-slate-700">
+                        <Link
+                          to="/admin/llm/providers"
+                          className="font-medium text-cyan-700 underline-offset-2 hover:underline focus-visible:underline"
+                        >
+                          {model.providerName}
+                        </Link>
+                      </td>
                       <td className="px-4 py-3 text-xs text-slate-500">{model.providerType}</td>
                       <td className="px-4 py-3">
                         <span
@@ -536,19 +545,6 @@ const Dashboard: React.FC = () => {
                         >
                           {formatStatusLabel(providerStatus)}
                         </span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <Link
-                          to="/admin/llm/providers"
-                          className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs text-slate-700 hover:bg-slate-100"
-                        >
-                          {providerCapabilities.modelPulling ? (
-                            <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                          ) : (
-                            <ServerCog className="h-3.5 w-3.5" aria-hidden="true" />
-                          )}
-                          {actionLabel}
-                        </Link>
                       </td>
                     </tr>
                   );
@@ -568,12 +564,32 @@ const Dashboard: React.FC = () => {
         </section>
 
         <section className="rounded-md border border-slate-200 bg-white">
-          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
             <div>
               <h2 className="text-sm font-semibold text-slate-950">User Governance</h2>
               <p className="text-xs text-slate-500">Read-only user directory preview.</p>
             </div>
-            <ShieldCheck className="h-4 w-4 text-emerald-600" aria-hidden="true" />
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Link
+                to="/admin/users"
+                className="inline-flex h-8 items-center rounded-md border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                View all users
+              </Link>
+              <button
+                type="button"
+                onClick={() => void usersQuery.refetch()}
+                disabled={usersQuery.isFetching}
+                aria-label="Refresh user preview"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+              >
+                <RefreshCw
+                  className={`h-3.5 w-3.5 ${usersQuery.isFetching ? "animate-spin" : ""}`}
+                  aria-hidden="true"
+                />
+                Refresh
+              </button>
+            </div>
           </div>
           <div className="divide-y divide-slate-100">
             {usersQuery.isLoading &&
@@ -586,7 +602,7 @@ const Dashboard: React.FC = () => {
                   <div className="h-6 w-16 rounded-full bg-slate-200" />
                 </div>
               ))}
-            {users?.map((user) => (
+            {users?.slice(0, DASHBOARD_PREVIEW_LIMIT).map((user) => (
               <div key={user.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-3">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium text-slate-900">{user.name}</div>
@@ -636,29 +652,36 @@ const Dashboard: React.FC = () => {
           {
             label: "Provider Configs",
             icon: ServerCog,
-            text: "Loaded from existing admin provider APIs; manage provider settings from the provider config page.",
+            to: "/admin/llm/providers",
+            text: "Configure providers and manage their connection settings.",
           },
           {
             label: "User Directory",
             icon: ShieldCheck,
-            text: "Read-only user preview preserves the privacy rule and does not fetch chat contents.",
+            to: "/admin/users",
+            text: "Find users and manage their account details.",
           },
           {
             label: "Access & Bans",
             icon: Ban,
-            text: "Ban, reactivate, and soft-delete controls are available in the access controls page.",
+            to: "/admin/users/access",
+            text: "Ban, reactivate, or remove user accounts.",
           },
         ].map((item) => {
           const Icon = item.icon;
 
           return (
-            <div key={item.label} className="rounded-md border border-slate-200 bg-white px-4 py-3">
+            <Link
+              key={item.label}
+              to={item.to}
+              className="rounded-md border border-slate-200 bg-white px-4 py-3 transition-colors hover:border-cyan-300 hover:bg-cyan-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-700"
+            >
               <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
                 <Icon className="h-4 w-4 text-cyan-700" aria-hidden="true" />
                 {item.label}
               </div>
               <p className="mt-1 text-xs leading-5 text-slate-500">{item.text}</p>
-            </div>
+            </Link>
           );
         })}
       </section>

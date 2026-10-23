@@ -8,7 +8,7 @@ import type {
 } from "../types";
 import { providerConfigService } from "./providerConfigService";
 
-const USER_PREVIEW_LIMIT = 8;
+const USER_PREVIEW_LIMIT = 10;
 
 export interface AnalyticsSummaryParams {
   from?: string;
