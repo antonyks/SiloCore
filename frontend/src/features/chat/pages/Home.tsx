@@ -1138,10 +1138,10 @@ const Home: React.FC = () => {
     return (
       <div
         key={session.id}
-        className={`relative rounded-md border bg-white transition ${
+        className={`relative rounded-md border transition ${
           isSelected
-            ? "border-cyan-300 shadow-sm ring-1 ring-cyan-100"
-            : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+            ? "border-cyan-300 border-l-4 border-l-cyan-600 bg-cyan-50 shadow-sm"
+            : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
         } ${isEditing ? "" : "cursor-pointer"}`}
       >
         {isEditing ? (
@@ -1182,11 +1182,15 @@ const Home: React.FC = () => {
               onClick={() => selectSession(session.id)}
               className="block w-full cursor-pointer rounded-md p-2 pr-10 text-left focus:outline-none focus:ring-2 focus:ring-cyan-100"
               aria-label={`Open ${session.title}`}
+              aria-current={isSelected ? "true" : undefined}
             >
-              <span title={session.title} className="block truncate text-sm font-medium text-slate-900">
+              <span
+                title={session.title}
+                className={`block truncate text-sm font-medium ${isSelected ? "text-cyan-950" : "text-slate-900"}`}
+              >
                 {session.title}
               </span>
-              <span className="mt-1 block text-xs text-slate-500">
+              <span className={`mt-1 block text-xs ${isSelected ? "text-cyan-800" : "text-slate-500"}`}>
                 Updated {formatSessionDate(session.updatedAt)}
               </span>
             </button>

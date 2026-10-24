@@ -34,6 +34,7 @@ export const useChatSessions = (
       : [...chatSessionQueryKeys.all, "workspace", "none", "list", params],
     queryFn: () => chatService.getSessions(params),
     enabled: workspaceId !== null && enabled,
+    refetchOnWindowFocus: true,
   });
 };
 

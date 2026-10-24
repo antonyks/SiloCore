@@ -117,6 +117,35 @@ describe('Chat ownership integration', () => {
     });
   });
 
+  it('moves an older session to the top when messages are saved', async () => {
+    const owner = await createIntegrationTestUser({ email: 'session-activity-owner@example.com' });
+    const { workspace } = await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(owner.id);
+    const context = createChatWorkspaceContext({ workspace, actorUserId: owner.id });
+    const older = await ChatService.createSession({ title: 'Older chat', userId: owner.id }, context);
+    const newer = await ChatService.createSession({ title: 'Newer chat', userId: owner.id }, context);
+
+    await integrationPrisma.chatSession.update({
+      where: { id: older.id },
+      data: { updatedAt: new Date('2020-01-01T00:00:00.000Z') },
+    });
+    await integrationPrisma.chatSession.update({
+      where: { id: newer.id },
+      data: { updatedAt: new Date('2021-01-01T00:00:00.000Z') },
+    });
+    const list = () => ChatService.getWorkspaceSessions({ orderBy: 'updatedAt', orderDirection: 'desc' }, context);
+    expect((await list()).map((session) => session.id)).toEqual([newer.id, older.id]);
+
+    await ChatService.createMessage({ sessionId: older.id, content: 'New prompt', author: MessageAuthor.USER }, context);
+    const afterPrompt = await list();
+    expect(afterPrompt.map((session) => session.id)).toEqual([older.id, newer.id]);
+    expect(afterPrompt[0].updatedAt.getTime()).toBeGreaterThan(afterPrompt[1].updatedAt.getTime());
+
+    await ChatService.createMessage({ sessionId: older.id, content: 'Saved answer', author: MessageAuthor.ASSISTANT }, context);
+    const afterAnswer = await list();
+    expect(afterAnswer[0].id).toBe(older.id);
+    expect(afterAnswer[0].updatedAt.getTime()).toBeGreaterThanOrEqual(afterPrompt[0].updatedAt.getTime());
+  });
+
   it('isolates sessions across workspaces owned by the same user', async () => {
     const owner = await createIntegrationTestUser({ email: 'same-owner-workspaces@example.com' });
     const { workspace: personalWorkspace } =

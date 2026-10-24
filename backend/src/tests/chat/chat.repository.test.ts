@@ -125,9 +125,7 @@ describe('ChatRepository', () => {
         where: { workspaceId: 25 },
         skip: 0,
         take: 10,
-        orderBy: {
-          createdAt: 'desc',
-        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: SelectedChatSessionFields,
       });
 
@@ -143,7 +141,7 @@ describe('ChatRepository', () => {
 
       expect(mockPrisma.chatSession.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         })
       );
     });
@@ -161,7 +159,7 @@ describe('ChatRepository', () => {
 
       expect(mockPrisma.chatSession.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          orderBy: { updatedAt: 'asc' },
+          orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
         })
       );
     });
@@ -292,6 +290,11 @@ describe('ChatRepository', () => {
         data: messageData,
         select: SelectedChatMessageFields,
       });
+      expect(mockPrisma.chatSession.update).toHaveBeenCalledWith({
+        where: { id: messageData.sessionId },
+        data: { updatedAt: expect.any(Date) },
+      });
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
 
       expect(result).toEqual(mockMessage);
     });
@@ -318,6 +321,10 @@ describe('ChatRepository', () => {
 
       expect(result).toEqual(mockMessage);
       expect(result?.metadata).toBeNull();
+      expect(mockPrisma.chatSession.update).toHaveBeenCalledWith({
+        where: { id: messageData.sessionId },
+        data: { updatedAt: expect.any(Date) },
+      });
     });
 
     it('should support SYSTEM author type', async () => {
@@ -341,6 +348,23 @@ describe('ChatRepository', () => {
       const result = await ChatRepository.createMessage(messageData);
 
       expect(result?.author).toBe(MessageAuthor.SYSTEM);
+      expect(mockPrisma.chatSession.update).toHaveBeenCalledWith({
+        where: { id: messageData.sessionId },
+        data: { updatedAt: expect.any(Date) },
+      });
+    });
+
+    it('does not touch the session when message creation fails', async () => {
+      const error = new Error('Message write failed');
+      mockPrisma.chatMessage.create.mockRejectedValue(error);
+
+      await expect(ChatRepository.createMessage({
+        content: 'Not saved',
+        author: MessageAuthor.USER,
+        sessionId: 1,
+      })).rejects.toThrow(error);
+
+      expect(mockPrisma.chatSession.update).not.toHaveBeenCalled();
     });
   });
 

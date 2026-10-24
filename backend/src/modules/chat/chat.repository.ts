@@ -1,6 +1,6 @@
 import { 
   ChatSessionModel, 
-  ChatMessageModel, 
+  ChatMessageModel,
   SelectedChatSession, 
   ChatSessionWithMessages, 
   ChatSessionWithMessagesFields,
@@ -44,9 +44,10 @@ export const ChatRepository = {
       where: { workspaceId },
       skip,
       take,
-      orderBy: {
-        [orderBy]: orderDirection
-      },
+      orderBy: [
+        { [orderBy]: orderDirection },
+        { id: orderDirection },
+      ],
       select: SelectedChatSessionFields
     });
   },
@@ -108,9 +109,16 @@ export const ChatRepository = {
   },
 
   async createMessage(data: IChatMessageCreateInput): Promise<SelectedChatMessage> {
-    return ChatMessageModel.create({
-      data:data,
-      select:SelectedChatMessageFields
+    return prisma.$transaction(async (tx) => {
+      const message = await tx.chatMessage.create({
+        data,
+        select: SelectedChatMessageFields,
+      });
+      await tx.chatSession.update({
+        where: { id: data.sessionId },
+        data: { updatedAt: new Date() },
+      });
+      return message;
     });
   },
 

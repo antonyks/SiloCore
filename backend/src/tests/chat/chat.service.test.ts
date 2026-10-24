@@ -267,7 +267,7 @@ describe('ChatService', () => {
         where: { workspaceId: params.workspaceId },
         skip: params.skip,
         take: params.take,
-        orderBy: { [params.orderBy]: params.orderDirection },
+        orderBy: [{ [params.orderBy]: params.orderDirection }, { id: params.orderDirection }],
         select: SelectedChatSessionFields,
       });
     });
