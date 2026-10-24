@@ -4,14 +4,14 @@ import {
   Ban,
   CheckCircle2,
   RefreshCw,
-  RotateCcw,
   Search,
-  ShieldAlert,
   Trash2,
+  UserCheck,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../../auth/hooks/useAuth";
+import AdminActionDialog from "../components/AdminActionDialog";
 import {
   useActivateAdminUser,
   useAdminUsers,
@@ -28,6 +28,8 @@ interface ActionMessage {
   message: string;
   tone: "success" | "error";
 }
+
+type AccessAction = "ban" | "activate" | "delete";
 
 const statusClass = (status: string) => {
   const normalizedStatus = status.toLowerCase();
@@ -103,12 +105,20 @@ const UserAccessPage: React.FC = () => {
   const [searchInput, setSearchInput] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [pageIndex, setPageIndex] = useState(0);
-  const [confirmingDeleteUser, setConfirmingDeleteUser] = useState<AdminUser | null>(null);
+  const [confirmingAction, setConfirmingAction] = useState<{
+    user: AdminUser;
+    action: AccessAction;
+  } | null>(null);
+  const [confirmationError, setConfirmationError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<ActionMessage | null>(null);
   const [activeMutation, setActiveMutation] = useState<{
     userId: number;
-    action: "ban" | "activate" | "delete";
+    action: AccessAction;
   } | null>(null);
+  const actionTriggerRef = useRef<HTMLElement | null>(null);
+  const refreshButtonRef = useRef<HTMLButtonElement>(null);
+  const actionRequestInFlightRef = useRef(false);
+  const focusRefreshAfterActionRef = useRef(false);
 
   const listParams = useMemo<AdminUserListParams>(
     () => ({
@@ -127,6 +137,13 @@ const UserAccessPage: React.FC = () => {
   const visibleUsers = fetchedUsers.slice(0, PAGE_SIZE);
   const hasNextPage = fetchedUsers.length > PAGE_SIZE;
   const hasPreviousPage = pageIndex > 0;
+
+  useEffect(() => {
+    if (focusRefreshAfterActionRef.current && !confirmingAction && !activeMutation) {
+      refreshButtonRef.current?.focus();
+      focusRefreshAfterActionRef.current = false;
+    }
+  }, [confirmingAction, activeMutation]);
 
   const getIsCurrentUser = (targetUser: AdminUser) => {
     if (!currentUser) {
@@ -148,11 +165,28 @@ const UserAccessPage: React.FC = () => {
     setPageIndex(0);
   };
 
+  const openConfirmation = (user: AdminUser, action: AccessAction) => {
+    if (activeMutation) return;
+    actionTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    setConfirmationError(null);
+    setConfirmingAction({ user, action });
+  };
+
+  const closeConfirmation = () => {
+    setConfirmingAction(null);
+    setConfirmationError(null);
+  };
+
   const handleStatusAction = async (
     targetUser: AdminUser,
-    action: "ban" | "activate" | "delete",
+    action: AccessAction,
   ) => {
+    if (actionRequestInFlightRef.current) return;
+    actionRequestInFlightRef.current = true;
     setActionMessage(null);
+    setConfirmationError(null);
     setActiveMutation({ userId: targetUser.id, action });
 
     try {
@@ -184,24 +218,25 @@ const UserAccessPage: React.FC = () => {
           message: "User was deleted.",
           tone: "success",
         });
-        setConfirmingDeleteUser(null);
       }
+      focusRefreshAfterActionRef.current = true;
+      closeConfirmation();
     } catch (error) {
-      setActionMessage({
-        userId: targetUser.id,
-        userName: targetUser.name,
-        message: getErrorMessage(error),
-        tone: "error",
-      });
+      setConfirmationError(getErrorMessage(error));
     } finally {
+      actionRequestInFlightRef.current = false;
       setActiveMutation(null);
     }
   };
 
   const getRowActionInProgress = (
     targetUser: AdminUser,
-    action: "ban" | "activate" | "delete",
+    action: AccessAction,
   ) => activeMutation?.userId === targetUser.id && activeMutation.action === action;
+
+  const confirmationBusy = confirmingAction
+    ? getRowActionInProgress(confirmingAction.user, confirmingAction.action)
+    : false;
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
@@ -214,6 +249,7 @@ const UserAccessPage: React.FC = () => {
             </p>
           </div>
           <button
+            ref={refreshButtonRef}
             type="button"
             onClick={() => void usersQuery.refetch()}
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
@@ -293,36 +329,6 @@ const UserAccessPage: React.FC = () => {
           </div>
         )}
 
-        {confirmingDeleteUser && (
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            <span className="inline-flex items-center gap-2">
-              <ShieldAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
-              Delete <span className="font-semibold">{confirmingDeleteUser.name}</span>? The
-              account will be soft-deleted and removed from active user lists.
-            </span>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setConfirmingDeleteUser(null)}
-                disabled={getRowActionInProgress(confirmingDeleteUser, "delete")}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-amber-200 bg-white px-2.5 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-60"
-              >
-                <X className="h-3.5 w-3.5" aria-hidden="true" />
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleStatusAction(confirmingDeleteUser, "delete")}
-                disabled={getRowActionInProgress(confirmingDeleteUser, "delete")}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-red-700 px-2.5 text-xs font-semibold text-white hover:bg-red-800 disabled:bg-red-300"
-              >
-                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                {getRowActionInProgress(confirmingDeleteUser, "delete") ? "Deleting..." : "Delete"}
-              </button>
-            </div>
-          </div>
-        )}
-
         <div className="overflow-x-auto">
           <table className="w-full min-w-[980px] border-collapse text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
@@ -339,7 +345,6 @@ const UserAccessPage: React.FC = () => {
               {usersQuery.isLoading && <LoadingRows />}
               {visibleUsers.map((targetUser) => {
                 const isCurrentUser = getIsCurrentUser(targetUser);
-                const isRowBusy = activeMutation?.userId === targetUser.id;
                 const canBan = targetUser.status === "ACTIVE" && !isCurrentUser;
                 const canActivate = targetUser.status === "BANNED" && !isCurrentUser;
                 const canDelete = !isCurrentUser;
@@ -358,8 +363,8 @@ const UserAccessPage: React.FC = () => {
                         {canBan && (
                           <button
                             type="button"
-                            onClick={() => void handleStatusAction(targetUser, "ban")}
-                            disabled={isRowBusy}
+                            onClick={() => openConfirmation(targetUser, "ban")}
+                            disabled={Boolean(activeMutation)}
                             className="inline-flex h-7 items-center gap-1 rounded-md border border-red-200 px-2 text-xs text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-red-300"
                           >
                             <Ban className="h-3.5 w-3.5" aria-hidden="true" />
@@ -369,11 +374,11 @@ const UserAccessPage: React.FC = () => {
                         {canActivate && (
                           <button
                             type="button"
-                            onClick={() => void handleStatusAction(targetUser, "activate")}
-                            disabled={isRowBusy}
+                            onClick={() => openConfirmation(targetUser, "activate")}
+                            disabled={Boolean(activeMutation)}
                             className="inline-flex h-7 items-center gap-1 rounded-md border border-emerald-200 px-2 text-xs text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:text-emerald-300"
                           >
-                            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                            <UserCheck className="h-3.5 w-3.5" aria-hidden="true" />
                             {getRowActionInProgress(targetUser, "activate")
                               ? "Activating..."
                               : "Activate"}
@@ -382,12 +387,12 @@ const UserAccessPage: React.FC = () => {
                         {canDelete && (
                           <button
                             type="button"
-                            onClick={() => setConfirmingDeleteUser(targetUser)}
-                            disabled={isRowBusy}
+                            onClick={() => openConfirmation(targetUser, "delete")}
+                            disabled={Boolean(activeMutation)}
                             className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
                           >
                             <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                            Delete
+                            {getRowActionInProgress(targetUser, "delete") ? "Deleting..." : "Delete"}
                           </button>
                         )}
                         {isCurrentUser && (
@@ -440,6 +445,69 @@ const UserAccessPage: React.FC = () => {
           </div>
         </div>
       </section>
+
+      {confirmingAction && (
+        <AdminActionDialog
+          label={`${confirmingAction.action === "ban" ? "Ban" : confirmingAction.action === "activate" ? "Activate" : "Delete"} user ${confirmingAction.user.name}`}
+          busy={confirmationBusy}
+          returnFocusRef={actionTriggerRef}
+          fallbackFocusRef={refreshButtonRef}
+          onClose={closeConfirmation}
+        >
+          <div className="border-b border-slate-200 px-4 py-3 pr-12">
+            <h2 data-dialog-initial-focus tabIndex={-1} className="text-sm font-semibold text-slate-950">
+              {confirmingAction.action === "ban" ? "Ban user" : confirmingAction.action === "activate" ? "Reactivate user" : "Delete user"}
+            </h2>
+          </div>
+          <div className="space-y-3 px-4 py-4 text-sm text-slate-700">
+            <p>
+              {confirmingAction.action === "ban" ? "Ban" : confirmingAction.action === "activate" ? "Reactivate" : "Delete"}{" "}
+              <strong className="font-semibold text-slate-950">{confirmingAction.user.name}</strong>{" "}
+              ({confirmingAction.user.email})?
+            </p>
+            <p>
+              {confirmingAction.action === "ban"
+                ? "This user will lose access until reactivated."
+                : confirmingAction.action === "activate"
+                  ? "This user will regain access."
+                  : "The account will be soft-deleted and removed from active user lists."}
+            </p>
+            {confirmationError && (
+              <div role="alert" className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-800">
+                <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{confirmationError}</span>
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 border-t border-slate-200 px-4 py-3">
+            <button
+              type="button"
+              onClick={closeConfirmation}
+              disabled={confirmationBusy}
+              className="inline-flex h-9 items-center rounded-md border border-slate-200 px-3 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleStatusAction(confirmingAction.user, confirmingAction.action)}
+              disabled={confirmationBusy}
+              className={`inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 ${confirmingAction.action === "activate" ? "bg-emerald-700 hover:bg-emerald-800" : "bg-red-700 hover:bg-red-800"}`}
+            >
+              {confirmingAction.action === "ban" ? (
+                <Ban className="h-4 w-4" aria-hidden="true" />
+              ) : confirmingAction.action === "activate" ? (
+                <UserCheck className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+              )}
+              {confirmationBusy
+                ? confirmingAction.action === "ban" ? "Banning..." : confirmingAction.action === "activate" ? "Activating..." : "Deleting..."
+                : confirmingAction.action === "ban" ? "Confirm Ban" : confirmingAction.action === "activate" ? "Confirm Reactivate" : "Confirm Delete"}
+            </button>
+          </div>
+        </AdminActionDialog>
+      )}
     </div>
   );
 };
