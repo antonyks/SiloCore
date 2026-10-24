@@ -415,7 +415,7 @@ describe("frontend extension composition", () => {
       await screen.findByRole("button", { name: "Count 25/0" }),
     ).toBeInTheDocument();
   });
-  it("adds admin navigation in both layouts and uses route titles for breadcrumbs", async () => {
+  it("adds admin navigation in both layouts and uses route titles for page headings", async () => {
     seed("ADMIN");
     installApi();
     const definition: FrontendExtensionDefinition = {

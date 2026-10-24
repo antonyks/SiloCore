@@ -83,6 +83,8 @@ const AdminLayout: React.FC = () => {
   );
   const activeRoute = extensionRoutes.find((route) => route.path === location.pathname)
     || getRouteLabel(location.pathname);
+  const isDashboard = location.pathname === "/analytics/dashboard";
+  const showBreadcrumbSection = !["Overview", "Admin", "Console"].includes(activeRoute.section);
   const navigationGroups: typeof navGroups = [
     ...navGroups,
     ...extensions.flatMap((extension) =>
@@ -113,7 +115,7 @@ const AdminLayout: React.FC = () => {
             isSidebarCollapsed ? "w-16" : "w-64"
           }`}
         >
-          <div className="flex h-14 items-center gap-3 border-b border-slate-800 px-3">
+          <div className="flex h-16 items-center gap-3 border-b border-slate-800 px-3">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-cyan-500 text-slate-950">
               <Gauge className="h-4 w-4" aria-hidden="true" />
             </div>
@@ -196,24 +198,32 @@ const AdminLayout: React.FC = () => {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 flex min-h-14 items-center gap-3 border-b border-slate-200 bg-white/95 px-4 backdrop-blur">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 text-xs text-slate-500">
-                <span>Home</span>
-                <span>/</span>
-                <span>Admin</span>
-                <span>/</span>
-                <span className="truncate">{activeRoute.section}</span>
-                <span>/</span>
-                <span className="truncate text-slate-700">{activeRoute.label}</span>
-              </div>
-              <h1 className="truncate text-base font-semibold text-slate-950">{activeRoute.label}</h1>
+          <header className="sticky top-0 z-20 flex min-h-16 items-center gap-3 border-b border-slate-200 bg-white/95 px-4 py-2 backdrop-blur">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[11px] font-medium leading-4 text-slate-500">
+                {isDashboard ? (
+                  <span>Admin</span>
+                ) : (
+                  <Link to="/analytics/dashboard" className="shrink-0 rounded-sm hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-cyan-700">
+                    Admin
+                  </Link>
+                )}
+                {showBreadcrumbSection && (
+                  <>
+                    <span aria-hidden="true" className="shrink-0 text-slate-300">/</span>
+                    <span className="min-w-0 truncate" title={activeRoute.section}>{activeRoute.section}</span>
+                  </>
+                )}
+              </nav>
+              <h1 className="truncate text-base font-semibold leading-tight text-slate-950 sm:text-lg" title={activeRoute.label}>{activeRoute.label}</h1>
             </div>
-            <div className="hidden items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-800 sm:flex">
+            <div className="hidden shrink-0 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-800 lg:flex">
               <Bell className="h-3.5 w-3.5" aria-hidden="true" />
               Inference monitor
             </div>
-            <UserProfileDropdown user={user} />
+            <div className="shrink-0">
+              <UserProfileDropdown user={user} />
+            </div>
           </header>
 
           <main className="min-w-0 flex-1 overflow-x-hidden px-3 py-4 sm:px-5 lg:px-6">

@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useLogout } from '../../features/auth/hooks/useAuth';
-import { useNavigate } from "react-router-dom";
 import type { User } from '../../types/user';
 
 interface UserProfileDropdownProps {
@@ -9,7 +8,6 @@ interface UserProfileDropdownProps {
 
 const UserProfileDropdown: React.FC<UserProfileDropdownProps> = ({ user }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const navigate = useNavigate();
   const logout = useLogout();
 
   const toggleDropdown = () => {
@@ -18,11 +16,6 @@ const UserProfileDropdown: React.FC<UserProfileDropdownProps> = ({ user }) => {
 
   const handleLogout = () => {
     logout();
-    setIsOpen(false);
-  };
-
-  const handleProfileClick = () => {
-    navigate('/profile');
     setIsOpen(false);
   };
 
@@ -46,12 +39,6 @@ const UserProfileDropdown: React.FC<UserProfileDropdownProps> = ({ user }) => {
             <div className="truncate text-sm font-medium text-slate-900">{user?.name || "Admin"}</div>
             <div className="truncate text-xs text-slate-500">{user?.email}</div>
           </div>
-          <button
-            onClick={handleProfileClick}
-            className="block w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
-          >
-            Profile
-          </button>
           <button
             onClick={handleLogout}
             className="block w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
