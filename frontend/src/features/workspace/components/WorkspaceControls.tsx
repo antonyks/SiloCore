@@ -1,5 +1,5 @@
 import axios from "axios";
-import { Building2, Check, ChevronDown, Plus, Settings2 } from "lucide-react";
+import { Building2, Check, ChevronDown, Plus, Settings } from "lucide-react";
 import { useWorkspaceContext } from "../workspaceContext";
 import { WorkspaceExtensionSlot } from "../../../extensions/WorkspaceExtensionSlot";
 import type { Workspace } from "../types";
@@ -122,7 +122,7 @@ export function WorkspaceControls() {
         className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
         aria-label="Workspace settings"
       >
-        <Settings2 className="h-4 w-4" aria-hidden="true" />
+        <Settings className="h-4 w-4" aria-hidden="true" />
       </button>
     </div>
   );

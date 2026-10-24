@@ -1138,14 +1138,14 @@ const Home: React.FC = () => {
     return (
       <div
         key={session.id}
-        className={`relative rounded-md border bg-white p-2 transition ${
+        className={`relative rounded-md border bg-white transition ${
           isSelected
             ? "border-cyan-300 shadow-sm ring-1 ring-cyan-100"
             : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
         } ${isEditing ? "" : "cursor-pointer"}`}
       >
         {isEditing ? (
-          <form onSubmit={(event) => void handleRenameSubmit(event, session)} className="space-y-2">
+          <form onSubmit={(event) => void handleRenameSubmit(event, session)} className="space-y-2 p-2">
             <input
               value={editingTitle}
               onChange={(event) => setEditingTitle(event.target.value)}
@@ -1180,17 +1180,16 @@ const Home: React.FC = () => {
             <button
               type="button"
               onClick={() => selectSession(session.id)}
-              className="absolute inset-0 cursor-pointer rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-100"
+              className="block w-full cursor-pointer rounded-md p-2 pr-10 text-left focus:outline-none focus:ring-2 focus:ring-cyan-100"
               aria-label={`Open ${session.title}`}
-            />
-            <div className="pointer-events-none relative z-10 pr-8">
-              <span className="block truncate text-sm font-medium text-slate-900">
+            >
+              <span title={session.title} className="block truncate text-sm font-medium text-slate-900">
                 {session.title}
               </span>
               <span className="mt-1 block text-xs text-slate-500">
                 Updated {formatSessionDate(session.updatedAt)}
               </span>
-            </div>
+            </button>
             <button
               type="button"
               onClick={() =>
@@ -1235,7 +1234,7 @@ const Home: React.FC = () => {
             )}
           </>
         )}
-        {rowError && <div className="mt-2 text-xs text-red-700">{rowError}</div>}
+        {rowError && <div className="px-2 pb-2 text-xs text-red-700">{rowError}</div>}
       </div>
     );
   };

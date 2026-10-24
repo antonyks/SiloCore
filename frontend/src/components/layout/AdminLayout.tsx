@@ -5,7 +5,6 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import {
   Activity,
   BarChart3,
-  Bell,
   Bot,
   ChevronLeft,
   ChevronRight,
@@ -216,10 +215,6 @@ const AdminLayout: React.FC = () => {
                 )}
               </nav>
               <h1 className="truncate text-base font-semibold leading-tight text-slate-950 sm:text-lg" title={activeRoute.label}>{activeRoute.label}</h1>
-            </div>
-            <div className="hidden shrink-0 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-800 lg:flex">
-              <Bell className="h-3.5 w-3.5" aria-hidden="true" />
-              Inference monitor
             </div>
             <div className="shrink-0">
               <UserProfileDropdown user={user} />
