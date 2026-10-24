@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Save, X } from "lucide-react";
+import { Save } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import type { AdminUser, AdminUserCreateInput, AdminUserUpdateInput } from "../types";
@@ -71,26 +71,16 @@ const AdminUserForm: React.FC<AdminUserFormProps> = ({
 
   return (
     <form
-      className="rounded-md border border-slate-200 bg-white"
+      className="bg-white"
       onSubmit={handleSubmit((values) => onSubmit(toUserInput(values, user)))}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold text-slate-950">
-            {user ? "Edit User" : "Create User"}
-          </h2>
-          <p className="text-xs text-slate-500">
-            User management never exposes chat contents.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-        >
-          <X className="h-3.5 w-3.5" aria-hidden="true" />
-          Cancel
-        </button>
+      <div className="border-b border-slate-200 px-4 py-3 pr-12">
+        <h2 className="text-sm font-semibold text-slate-950">
+          {user ? "Edit User" : "Create User"}
+        </h2>
+        <p className="text-xs text-slate-500">
+          User management never exposes chat contents.
+        </p>
       </div>
 
       {serverError && (
@@ -102,7 +92,7 @@ const AdminUserForm: React.FC<AdminUserFormProps> = ({
       <div className="grid gap-4 px-4 py-4 lg:grid-cols-2">
         <label className="block">
           <span className="text-xs font-medium text-slate-700">Name</span>
-          <input className={inputClassName} {...register("name")} disabled={isSubmitting} />
+          <input data-dialog-initial-focus className={inputClassName} {...register("name")} disabled={isSubmitting} />
           <div className={errorClassName}>{errors.name?.message}</div>
         </label>
 
@@ -134,6 +124,14 @@ const AdminUserForm: React.FC<AdminUserFormProps> = ({
       </div>
 
       <div className="flex justify-end gap-2 border-t border-slate-200 px-4 py-3">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={isSubmitting}
+          className="inline-flex h-9 items-center rounded-md border border-slate-200 px-3 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Cancel
+        </button>
         <button
           type="submit"
           disabled={isSubmitting}

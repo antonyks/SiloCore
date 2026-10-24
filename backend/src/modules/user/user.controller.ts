@@ -13,9 +13,20 @@ export const UserController = {
 
     async getAllUsers(req: Request, res: Response): Promise<void> {
 
-        const { name, skip, take } = req.query;
+        const { name, search, skip, take } = req.query;
+
+        if (name !== undefined && search !== undefined) {
+            throw new InvalidInputError("Use either search or name, not both");
+        }
+        if (search !== undefined && typeof search !== 'string') {
+            throw new InvalidInputError("Invalid value for search parameter");
+        }
 
         const searchName: string | undefined = typeof name === 'string' ? name : undefined;
+        const searchTerm: string | undefined = typeof search === 'string' ? search.trim() : undefined;
+        if (searchTerm === '') {
+            throw new InvalidInputError("Search must be at least 1 character long");
+        }
 
         const paginationSkip: number | undefined = skip ? parseInt(skip as string, 10) : undefined;
         const paginationTake: number | undefined = take ? parseInt(take as string, 10) : undefined;
@@ -28,7 +39,7 @@ export const UserController = {
         }
 
 
-        const users = await UserService.getUsers(searchName, paginationSkip, paginationTake);
+        const users = await UserService.getUsers({ name: searchName, search: searchTerm, skip: paginationSkip, take: paginationTake });
         res.status(200).json({ data: users });
         return;
     },

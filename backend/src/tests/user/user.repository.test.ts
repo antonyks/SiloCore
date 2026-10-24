@@ -182,6 +182,7 @@ describe('UserRepository', () => {
         where: { role: UserRole.USER },
         skip: 0,
         take: 10,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: SelectedUserFields,
       });
 

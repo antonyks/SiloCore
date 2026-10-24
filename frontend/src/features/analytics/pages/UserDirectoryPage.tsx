@@ -9,7 +9,8 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import AdminActionDialog from "../components/AdminActionDialog";
 import AdminUserForm from "../components/AdminUserForm";
 import {
   useAdminUser,
@@ -103,24 +104,26 @@ const isCreateInput = (
 
 const UserDirectoryPage: React.FC = () => {
   const [searchInput, setSearchInput] = useState("");
-  const [searchName, setSearchName] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
   const [pageIndex, setPageIndex] = useState(0);
-  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [viewingUserId, setViewingUserId] = useState<number | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const actionTriggerRef = useRef<HTMLElement | null>(null);
+  const addUserButtonRef = useRef<HTMLButtonElement>(null);
 
   const listParams = useMemo<AdminUserListParams>(
     () => ({
-      ...(searchName ? { name: searchName } : {}),
+      ...(searchTerm ? { search: searchTerm } : {}),
       skip: pageIndex * PAGE_SIZE,
       take: PAGE_SIZE + 1,
     }),
-    [pageIndex, searchName],
+    [pageIndex, searchTerm],
   );
 
   const usersQuery = useAdminUsers(listParams);
-  const selectedUserQuery = useAdminUser(selectedUserId);
+  const viewedUserQuery = useAdminUser(viewingUserId);
   const createUser = useCreateAdminUser();
   const updateUser = useUpdateAdminUser();
   const mutationError = createUser.error || updateUser.error;
@@ -130,17 +133,35 @@ const UserDirectoryPage: React.FC = () => {
   const hasNextPage = fetchedUsers.length > PAGE_SIZE;
   const hasPreviousPage = pageIndex > 0;
 
+  const rememberTrigger = () => {
+    actionTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+  };
+
   const openCreateForm = () => {
+    rememberTrigger();
     setSuccessMessage(null);
+    createUser.reset();
+    updateUser.reset();
+    setViewingUserId(null);
     setEditingUser(null);
     setIsFormOpen(true);
   };
 
   const openEditForm = (user: AdminUser) => {
+    rememberTrigger();
     setSuccessMessage(null);
+    createUser.reset();
+    updateUser.reset();
+    setViewingUserId(null);
     setEditingUser(user);
     setIsFormOpen(true);
-    setSelectedUserId(user.id);
+  };
+
+  const openView = (user: AdminUser) => {
+    rememberTrigger();
+    setViewingUserId(user.id);
   };
 
   const closeForm = () => {
@@ -148,15 +169,17 @@ const UserDirectoryPage: React.FC = () => {
     setEditingUser(null);
   };
 
+  const closeView = () => setViewingUserId(null);
+
   const handleSearchSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setSearchName(searchInput.trim());
+    setSearchTerm(searchInput.trim());
     setPageIndex(0);
   };
 
   const resetSearch = () => {
     setSearchInput("");
-    setSearchName("");
+    setSearchTerm("");
     setPageIndex(0);
   };
 
@@ -165,11 +188,10 @@ const UserDirectoryPage: React.FC = () => {
       if (editingUser) {
         const updatedUser = await updateUser.mutateAsync({ id: editingUser.id, input });
         setSuccessMessage(`${updatedUser.name} was updated.`);
-        setSelectedUserId(updatedUser.id);
       } else if (isCreateInput(input)) {
         const createdUser = await createUser.mutateAsync(input);
         setSuccessMessage(`${createdUser.name} was created.`);
-        setSelectedUserId(createdUser.id);
+        setViewingUserId(createdUser.id);
       }
 
       closeForm();
@@ -201,6 +223,7 @@ const UserDirectoryPage: React.FC = () => {
               Refresh
             </button>
             <button
+              ref={addUserButtonRef}
               type="button"
               onClick={openCreateForm}
               className="inline-flex h-8 items-center gap-1.5 rounded-md bg-slate-950 px-3 text-xs font-semibold text-white hover:bg-slate-800"
@@ -216,12 +239,12 @@ const UserDirectoryPage: React.FC = () => {
           className="flex flex-wrap items-end gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3"
         >
           <label className="min-w-[240px] flex-1">
-            <span className="text-xs font-medium text-slate-700">Search Name</span>
+            <span className="text-xs font-medium text-slate-700">Search Name or Email</span>
             <input
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
               className="mt-1 h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
-              placeholder="Search by name"
+              placeholder="Search by name or email"
             />
           </label>
           <button
@@ -231,7 +254,7 @@ const UserDirectoryPage: React.FC = () => {
             <Search className="h-4 w-4" aria-hidden="true" />
             Search
           </button>
-          {(searchName || searchInput) && (
+          {(searchTerm || searchInput) && (
             <button
               type="button"
               onClick={resetSearch}
@@ -242,13 +265,6 @@ const UserDirectoryPage: React.FC = () => {
             </button>
           )}
         </form>
-
-        {successMessage && (
-          <div className="flex items-center gap-2 border-b border-emerald-100 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
-            <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
-            {successMessage}
-          </div>
-        )}
 
         {usersQuery.isError && (
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-red-100 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -267,19 +283,6 @@ const UserDirectoryPage: React.FC = () => {
           </div>
         )}
 
-        {isFormOpen && (
-          <div className="border-b border-slate-200 bg-slate-50 p-4">
-            <AdminUserForm
-              key={editingUser?.id || "create"}
-              user={editingUser}
-              isSubmitting={isSaving}
-              serverError={mutationError ? getErrorMessage(mutationError) : undefined}
-              onCancel={closeForm}
-              onSubmit={(input) => void handleSubmit(input)}
-            />
-          </div>
-        )}
-
         <div className="overflow-x-auto">
           <table className="w-full min-w-[920px] border-collapse text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
@@ -288,7 +291,7 @@ const UserDirectoryPage: React.FC = () => {
                 <th className="px-4 py-2 font-semibold">Email</th>
                 <th className="px-4 py-2 font-semibold">Role</th>
                 <th className="px-4 py-2 font-semibold">Status</th>
-                <th className="px-4 py-2 font-semibold">Created</th>
+                <th aria-sort="descending" className="px-4 py-2 font-semibold">Created ↓</th>
                 <th className="px-4 py-2 text-right font-semibold">Actions</th>
               </tr>
             </thead>
@@ -307,7 +310,7 @@ const UserDirectoryPage: React.FC = () => {
                     <div className="flex justify-end gap-1.5">
                       <button
                         type="button"
-                        onClick={() => setSelectedUserId(user.id)}
+                        onClick={() => openView(user)}
                         className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs text-slate-700 hover:bg-slate-100"
                       >
                         <Eye className="h-3.5 w-3.5" aria-hidden="true" />
@@ -361,69 +364,108 @@ const UserDirectoryPage: React.FC = () => {
         </div>
       </section>
 
-      {selectedUserId && (
-        <section className="rounded-md border border-slate-200 bg-white">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-950">User Detail</h2>
+      {isFormOpen && (
+        <AdminActionDialog
+          label={editingUser ? `Edit user ${editingUser.name}` : "Add user"}
+          busy={isSaving}
+          wide
+          returnFocusRef={actionTriggerRef}
+          fallbackFocusRef={addUserButtonRef}
+          onClose={closeForm}
+        >
+          <AdminUserForm
+            key={editingUser ? `edit-${editingUser.id}` : "create"}
+            user={editingUser}
+            isSubmitting={isSaving}
+            serverError={mutationError ? getErrorMessage(mutationError) : undefined}
+            onCancel={closeForm}
+            onSubmit={(input) => void handleSubmit(input)}
+          />
+        </AdminActionDialog>
+      )}
+
+      {viewingUserId !== null && (
+        <AdminActionDialog
+          label="User detail"
+          busy={false}
+          wide
+          returnFocusRef={actionTriggerRef}
+          fallbackFocusRef={addUserButtonRef}
+          onClose={closeView}
+        >
+          <div className="bg-white">
+            <div className="border-b border-slate-200 px-4 py-3 pr-12">
+              <h2 data-dialog-initial-focus tabIndex={-1} className="text-sm font-semibold text-slate-950">
+                User Detail
+              </h2>
               <p className="text-xs text-slate-500">
                 Account fields only. Chat content is intentionally not requested.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setSelectedUserId(null)}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-            >
-              <X className="h-3.5 w-3.5" aria-hidden="true" />
-              Close
-            </button>
-          </div>
 
-          {selectedUserQuery.isLoading && (
-            <div className="grid animate-pulse gap-3 px-4 py-4 sm:grid-cols-2 lg:grid-cols-5">
-              {Array.from({ length: 5 }).map((_, index) => (
-                <div key={index} className="h-12 rounded bg-slate-100" />
-              ))}
-            </div>
-          )}
+            {viewedUserQuery.isLoading && (
+              <div className="grid animate-pulse gap-3 px-4 py-4 sm:grid-cols-2 lg:grid-cols-5">
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <div key={index} className="h-12 rounded bg-slate-100" />
+                ))}
+              </div>
+            )}
 
-          {selectedUserQuery.isError && (
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-red-100 bg-red-50 px-4 py-3 text-sm text-red-800">
-              <span className="inline-flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
-                {getErrorMessage(selectedUserQuery.error)}
-              </span>
-              <button
-                type="button"
-                onClick={() => void selectedUserQuery.refetch()}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 bg-white px-2.5 text-xs font-medium text-red-700 hover:bg-red-100"
-              >
-                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-                Retry
-              </button>
-            </div>
-          )}
+            {viewedUserQuery.isError && (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-red-100 bg-red-50 px-4 py-3 text-sm text-red-800">
+                <span className="inline-flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  {getErrorMessage(viewedUserQuery.error)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void viewedUserQuery.refetch()}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-200 bg-white px-2.5 text-xs font-medium text-red-700 hover:bg-red-100"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                  Retry
+                </button>
+              </div>
+            )}
 
-          {selectedUserQuery.data && (
-            <div className="grid gap-3 px-4 py-4 sm:grid-cols-2 lg:grid-cols-5">
-              {[
-                ["Name", selectedUserQuery.data.name],
-                ["Email", selectedUserQuery.data.email],
-                ["Role", selectedUserQuery.data.role],
-                ["Status", formatStatusLabel(selectedUserQuery.data.status)],
-                ["Created", formatDate(selectedUserQuery.data.createdAt)],
-              ].map(([label, value]) => (
-                <div key={label} className="rounded-md border border-slate-200 px-3 py-2">
-                  <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                    {label}
+            {viewedUserQuery.data && (
+              <div className="grid gap-3 px-4 py-4 sm:grid-cols-2 lg:grid-cols-5">
+                {[
+                  ["Name", viewedUserQuery.data.name],
+                  ["Email", viewedUserQuery.data.email],
+                  ["Role", viewedUserQuery.data.role],
+                  ["Status", formatStatusLabel(viewedUserQuery.data.status)],
+                  ["Created", formatDate(viewedUserQuery.data.createdAt)],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-md border border-slate-200 px-3 py-2">
+                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      {label}
+                    </div>
+                    <div className="mt-1 truncate text-sm font-medium text-slate-900">{value}</div>
                   </div>
-                  <div className="mt-1 truncate text-sm font-medium text-slate-900">{value}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+                ))}
+              </div>
+            )}
+          </div>
+        </AdminActionDialog>
+      )}
+
+      {successMessage && (
+        <div
+          role="status"
+          className="fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] items-start gap-3 rounded-md border border-emerald-200 bg-white p-4 text-sm text-emerald-800 shadow-lg sm:max-w-md"
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="flex-1">{successMessage}</span>
+          <button
+            type="button"
+            onClick={() => setSuccessMessage(null)}
+            aria-label="Dismiss notice"
+            className="rounded p-0.5 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-cyan-700"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
       )}
     </div>
   );

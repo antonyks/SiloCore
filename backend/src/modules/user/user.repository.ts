@@ -66,6 +66,7 @@ export const UserRepository = {
       where: where,
       skip: skip,
       take: take,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       select: SelectedUserFields
     });
   },

@@ -7,6 +7,13 @@ import { UserRole, UserStatus, SelectedUser, UserWhereInput, AuthUser } from './
 import { prisma } from '../../config/database';
 import { WorkspaceProvisioningService } from '../workspace/workspaceProvisioning.service';
 
+interface UserListParams {
+  name?: string;
+  search?: string;
+  skip?: number;
+  take?: number;
+}
+
 export const UserService = {
   async createUser(data: IUserCreateInput): Promise<SelectedUser> {
     const existing = await UserRepository.findByEmail(data.email);
@@ -29,7 +36,7 @@ export const UserService = {
     return user;
   },
 
-  async getUsers(name?: string, skip?: number, take?: number): Promise<SelectedUser[]> {
+  async getUsers({ name, search, skip, take }: UserListParams = {}): Promise<SelectedUser[]> {
 
     const baseFilter: UserWhereInput = {
       role: UserRole.USER,
@@ -38,7 +45,19 @@ export const UserService = {
 
     let finalFilter: UserWhereInput = baseFilter;
 
-    if (name) {
+    if (search) {
+      finalFilter = {
+        AND: [
+          baseFilter,
+          {
+            OR: [
+              { name: { contains: search, mode: 'insensitive' } },
+              { email: { contains: search, mode: 'insensitive' } },
+            ],
+          },
+        ],
+      };
+    } else if (name) {
       finalFilter = {
         AND: [
           baseFilter,

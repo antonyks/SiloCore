@@ -53,6 +53,13 @@ export const validateSearch = [
     .isLength({ min: 1 })
     .withMessage('Search name must be at least 1 character long')
     .trim(),
+  query('search')
+    .optional()
+    .isString()
+    .withMessage('Search must be a string')
+    .trim()
+    .isLength({ min: 1 })
+    .withMessage('Search must be at least 1 character long'),
   query('skip')
     .optional()
     .isInt({ min: 0 })

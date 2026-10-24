@@ -12,7 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { useRef, useState } from "react";
-import ProviderActionDialog from "../components/ProviderActionDialog";
+import AdminActionDialog from "../components/AdminActionDialog";
 import ProviderConfigForm from "../components/ProviderConfigForm";
 import {
   useCreateProviderConfig,
@@ -366,11 +366,11 @@ const ProviderConfigsPage: React.FC = () => {
         )}
 
         {pullingProvider && (
-          <ProviderActionDialog
+          <AdminActionDialog
             label={`Pull model for ${pullingProvider.name}`}
             busy={pullModel.isPending}
-            returnFocusTo={actionTriggerRef.current}
-            fallbackFocusTo={addProviderButtonRef.current}
+            returnFocusRef={actionTriggerRef}
+            fallbackFocusRef={addProviderButtonRef}
             onClose={closePullPanel}
           >
             <div className="flex flex-col gap-4 p-4">
@@ -423,7 +423,7 @@ const ProviderConfigsPage: React.FC = () => {
                 )}
               </div>
             </div>
-          </ProviderActionDialog>
+          </AdminActionDialog>
         )}
 
         <div className="overflow-x-auto">
@@ -525,12 +525,12 @@ const ProviderConfigsPage: React.FC = () => {
       </section>
 
       {isFormOpen && (
-        <ProviderActionDialog
+        <AdminActionDialog
           label={editingProvider ? `Edit provider ${editingProvider.name}` : "Add provider"}
           busy={isSaving}
           wide
-          returnFocusTo={actionTriggerRef.current}
-          fallbackFocusTo={addProviderButtonRef.current}
+          returnFocusRef={actionTriggerRef}
+          fallbackFocusRef={addProviderButtonRef}
           onClose={closeForm}
         >
           <ProviderConfigForm
@@ -541,15 +541,15 @@ const ProviderConfigsPage: React.FC = () => {
             onCancel={closeForm}
             onSubmit={(input) => void handleSubmit(input)}
           />
-        </ProviderActionDialog>
+        </AdminActionDialog>
       )}
 
       {deletingProvider && (
-        <ProviderActionDialog
+        <AdminActionDialog
           label={`Delete provider ${deletingProvider.name}`}
           busy={deleteProvider.isPending}
-          returnFocusTo={actionTriggerRef.current}
-          fallbackFocusTo={addProviderButtonRef.current}
+          returnFocusRef={actionTriggerRef}
+          fallbackFocusRef={addProviderButtonRef}
           onClose={() => setDeletingProvider(null)}
         >
           <div className="space-y-4 p-4">
@@ -578,7 +578,7 @@ const ProviderConfigsPage: React.FC = () => {
               </button>
             </div>
           </div>
-        </ProviderActionDialog>
+        </AdminActionDialog>
       )}
 
       {notice && (

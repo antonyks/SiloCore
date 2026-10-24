@@ -113,6 +113,42 @@ describe('UserController', () => {
             expect(res.json).toHaveBeenCalledWith({ data: [mockUser] });
         });
 
+        it('should handle a combined name or email search', async () => {
+            req = {query:{ search: ' example.com ', skip: '0', take: '11' }} as Partial<AuthenticatedRequest>;
+            mockPrisma.user.findMany.mockResolvedValue([mockUser]);
+
+            await UserController.getAllUsers(createAuthenticatedMockRequest(req), res);
+
+            expect(mockPrisma.user.findMany).toHaveBeenCalledWith(expect.objectContaining({
+                where: {
+                    AND: [
+                        { role: 'USER', status: { not: 'DELETED' } },
+                        { OR: [
+                            { name: { contains: 'example.com', mode: 'insensitive' } },
+                            { email: { contains: 'example.com', mode: 'insensitive' } },
+                        ] },
+                    ],
+                },
+            }));
+            expect(res.json).toHaveBeenCalledWith({ data: [mockUser] });
+        });
+
+        it('should reject using name and search together', async () => {
+            req = {query:{ name: 'Test', search: 'example.com' }} as Partial<AuthenticatedRequest>;
+
+            await expect(UserController.getAllUsers(createAuthenticatedMockRequest(req), res))
+                .rejects.toThrow('Use either search or name, not both');
+            expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
+        });
+
+        it('should reject an empty search term', async () => {
+            req = {query:{ search: '   ' }} as Partial<AuthenticatedRequest>;
+
+            await expect(UserController.getAllUsers(createAuthenticatedMockRequest(req), res))
+                .rejects.toThrow('Search must be at least 1 character long');
+            expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
+        });
+
         it('should throw InvalidInputError for invalid skip parameter', async () => {
             req = {query:{skip: '-1', take: '10' }} as Partial<AuthenticatedRequest>;
             

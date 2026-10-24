@@ -228,7 +228,7 @@ describe('UserService', () => {
 
       mockPrisma.user.findMany.mockResolvedValue(mockUsers);
 
-      const result = await UserService.getUsers(undefined,0,10);
+      const result = await UserService.getUsers({ skip: 0, take: 10 });
 
       expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
         where: {
@@ -237,6 +237,7 @@ describe('UserService', () => {
         },
         skip: 0,
         take: 10,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: SelectedUserFields,
     });
       expect(result).toEqual(mockUsers);
@@ -257,7 +258,7 @@ describe('UserService', () => {
 
       mockPrisma.user.findMany.mockResolvedValue(mockUsers);
 
-      const result = await UserService.getUsers('Test',0,10);
+      const result = await UserService.getUsers({ name: 'Test', skip: 0, take: 10 });
 
       expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
         where:{
@@ -276,9 +277,34 @@ describe('UserService', () => {
         },
         skip: 0,
         take: 10,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: SelectedUserFields
     });
       expect(result).toEqual(mockUsers);
+    });
+
+    it('should match name or email case-insensitively within visible users', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([]);
+
+      await UserService.getUsers({ search: 'ALICE', skip: 10, take: 11 });
+
+      expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
+        where: {
+          AND: [
+            { role: UserRole.USER, status: { not: UserStatus.DELETED } },
+            {
+              OR: [
+                { name: { contains: 'ALICE', mode: 'insensitive' } },
+                { email: { contains: 'ALICE', mode: 'insensitive' } },
+              ],
+            },
+          ],
+        },
+        skip: 10,
+        take: 11,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: SelectedUserFields,
+      });
     });
   });
 

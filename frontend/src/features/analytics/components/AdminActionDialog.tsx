@@ -1,22 +1,22 @@
 import { X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
-interface ProviderActionDialogProps {
+interface AdminActionDialogProps {
   label: string;
   busy: boolean;
   wide?: boolean;
-  returnFocusTo: HTMLElement | null;
-  fallbackFocusTo: HTMLElement | null;
+  returnFocusRef: RefObject<HTMLElement | null>;
+  fallbackFocusRef: RefObject<HTMLElement | null>;
   onClose: () => void;
   children: React.ReactNode;
 }
 
-const ProviderActionDialog: React.FC<ProviderActionDialogProps> = ({
+const AdminActionDialog: React.FC<AdminActionDialogProps> = ({
   label,
   busy,
   wide = false,
-  returnFocusTo,
-  fallbackFocusTo,
+  returnFocusRef,
+  fallbackFocusRef,
   onClose,
   children,
 }) => {
@@ -24,6 +24,8 @@ const ProviderActionDialog: React.FC<ProviderActionDialogProps> = ({
 
   useEffect(() => {
     const dialog = dialogRef.current;
+    const returnFocusTo = returnFocusRef.current;
+    const fallbackFocusTo = fallbackFocusRef.current;
     dialog?.showModal();
     dialog?.querySelector<HTMLElement>("[data-dialog-initial-focus]")?.focus();
 
@@ -32,7 +34,7 @@ const ProviderActionDialog: React.FC<ProviderActionDialogProps> = ({
       const target = returnFocusTo?.isConnected ? returnFocusTo : fallbackFocusTo;
       target?.focus();
     };
-  }, [returnFocusTo, fallbackFocusTo]);
+  }, [returnFocusRef, fallbackFocusRef]);
 
   return (
     <dialog
@@ -64,4 +66,4 @@ const ProviderActionDialog: React.FC<ProviderActionDialogProps> = ({
   );
 };
 
-export default ProviderActionDialog;
+export default AdminActionDialog;

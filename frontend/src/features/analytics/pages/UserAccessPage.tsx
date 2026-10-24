@@ -101,7 +101,7 @@ const StatusBadge: React.FC<{ status: string }> = ({ status }) => (
 const UserAccessPage: React.FC = () => {
   const { user: currentUser } = useAuth();
   const [searchInput, setSearchInput] = useState("");
-  const [searchName, setSearchName] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
   const [pageIndex, setPageIndex] = useState(0);
   const [confirmingDeleteUser, setConfirmingDeleteUser] = useState<AdminUser | null>(null);
   const [actionMessage, setActionMessage] = useState<ActionMessage | null>(null);
@@ -112,11 +112,11 @@ const UserAccessPage: React.FC = () => {
 
   const listParams = useMemo<AdminUserListParams>(
     () => ({
-      ...(searchName ? { name: searchName } : {}),
+      ...(searchTerm ? { search: searchTerm } : {}),
       skip: pageIndex * PAGE_SIZE,
       take: PAGE_SIZE + 1,
     }),
-    [pageIndex, searchName],
+    [pageIndex, searchTerm],
   );
 
   const usersQuery = useAdminUsers(listParams);
@@ -138,13 +138,13 @@ const UserAccessPage: React.FC = () => {
 
   const handleSearchSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setSearchName(searchInput.trim());
+    setSearchTerm(searchInput.trim());
     setPageIndex(0);
   };
 
   const resetSearch = () => {
     setSearchInput("");
-    setSearchName("");
+    setSearchTerm("");
     setPageIndex(0);
   };
 
@@ -231,12 +231,12 @@ const UserAccessPage: React.FC = () => {
           className="flex flex-wrap items-end gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3"
         >
           <label className="min-w-[240px] flex-1">
-            <span className="text-xs font-medium text-slate-700">Search Name</span>
+            <span className="text-xs font-medium text-slate-700">Search Name or Email</span>
             <input
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
               className="mt-1 h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100"
-              placeholder="Search by name"
+              placeholder="Search by name or email"
             />
           </label>
           <button
@@ -246,7 +246,7 @@ const UserAccessPage: React.FC = () => {
             <Search className="h-4 w-4" aria-hidden="true" />
             Search
           </button>
-          {(searchName || searchInput) && (
+          {(searchTerm || searchInput) && (
             <button
               type="button"
               onClick={resetSearch}
@@ -331,7 +331,7 @@ const UserAccessPage: React.FC = () => {
                 <th className="px-4 py-2 font-semibold">Email</th>
                 <th className="px-4 py-2 font-semibold">Role</th>
                 <th className="px-4 py-2 font-semibold">Status</th>
-                <th className="px-4 py-2 font-semibold">Created</th>
+                <th aria-sort="descending" className="px-4 py-2 font-semibold">Created ↓</th>
                 <th className="px-4 py-2 text-right font-semibold">Access Actions</th>
               </tr>
             </thead>

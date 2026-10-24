@@ -108,7 +108,7 @@ export interface AdminUserPreview {
 export type AdminUser = AdminUserPreview;
 
 export interface AdminUserListParams {
-  name?: string;
+  search?: string;
   skip?: number;
   take?: number;
 }
