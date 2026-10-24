@@ -2,18 +2,19 @@ import axiosClient from "../../../lib/axiosClient";
 import type { ApiResponse } from "../../../types/api";
 import type {
   AdminUser,
+  AdminUserPage,
   AdminUserCreateInput,
   AdminUserListParams,
   AdminUserUpdateInput,
 } from "../types";
 
 export const adminUserService = {
-  async getUsers(params: AdminUserListParams = {}): Promise<AdminUser[]> {
-    const { data } = await axiosClient.get<ApiResponse<AdminUser[]>>("/users", {
+  async getUsers(params: AdminUserListParams = {}): Promise<AdminUserPage> {
+    const { data } = await axiosClient.get<ApiResponse<AdminUser[]> & { total: number }>("/users", {
       params,
     });
 
-    return data.data;
+    return { data: data.data, total: data.total };
   },
 
   async getUser(id: number): Promise<AdminUser> {

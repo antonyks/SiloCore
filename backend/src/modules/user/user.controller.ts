@@ -39,8 +39,8 @@ export const UserController = {
         }
 
 
-        const users = await UserService.getUsers({ name: searchName, search: searchTerm, skip: paginationSkip, take: paginationTake });
-        res.status(200).json({ data: users });
+        const page = await UserService.getUsersPage({ name: searchName, search: searchTerm, skip: paginationSkip, take: paginationTake });
+        res.status(200).json(page);
         return;
     },
 

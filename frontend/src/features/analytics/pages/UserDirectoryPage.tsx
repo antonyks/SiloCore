@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import AdminActionDialog from "../components/AdminActionDialog";
+import AdminUserPager from "../components/AdminUserPager";
 import AdminUserForm from "../components/AdminUserForm";
 import {
   useAdminUser,
@@ -117,7 +118,7 @@ const UserDirectoryPage: React.FC = () => {
     () => ({
       ...(searchTerm ? { search: searchTerm } : {}),
       skip: pageIndex * PAGE_SIZE,
-      take: PAGE_SIZE + 1,
+      take: PAGE_SIZE,
     }),
     [pageIndex, searchTerm],
   );
@@ -128,10 +129,13 @@ const UserDirectoryPage: React.FC = () => {
   const updateUser = useUpdateAdminUser();
   const mutationError = createUser.error || updateUser.error;
   const isSaving = createUser.isPending || updateUser.isPending;
-  const fetchedUsers = usersQuery.data || [];
-  const visibleUsers = fetchedUsers.slice(0, PAGE_SIZE);
-  const hasNextPage = fetchedUsers.length > PAGE_SIZE;
-  const hasPreviousPage = pageIndex > 0;
+  const visibleUsers = usersQuery.data?.data || [];
+  const total = usersQuery.data?.total ?? 0;
+  const lastPageIndex = Math.max(0, Math.ceil(total / PAGE_SIZE) - 1);
+
+  if (usersQuery.isSuccess && pageIndex > lastPageIndex) {
+    setPageIndex(lastPageIndex);
+  }
 
   const rememberTrigger = () => {
     actionTriggerRef.current = document.activeElement instanceof HTMLElement
@@ -283,7 +287,9 @@ const UserDirectoryPage: React.FC = () => {
           </div>
         )}
 
-        <div className="overflow-x-auto">
+        {usersQuery.isLoading && <p className="px-4 py-3 text-sm text-slate-500">Loading page {pageIndex + 1}...</p>}
+
+        <div className="hidden overflow-x-auto xl:block">
           <table className="w-full min-w-[920px] border-collapse text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
@@ -332,36 +338,37 @@ const UserDirectoryPage: React.FC = () => {
           </table>
         </div>
 
-        {!usersQuery.isLoading && !usersQuery.isError && visibleUsers.length === 0 && (
+        {!usersQuery.isLoading && !usersQuery.isError && pageIndex <= lastPageIndex && (
+          <div className="divide-y divide-slate-100 xl:hidden">
+            {visibleUsers.map((user) => (
+              <article key={user.id} className="space-y-3 px-4 py-4 text-sm">
+                <div className="min-w-0">
+                  <h3 className="font-semibold text-slate-900">{user.name}</h3>
+                  <p className="break-all text-slate-700">{user.email}</p>
+                </div>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
+                  <dt className="text-slate-500">Role</dt><dd>{user.role}</dd>
+                  <dt className="text-slate-500">Status</dt><dd><StatusBadge status={user.status} /></dd>
+                  <dt className="text-slate-500">Created</dt><dd>{formatDate(user.createdAt)}</dd>
+                </dl>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => openView(user)} className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs text-slate-700 hover:bg-slate-100"><Eye className="h-3.5 w-3.5" aria-hidden="true" />View</button>
+                  <button type="button" onClick={() => openEditForm(user)} className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs text-slate-700 hover:bg-slate-100"><Edit3 className="h-3.5 w-3.5" aria-hidden="true" />Edit</button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+
+        {!usersQuery.isLoading && !usersQuery.isError && total === 0 && (
           <div className="border-t border-slate-100 px-4 py-8 text-center text-sm text-slate-500">
             No users match the current directory filters.
           </div>
         )}
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-xs text-slate-500">
-          <span>
-            Showing {visibleUsers.length} user{visibleUsers.length === 1 ? "" : "s"} from offset{" "}
-            {pageIndex * PAGE_SIZE}
-          </span>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setPageIndex((current) => Math.max(0, current - 1))}
-              disabled={!hasPreviousPage || usersQuery.isFetching}
-              className="inline-flex h-8 items-center rounded-md border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
-            >
-              Previous
-            </button>
-            <button
-              type="button"
-              onClick={() => setPageIndex((current) => current + 1)}
-              disabled={!hasNextPage || usersQuery.isFetching}
-              className="inline-flex h-8 items-center rounded-md border border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
-            >
-              Next
-            </button>
-          </div>
-        </div>
+        {usersQuery.isSuccess && pageIndex <= lastPageIndex && (
+          <AdminUserPager pageIndex={pageIndex} pageSize={PAGE_SIZE} total={total} disabled={usersQuery.isFetching} onPageChange={setPageIndex} />
+        )}
       </section>
 
       {isFormOpen && (

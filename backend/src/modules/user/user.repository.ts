@@ -71,6 +71,10 @@ export const UserRepository = {
     });
   },
 
+  async countUsers(where: UserWhereInput): Promise<number> {
+    return UserModel.count({ where });
+  },
+
   async updateUser(id: number, data: UserUpdateInput): Promise<SelectedUser | null> {
     return UserModel.update({
       where: { id }, data: data,

@@ -14,6 +14,27 @@ interface UserListParams {
   take?: number;
 }
 
+function userListFilter({ name, search }: UserListParams): UserWhereInput {
+  const baseFilter: UserWhereInput = {
+    role: UserRole.USER,
+    status: { not: UserStatus.DELETED },
+  };
+  if (search) {
+    return {
+      AND: [baseFilter, {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+        ],
+      }],
+    };
+  }
+  if (name) {
+    return { AND: [baseFilter, { name: { contains: name, mode: 'insensitive' } }] };
+  }
+  return baseFilter;
+}
+
 export const UserService = {
   async createUser(data: IUserCreateInput): Promise<SelectedUser> {
     const existing = await UserRepository.findByEmail(data.email);
@@ -37,41 +58,16 @@ export const UserService = {
   },
 
   async getUsers({ name, search, skip, take }: UserListParams = {}): Promise<SelectedUser[]> {
+    return UserRepository.findManyUsers(userListFilter({ name, search }), skip, take);
+  },
 
-    const baseFilter: UserWhereInput = {
-      role: UserRole.USER,
-      status: { not: UserStatus.DELETED }
-    };
-
-    let finalFilter: UserWhereInput = baseFilter;
-
-    if (search) {
-      finalFilter = {
-        AND: [
-          baseFilter,
-          {
-            OR: [
-              { name: { contains: search, mode: 'insensitive' } },
-              { email: { contains: search, mode: 'insensitive' } },
-            ],
-          },
-        ],
-      };
-    } else if (name) {
-      finalFilter = {
-        AND: [
-          baseFilter,
-          {
-            name: {
-              contains: name,
-              mode: 'insensitive',
-            }
-          }
-        ]
-      };
-    }
-
-    return await UserRepository.findManyUsers(finalFilter, skip, take);
+  async getUsersPage(params: UserListParams = {}): Promise<{ data: SelectedUser[]; total: number }> {
+    const filter = userListFilter(params);
+    const [data, total] = await Promise.all([
+      UserRepository.findManyUsers(filter, params.skip, params.take),
+      UserRepository.countUsers(filter),
+    ]);
+    return { data, total };
   },
 
   async updateUserById(id: number, data: IUserUpdate): Promise<SelectedUser | null> {

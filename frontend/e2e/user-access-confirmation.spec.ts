@@ -19,7 +19,7 @@ test("access actions require centered confirmation dialogs", async ({ page, stac
   await page.route(`${stack.apiUrl}/users**`, async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (route.request().method() === "GET" && pathname.endsWith("/users")) {
-      await route.fulfill({ json: { data: user.status === "DELETED" ? [] : [user] } });
+      await route.fulfill({ json: { data: user.status === "DELETED" ? [] : [user], total: user.status === "DELETED" ? 0 : 1 } });
       return;
     }
     if (route.request().method() === "POST" && pathname.endsWith("/ban/101")) {
@@ -71,7 +71,9 @@ test("access actions require centered confirmation dialogs", async ({ page, stac
   expect(accessRequests).toBe(1);
 
   await page.setViewportSize({ width: 390, height: 700 });
-  await row.getByRole("button", { name: "Activate" }).click();
+  const card = page.locator("article", { hasText: "Synthetic Access User" });
+  await expect(card).toBeVisible();
+  await card.getByRole("button", { name: "Activate" }).click();
   const activateDialog = page.getByRole("dialog", { name: "Activate user Synthetic Access User" });
   await expect(activateDialog).toBeInViewport();
   const activateBox = await activateDialog.boundingBox();
@@ -80,11 +82,11 @@ test("access actions require centered confirmation dialogs", async ({ page, stac
   expect(activateBox!.x + activateBox!.width).toBeLessThanOrEqual(390);
   await activateDialog.getByRole("button", { name: "Confirm Reactivate" }).click();
   await expect(activateDialog).not.toBeVisible();
-  await expect(row.getByRole("button", { name: "Ban" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Ban" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Refresh" })).toBeFocused();
   expect(accessRequests).toBe(2);
 
-  const deleteButton = row.getByRole("button", { name: "Delete" });
+  const deleteButton = card.getByRole("button", { name: "Delete" });
   await deleteButton.click();
   const deleteDialog = page.getByRole("dialog", { name: "Delete user Synthetic Access User" });
   await expect(deleteDialog).toBeInViewport();

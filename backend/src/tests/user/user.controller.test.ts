@@ -95,27 +95,30 @@ describe('UserController', () => {
             req = {query:{ skip: '0', take: '10' }} as Partial<AuthenticatedRequest>;
             
             mockPrisma.user.findMany.mockResolvedValue([mockUser]);
+            mockPrisma.user.count.mockResolvedValue(1);
             
             await UserController.getAllUsers(createAuthenticatedMockRequest(req), res);
             
             expect(res.status).toHaveBeenCalledWith(200);
-            expect(res.json).toHaveBeenCalledWith({ data: [mockUser] });
+            expect(res.json).toHaveBeenCalledWith({ data: [mockUser], total: 1 });
         });
 
         it('should handle search name parameter', async () => {
             req = {query:{ name: 'Test', skip: '0', take: '10' }} as Partial<AuthenticatedRequest>;
             
             mockPrisma.user.findMany.mockResolvedValue([mockUser]);
+            mockPrisma.user.count.mockResolvedValue(1);
             
             await UserController.getAllUsers(createAuthenticatedMockRequest(req), res);
 
             expect(res.status).toHaveBeenCalledWith(200);
-            expect(res.json).toHaveBeenCalledWith({ data: [mockUser] });
+            expect(res.json).toHaveBeenCalledWith({ data: [mockUser], total: 1 });
         });
 
         it('should handle a combined name or email search', async () => {
             req = {query:{ search: ' example.com ', skip: '0', take: '11' }} as Partial<AuthenticatedRequest>;
             mockPrisma.user.findMany.mockResolvedValue([mockUser]);
+            mockPrisma.user.count.mockResolvedValue(1);
 
             await UserController.getAllUsers(createAuthenticatedMockRequest(req), res);
 
@@ -130,7 +133,8 @@ describe('UserController', () => {
                     ],
                 },
             }));
-            expect(res.json).toHaveBeenCalledWith({ data: [mockUser] });
+            expect(mockPrisma.user.count).toHaveBeenCalledWith({ where: expect.objectContaining({ AND: expect.any(Array) }) });
+            expect(res.json).toHaveBeenCalledWith({ data: [mockUser], total: 1 });
         });
 
         it('should reject using name and search together', async () => {

@@ -107,6 +107,11 @@ export interface AdminUserPreview {
 
 export type AdminUser = AdminUserPreview;
 
+export interface AdminUserPage {
+  data: AdminUser[];
+  total: number;
+}
+
 export interface AdminUserListParams {
   search?: string;
   skip?: number;

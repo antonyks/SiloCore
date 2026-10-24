@@ -32,7 +32,7 @@ const existingUser = {
 
 function registerUserReads(users = [existingUser]) {
   server.use(
-    http.get(`${API_BASE_URL}/users`, () => HttpResponse.json({ data: users })),
+    http.get(`${API_BASE_URL}/users`, () => HttpResponse.json({ data: users, total: users.length })),
     http.get(`${API_BASE_URL}/users/:id`, ({ params }) => {
       const user = users.find((entry) => entry.id === Number(params.id));
       return user
@@ -85,7 +85,7 @@ describe('UserDirectoryPage dialogs', () => {
     );
     renderWithProviders(<UserDirectoryPage />, { initialEntries: ['/admin/users'] });
 
-    const editButton = await screen.findByRole('button', { name: 'Edit' });
+    const editButton = await within(screen.getByRole('table')).findByRole('button', { name: 'Edit' });
     await userEvent.click(editButton);
     let dialog = screen.getByRole('dialog', { name: 'Edit user Existing User' });
     expect(within(dialog).getByRole('textbox', { name: 'Name' })).toHaveValue('Existing User');
@@ -111,7 +111,7 @@ describe('UserDirectoryPage dialogs', () => {
     );
     renderWithProviders(<UserDirectoryPage />, { initialEntries: ['/admin/users'] });
 
-    const editButton = await screen.findByRole('button', { name: 'Edit' });
+    const editButton = await within(screen.getByRole('table')).findByRole('button', { name: 'Edit' });
     await userEvent.click(editButton);
     const dialog = screen.getByRole('dialog', { name: 'Edit user Existing User' });
     const emailInput = within(dialog).getByRole('textbox', { name: 'Email' });
@@ -138,7 +138,7 @@ describe('UserDirectoryPage dialogs', () => {
     );
     renderWithProviders(<UserDirectoryPage />, { initialEntries: ['/admin/users'] });
 
-    const viewButton = await screen.findByRole('button', { name: 'View' });
+    const viewButton = await within(screen.getByRole('table')).findByRole('button', { name: 'View' });
     await userEvent.click(viewButton);
     const dialog = screen.getByRole('dialog', { name: 'User detail' });
     expect(await within(dialog).findByText('Detail unavailable')).toBeInTheDocument();
@@ -160,7 +160,7 @@ describe.each([
     server.use(
       http.get(`${API_BASE_URL}/users`, ({ request }) => {
         requests.push(new URL(request.url));
-        return HttpResponse.json({ data: [] });
+        return HttpResponse.json({ data: [], total: 0 });
       }),
     );
     renderWithProviders(page, { initialEntries: ['/admin/users'] });
@@ -169,7 +169,7 @@ describe.each([
     expect(searchInput).toHaveAttribute('placeholder', 'Search by name or email');
     await waitFor(() => expect(requests).toHaveLength(1));
     expect(requests[0].searchParams.get('skip')).toBe('0');
-    expect(requests[0].searchParams.get('take')).toBe('11');
+    expect(requests[0].searchParams.get('take')).toBe('10');
 
     await userEvent.type(searchInput, '  Alice@Example.com  ');
     await userEvent.click(screen.getByRole('button', { name: 'Search' }));
@@ -181,5 +181,49 @@ describe.each([
     await waitFor(() => expect(requests).toHaveLength(3));
     expect(requests[2].searchParams.has('search')).toBe(false);
     expect(searchInput).toHaveValue('');
+  });
+});
+
+describe.each([
+  ['User Directory', <UserDirectoryPage />],
+  ['Access & Bans', <UserAccessPage />],
+])('%s pagination', (_pageName, page) => {
+  it('shows counts, navigates pages directly, validates jumps, and resets search', async () => {
+    const requests: number[] = [];
+    server.use(http.get(`${API_BASE_URL}/users`, ({ request }) => {
+      const url = new URL(request.url);
+      const skip = Number(url.searchParams.get('skip'));
+      requests.push(skip);
+      const total = url.searchParams.has('search') ? 1 : 23;
+      const pageUsers = Array.from({ length: Math.max(0, Math.min(10, total - skip)) }, (_, index) => ({
+        ...existingUser,
+        id: skip + index + 1,
+        name: `User ${skip + index + 1}`,
+      }));
+      return HttpResponse.json({ data: pageUsers, total });
+    }));
+    renderWithProviders(page, { initialEntries: ['/admin/users'] });
+
+    expect(await screen.findByText('Showing 1–10 of 23 users')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('Showing 11–20 of 23 users')).toBeInTheDocument();
+    expect(requests).toContain(10);
+    await userEvent.click(screen.getByRole('button', { name: 'Last' }));
+    expect(await screen.findByText('Showing 21–23 of 23 users')).toBeInTheDocument();
+    expect(screen.getByText('Page 3 of 3')).toBeInTheDocument();
+    const jump = screen.getByRole('spinbutton', { name: 'Go to page' });
+    await userEvent.clear(jump);
+    await userEvent.type(jump, '99');
+    await userEvent.click(screen.getByRole('button', { name: 'Go' }));
+    expect(jump).toHaveValue(3);
+    await userEvent.clear(jump);
+    await userEvent.type(jump, '1');
+    await userEvent.click(screen.getByRole('button', { name: 'Go' }));
+    expect(await screen.findByText('Showing 1–10 of 23 users')).toBeInTheDocument();
+
+    await userEvent.type(screen.getByRole('textbox', { name: 'Search Name or Email' }), 'alice');
+    await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+    expect(await screen.findByText('Showing 1–1 of 1 users')).toBeInTheDocument();
+    expect(requests.at(-1)).toBe(0);
   });
 });

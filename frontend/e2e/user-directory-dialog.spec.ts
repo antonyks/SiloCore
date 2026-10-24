@@ -18,7 +18,7 @@ test("user directory dialogs stay accessible from the list on desktop and mobile
   await page.route(`${stack.apiUrl}/users**`, async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname.endsWith("/users")) {
-      await route.fulfill({ json: { data: users } });
+      await route.fulfill({ json: { data: users, total: users.length } });
       return;
     }
     const id = Number(pathname.split("/").at(-1));
@@ -66,6 +66,9 @@ test("user directory dialogs stay accessible from the list on desktop and mobile
   await expect(viewDialog).not.toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 700 });
+  const userCard = page.locator("article", { hasText: "Synthetic User 10" });
+  await expect(userCard).toBeVisible();
+  await expect(userCard.getByText("synthetic-10@example.com")).toBeVisible();
   await page.getByRole("button", { name: "Add User" }).click();
   const addDialog = page.getByRole("dialog", { name: "Add user" });
   await expect(addDialog).toBeInViewport();

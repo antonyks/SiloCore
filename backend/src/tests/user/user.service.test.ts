@@ -204,6 +204,25 @@ describe('UserService', () => {
   });
 
   describe('getUsers', () => {
+    it('uses the same filter for page rows and total count', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([]);
+      mockPrisma.user.count.mockResolvedValue(17);
+
+      const page = await UserService.getUsersPage({ search: 'ALICE', skip: 10, take: 10 });
+
+      expect(page).toEqual({ data: [], total: 17 });
+      const where = {
+        AND: [
+          { role: UserRole.USER, status: { not: UserStatus.DELETED } },
+          { OR: [
+            { name: { contains: 'ALICE', mode: 'insensitive' } },
+            { email: { contains: 'ALICE', mode: 'insensitive' } },
+          ] },
+        ],
+      };
+      expect(mockPrisma.user.count).toHaveBeenCalledWith({ where });
+      expect(mockPrisma.user.findMany).toHaveBeenCalledWith(expect.objectContaining({ where, skip: 10, take: 10 }));
+    });
     it('should return users with default filters', async () => {
       const mockUsers = [
         {

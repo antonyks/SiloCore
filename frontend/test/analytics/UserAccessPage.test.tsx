@@ -40,10 +40,34 @@ const users = [
 ];
 
 function registerUsers() {
-  server.use(http.get(`${API_BASE_URL}/users`, () => HttpResponse.json({ data: users })));
+  server.use(http.get(`${API_BASE_URL}/users`, () => HttpResponse.json({ data: users, total: users.length })));
 }
 
 describe('UserAccessPage confirmations', () => {
+  it('returns to the last valid page after deleting its only user', async () => {
+    let total = 11;
+    server.use(
+      http.get(`${API_BASE_URL}/users`, ({ request }) => {
+        const skip = Number(new URL(request.url).searchParams.get('skip'));
+        const data = Array.from({ length: Math.max(0, Math.min(10, total - skip)) }, (_, index) => ({
+          ...users[0], id: skip + index + 1, name: `User ${skip + index + 1}`,
+        }));
+        return HttpResponse.json({ data, total });
+      }),
+      http.delete(`${API_BASE_URL}/users/11`, () => {
+        total = 10;
+        return HttpResponse.json({ data: { ...users[0], id: 11 } });
+      }),
+    );
+    renderWithProviders(<UserAccessPage />, { initialEntries: ['/admin/users/access'] });
+    expect(await screen.findByText('Showing 1–10 of 11 users')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('Showing 11–11 of 11 users')).toBeInTheDocument();
+    await userEvent.click(within(screen.getByRole('table')).getByRole('button', { name: 'Delete' }));
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Confirm Delete' }));
+    expect(await screen.findByText('Showing 1–10 of 10 users')).toBeInTheDocument();
+    expect(screen.queryByText('No users match the current access-control filters.')).not.toBeInTheDocument();
+  });
   it('requires confirmation before Ban and cancels without a request', async () => {
     registerUsers();
     let banCalls = 0;
@@ -53,7 +77,7 @@ describe('UserAccessPage confirmations', () => {
     }));
     renderWithProviders(<UserAccessPage />, { initialEntries: ['/admin/users/access'] });
 
-    const banButton = await screen.findByRole('button', { name: 'Ban' });
+    const banButton = await within(screen.getByRole('table')).findByRole('button', { name: 'Ban' });
     await userEvent.click(banButton);
     let dialog = screen.getByRole('dialog', { name: 'Ban user Active User' });
     expect(within(dialog).getByText(/active@example.com/)).toBeInTheDocument();
@@ -89,7 +113,7 @@ describe('UserAccessPage confirmations', () => {
     }));
     renderWithProviders(<UserAccessPage />, { initialEntries: ['/admin/users/access'] });
 
-    const banButton = await screen.findByRole('button', { name: 'Ban' });
+    const banButton = await within(screen.getByRole('table')).findByRole('button', { name: 'Ban' });
     await userEvent.click(banButton);
     const dialog = screen.getByRole('dialog', { name: 'Ban user Active User' });
     await userEvent.click(within(dialog).getByRole('button', { name: 'Confirm Ban' }));
@@ -119,7 +143,7 @@ describe('UserAccessPage confirmations', () => {
     }));
     renderWithProviders(<UserAccessPage />, { initialEntries: ['/admin/users/access'] });
 
-    const activateButton = await screen.findByRole('button', { name: 'Activate' });
+    const activateButton = await within(screen.getByRole('table')).findByRole('button', { name: 'Activate' });
     await userEvent.click(activateButton);
     const dialog = screen.getByRole('dialog', { name: 'Activate user Banned User' });
     expect(within(dialog).getByText(/banned@example.com/)).toBeInTheDocument();
@@ -147,7 +171,7 @@ describe('UserAccessPage confirmations', () => {
     }));
     renderWithProviders(<UserAccessPage />, { initialEntries: ['/admin/users/access'] });
 
-    const row = (await screen.findByText('Active User')).closest('tr')!;
+    const row = (await within(screen.getByRole('table')).findByText('Active User')).closest('tr')!;
     const deleteButton = within(row).getByRole('button', { name: 'Delete' });
     await userEvent.click(deleteButton);
     let dialog = screen.getByRole('dialog', { name: 'Delete user Active User' });
@@ -187,7 +211,7 @@ describe('UserAccessPage confirmations', () => {
     }));
     renderWithProviders(<UserAccessPage />, { initialEntries: ['/admin/users/access'] });
 
-    const row = (await screen.findByText('Active User')).closest('tr')!;
+    const row = (await within(screen.getByRole('table')).findByText('Active User')).closest('tr')!;
     const deleteButton = within(row).getByRole('button', { name: 'Delete' });
     await userEvent.click(deleteButton);
     const dialog = screen.getByRole('dialog', { name: 'Delete user Active User' });
