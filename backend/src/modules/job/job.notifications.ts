@@ -100,6 +100,7 @@ export class JobNotificationListener {
   private startPromise: Promise<void> | null = null;
   private suppressClientErrors = false;
   private readonly subscribersByJobId = new Map<number, Set<JobNotificationSubscriber>>();
+  private readonly categorySubscribers = new Set<JobNotificationSubscriber>();
 
   constructor(
     private readonly createClient: () => PgNotificationClient = () =>
@@ -129,12 +130,28 @@ export class JobNotificationListener {
     };
   }
 
+  subscribeToCategories(subscriber: JobNotificationSubscriber): () => void {
+    this.categorySubscribers.add(subscriber);
+
+    void this.start().catch((error) => {
+      logger.warn(
+        { operation: 'job.listen', ...safeErrorDiagnostic(error) },
+        'Job notification listener failed to start; polling fallback remains active.',
+      );
+    });
+
+    return () => {
+      this.categorySubscribers.delete(subscriber);
+    };
+  }
+
   async close(): Promise<void> {
     const client = this.client;
     this.client = null;
     this.startPromise = null;
     this.suppressClientErrors = true;
     this.subscribersByJobId.clear();
+    this.categorySubscribers.clear();
 
     if (client) {
       await client.end();
@@ -147,10 +164,10 @@ export class JobNotificationListener {
     const parsedNotification = parseJobNotificationPayload(notification.payload ?? undefined);
     if (!parsedNotification) return;
 
-    const subscribers = this.subscribersByJobId.get(parsedNotification.jobId);
-    if (!subscribers) return;
-
-    for (const subscriber of subscribers) {
+    for (const subscriber of this.subscribersByJobId.get(parsedNotification.jobId) ?? []) {
+      subscriber(parsedNotification);
+    }
+    for (const subscriber of this.categorySubscribers) {
       subscriber(parsedNotification);
     }
   }

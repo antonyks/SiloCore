@@ -13,6 +13,7 @@ import {
 import {
   JOB_NOTIFICATION_CHANNEL,
   jobNotificationListener,
+  JobRepository,
   JobService,
 } from '../../../modules/job';
 
@@ -97,7 +98,7 @@ async function readUntil(
 ): Promise<string> {
   const decoder = new TextDecoder();
   let text = '';
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + 12000;
 
   while (Date.now() < deadline) {
     const result = await reader.read();
@@ -132,6 +133,157 @@ afterEach(async () => {
 });
 
 describe('Job notification integration', () => {
+  it('finds a recently completed old-id job before a large newer-id backlog and pages ties', async () => {
+    const server = await startTestServer();
+    const abortController = new AbortController();
+
+    try {
+      const owner = await createUserContext();
+      const oldJob = await createRunningJob(owner);
+      const sameCompletion = new Date(Date.now() - 60_000);
+      await integrationPrisma.job.createMany({
+        data: Array.from({ length: 501 }, () => ({
+          workspaceId: owner.workspace.id,
+          createdByUserId: owner.user.id,
+          type: 'validation.fixture',
+          status: JobStatus.SUCCEEDED,
+          completedAt: sameCompletion,
+        })),
+      });
+      await integrationPrisma.job.update({
+        where: { id: oldJob.id },
+        data: { status: JobStatus.SUCCEEDED, completedAt: new Date() },
+      });
+
+      const firstPage = await JobRepository.listJobEventsInWorkspace({
+        workspaceId: owner.workspace.id,
+        types: ['validation.fixture'],
+        statuses: [JobStatus.SUCCEEDED],
+        completedSince: new Date(Date.now() - 15 * 60_000),
+        limit: 100,
+      });
+      const secondPage = await JobRepository.listJobEventsInWorkspace({
+        workspaceId: owner.workspace.id,
+        types: ['validation.fixture'],
+        statuses: [JobStatus.SUCCEEDED],
+        completedSince: new Date(Date.now() - 15 * 60_000),
+        completedBefore: { completedAt: firstPage[99].completedAt as Date, id: firstPage[99].id },
+        limit: 100,
+      });
+      expect(firstPage).toHaveLength(100);
+      expect(secondPage).toHaveLength(100);
+      expect(firstPage[99].id).toBeGreaterThan(secondPage[0].id);
+
+      const response = await fetch(
+        `${server.baseUrl}/api/jobs/events?types=validation.fixture&statuses=SUCCEEDED`,
+        { headers: owner.headers, signal: abortController.signal },
+      );
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('Expected SSE response body.');
+      const initialScan = await readUntil(reader, (text) =>
+        text.includes(`"jobId":${oldJob.id}`) || (text.match(/event: job\n/g) ?? []).length >= 500,
+      );
+      expect(response.status).toBe(200);
+      expect(initialScan).toContain(`"jobId":${oldJob.id}`);
+      expect(initialScan).not.toContain('completedAt');
+    } finally {
+      abortController.abort();
+      await server.close();
+    }
+  }, 20000);
+
+  it('streams filtered workspace job states and discovers completion without a notification', async () => {
+    const server = await startTestServer();
+    const abortController = new AbortController();
+
+    try {
+      const owner = await createUserContext();
+      const otherUser = await createUserContext();
+      const privateJob = await integrationPrisma.job.create({
+        data: {
+          workspaceId: otherUser.workspace.id,
+          createdByUserId: otherUser.user.id,
+          type: 'chat.session_title',
+          status: JobStatus.SUCCEEDED,
+          completedAt: new Date(),
+          payload: { title: 'Other user private title' },
+        },
+      });
+      const wrongType = await integrationPrisma.job.create({
+        data: {
+          workspaceId: owner.workspace.id,
+          createdByUserId: owner.user.id,
+          type: 'validation.fixture',
+          status: JobStatus.SUCCEEDED,
+          completedAt: new Date(),
+        },
+      });
+      const alreadyCompleted = await integrationPrisma.job.create({
+        data: {
+          workspaceId: owner.workspace.id,
+          createdByUserId: owner.user.id,
+          type: 'chat.session_title',
+          status: JobStatus.SUCCEEDED,
+          completedAt: new Date(),
+        },
+      });
+      const missedJob = await integrationPrisma.job.create({
+        data: {
+          workspaceId: owner.workspace.id,
+          createdByUserId: owner.user.id,
+          type: 'chat.session_title',
+          status: JobStatus.RUNNING,
+          payload: { title: 'Sensitive proposed title' },
+          result: { title: 'Sensitive generated title' },
+        },
+      });
+      const response = await fetch(
+        `${server.baseUrl}/api/jobs/events?types=chat.session_title&statuses=SUCCEEDED`,
+        { headers: owner.headers, signal: abortController.signal },
+      );
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('Expected SSE response body.');
+      const ready = await readUntil(reader, (text) => text.includes(`"jobId":${alreadyCompleted.id}`));
+      expect(response.status).toBe(200);
+      expect(ready).toContain('event: ready\n');
+      expect(ready).toContain('data: {}');
+      expect(ready).not.toContain(`"jobId":${privateJob.id}`);
+      expect(ready).not.toContain(`"jobId":${wrongType.id}`);
+
+      await integrationPrisma.job.update({
+        where: { id: missedJob.id },
+        data: { status: JobStatus.SUCCEEDED, completedAt: new Date() },
+      });
+      const event = await readUntil(reader, (text) => text.includes(`"jobId":${missedJob.id}`));
+      expect(event).toContain(`data: {"jobId":${missedJob.id},"type":"chat.session_title","status":"SUCCEEDED"}`);
+      expect(event).not.toContain(`"jobId":${privateJob.id}`);
+      expect(event).not.toContain(`"jobId":${wrongType.id}`);
+      expect(event).not.toContain('Sensitive proposed title');
+      expect(event).not.toContain('Sensitive generated title');
+      expect(event).not.toContain('payload');
+      expect(event).not.toContain('result');
+      expect(event).not.toContain('workspaceId');
+    } finally {
+      abortController.abort();
+      await server.close();
+    }
+  }, 20000);
+
+  it('rejects invalid category filters before opening a stream', async () => {
+    const server = await startTestServer();
+    try {
+      const owner = await createUserContext();
+      for (const query of ['types=*&statuses=SUCCEEDED', 'types=chat.session_title&statuses=unknown', 'types=chat.session_title']) {
+        const response = await fetch(`${server.baseUrl}/api/jobs/events?${query}`, { headers: owner.headers });
+        expect(response.status).toBe(400);
+      }
+      const unauthenticated = await fetch(`${server.baseUrl}/api/jobs/events?types=chat.session_title&statuses=SUCCEEDED`);
+      expect(unauthenticated.status).not.toBe(200);
+    } finally {
+      await server.close();
+    }
+  });
+
   it('wakes a job SSE stream through LISTEN/NOTIFY and emits durable re-read state', async () => {
     const server = await startTestServer();
 

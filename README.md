@@ -221,7 +221,7 @@ All API routes are mounted under `/api`.
 | Authenticated model registry | `/api/llm/*` |
 | Admin provider management | `/api/admin/llm/providers/*` |
 | Admin analytics and system status | `/api/admin/analytics/*`, `/api/admin/system/*` |
-| Workspace-scoped job status, stream, cancellation | `/api/jobs/:jobId`, `/api/jobs/:jobId/stream`, `/api/jobs/:jobId/cancel` |
+| Workspace-scoped job status, stream, cancellation, and category events | `/api/jobs/:jobId`, `/api/jobs/:jobId/stream`, `/api/jobs/:jobId/cancel`, `/api/jobs/events` |
 
 Every authenticated request requires a positive numeric `X-Workspace-Id` for an active workspace the caller owns, including admin and job routes. Identity-establishing authentication requests such as login are exempt. The login response supplies the user's personal workspace ID for the first authenticated request. JWTs identify users; they do not select a workspace or confer membership. Missing, malformed, or inaccessible workspace IDs are rejected without revealing whether another user's workspace exists.
 
@@ -249,6 +249,8 @@ curl -X POST 'http://localhost:5000/api/jobs/<job-id>/cancel' \
 ```
 
 The enqueue route accepts `mode: "success"` (default) or `mode: "fail"`. It returns `202` with a public job in `data`; the status route returns `data` for that job. The SSE route sends a `snapshot`, possible `progress` and `heartbeat` events, and a terminal `succeeded`, `failed`, or `cancelled` event. Fast jobs may finish before an intermediate update is observed.
+
+For a workspace-wide status feed, `GET /api/jobs/events?types=validation.fixture&statuses=SUCCEEDED,FAILED` accepts exact comma-separated job types and durable statuses. It sends `ready` and matching `job` events whose data contains only `jobId`, `type`, and current `status`. It also sends comment keepalives. The feed re-reads workspace-scoped job state after notification hints and scans active jobs and jobs completed within the last 15 minutes, so clients should refetch their authoritative data on `ready` and when a matching event arrives. Intermediate status changes may be coalesced; the feed is not an event history.
 
 The backend includes a Bruno API collection under `backend/bruno/SiloCore` for manual API testing.
 

@@ -67,3 +67,15 @@ Use `npm run start` in another terminal for the compiled API. The normal build i
 The current validation job is an internal deterministic queue check, not a frontend screen. An ADMIN can enqueue it with `POST /api/admin/system/validation-jobs` and optional JSON body `{ "mode": "success" }` or `{ "mode": "fail" }`. Supply `Authorization: Bearer <jwt>` and an owned workspace's numeric `X-Workspace-Id` on this and subsequent requests. The enqueue response is `202` with the public job under `data`.
 
 Use `GET /api/jobs/:jobId` to inspect the job, `GET /api/jobs/:jobId/stream` to receive SSE snapshots and updates, and `POST /api/jobs/:jobId/cancel` to request cancellation. These routes are available only through the selected owned workspace. Cancellation first produces `CANCEL_REQUESTED`; the worker marks `CANCELLED` at a checkpoint. Jobs can also finish `SUCCEEDED` or `FAILED`. A fast job may reach a terminal state before the stream emits an intermediate progress event.
+
+## Workspace job-status feed
+
+`GET /api/jobs/events` is a reusable authenticated SSE feed for selected job categories in the request workspace. Both query parameters are required: `types` accepts up to 16 exact, comma-separated `Job.type` values (up to 128 characters each), and `statuses` accepts up to six comma-separated durable `JobStatus` values. Empty entries, wildcards and unknown statuses are rejected. For example:
+
+```http
+GET /api/jobs/events?types=validation.fixture&statuses=SUCCEEDED,FAILED
+Authorization: Bearer <jwt>
+X-Workspace-Id: <owned-workspace-id>
+```
+
+The stream sends `ready` with `{}` when established and `job` events with only `{jobId,type,status}`. It sends SSE comment keepalives every 15 seconds. PostgreSQL notifications contain only `{jobId,event}` and serve as wake-up hints; the feed re-reads durable job state under the request workspace before emitting. A five-second paginated fallback scan covers matching active jobs and jobs completed within the last 15 minutes. The feed deduplicates observed job/status pairs but does not replay every intermediate transition. Clients should reconcile their current state on `ready` and fetch authoritative data when a matching `job` event arrives.

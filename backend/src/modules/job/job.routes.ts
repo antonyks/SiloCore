@@ -16,6 +16,8 @@ export function createJobRoutes(dependencies: {
 
   router.use(authenticateRequest);
 
+  router.get('/events', controller.streamJobEvents);
+
   router.get(
     '/:jobId',
     validateJobId,

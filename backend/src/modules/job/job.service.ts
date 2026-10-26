@@ -46,6 +46,14 @@ export function createJobService(dependencies: Partial<JobServiceDependencies> =
       return toPublicJob(await getExistingJobInWorkspace(jobId, workspaceId));
     },
 
+    getJobEventsByIdsInWorkspace(jobIds: number[], workspaceId: number) {
+      return repository.findEventsByIdsInWorkspace(jobIds, workspaceId);
+    },
+
+    listJobEventsInWorkspace(input: Parameters<typeof repository.listJobEventsInWorkspace>[0]) {
+      return repository.listJobEventsInWorkspace(input);
+    },
+
     async enqueueJob(
       input: EnqueueJobInput,
       queueTransport: JobQueueTransport,

@@ -1,6 +1,6 @@
 import { Prisma, JobStatus } from '@prisma/client';
 import { prisma } from '../../config/database';
-import { JobSelectFields, SelectedJob } from './job.model';
+import { JobEventSelectFields, JobSelectFields, SelectedJob, SelectedJobEvent } from './job.model';
 
 type JobRepositoryClient = Pick<Prisma.TransactionClient, 'job' | 'jobMetric' | '$queryRaw'>;
 const TERMINAL_JOB_STATUSES = [
@@ -16,6 +16,16 @@ export interface CreateQueuedJobData {
   payload: Prisma.InputJsonValue;
   maxAttempts: number;
   stage: string;
+}
+
+export interface ListJobEventsInput {
+  workspaceId: number;
+  types: string[];
+  statuses: JobStatus[];
+  completedSince?: Date;
+  beforeId?: number;
+  completedBefore?: { completedAt: Date; id: number };
+  limit: number;
 }
 
 export const JobRepository = {
@@ -48,6 +58,50 @@ export const JobRepository = {
         workspaceId,
       },
       select: JobSelectFields,
+    });
+  },
+
+  findEventsByIdsInWorkspace(ids: number[], workspaceId: number): Promise<SelectedJobEvent[]> {
+    return prisma.job.findMany({
+      where: { id: { in: ids }, workspaceId },
+      select: JobEventSelectFields,
+    });
+  },
+
+  listJobEventsInWorkspace(input: ListJobEventsInput): Promise<SelectedJobEvent[]> {
+    if (input.completedSince) {
+      return prisma.job.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          type: { in: input.types },
+          status: { in: input.statuses },
+          completedAt: { gte: input.completedSince },
+          ...(input.completedBefore ? {
+            OR: [
+              { completedAt: { lt: input.completedBefore.completedAt } },
+              {
+                completedAt: input.completedBefore.completedAt,
+                id: { lt: input.completedBefore.id },
+              },
+            ],
+          } : {}),
+        },
+        orderBy: [{ completedAt: 'desc' }, { id: 'desc' }],
+        take: input.limit,
+        select: JobEventSelectFields,
+      });
+    }
+
+    return prisma.job.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        type: { in: input.types },
+        status: { in: input.statuses },
+        ...(input.beforeId ? { id: { lt: input.beforeId } } : {}),
+      },
+      orderBy: { id: 'desc' },
+      take: input.limit,
+      select: JobEventSelectFields,
     });
   },
 

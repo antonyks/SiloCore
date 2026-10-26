@@ -5,6 +5,7 @@ import { AuthenticatedRequest } from '../../types/authenticatedRequest';
 import { JobService } from './job.service';
 import { JobSseEventType, PublicJob } from './job.types';
 import { jobNotificationListener } from './job.notifications';
+import { streamWorkspaceJobEvents } from './job.events';
 
 const JOB_SSE_POLL_INTERVAL_MS = 1000;
 const JOB_SSE_HEARTBEAT_INTERVAL_MS = 15000;
@@ -68,6 +69,10 @@ export function createJobController(dependencies: Partial<JobControllerDependenc
   const serviceDependency = dependencies.serviceDependency ?? JobService;
 
   const service = {
+    streamJobEvents(req: AuthenticatedRequest, res: Response): void {
+      streamWorkspaceJobEvents(req, res, serviceDependency);
+    },
+
     async getJob(req: AuthenticatedRequest, res: Response): Promise<void> {
       const jobId = parseJobId(req.params.jobId);
       const job = await serviceDependency.getJobInWorkspace(jobId, getWorkspaceId(req));

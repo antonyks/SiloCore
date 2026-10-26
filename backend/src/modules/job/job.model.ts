@@ -29,4 +29,15 @@ export type SelectedJob = Prisma.JobGetPayload<{
   select: typeof JobSelectFields;
 }>;
 
+export const JobEventSelectFields = {
+  id: true,
+  type: true,
+  status: true,
+  completedAt: true,
+} as const;
+
+export type SelectedJobEvent = Prisma.JobGetPayload<{
+  select: typeof JobEventSelectFields;
+}>;
+
 export const JobModel = prisma.job;

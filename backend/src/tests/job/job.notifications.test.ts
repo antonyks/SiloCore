@@ -127,4 +127,34 @@ describe('job notifications', () => {
     await listener.close();
     expect(fakeClient.end).toHaveBeenCalledTimes(1);
   });
+
+  it('fans out category hints without changing per-job subscriptions and removes category subscribers', async () => {
+    const fakeClient = new FakePgClient();
+    const listener = new JobNotificationListener(() => fakeClient as never);
+    const categorySubscriber = jest.fn();
+    const jobSubscriber = jest.fn();
+    const unsubscribeCategory = listener.subscribeToCategories(categorySubscriber);
+    listener.subscribe(1, jobSubscriber);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    fakeClient.emit('notification', {
+      channel: JOB_NOTIFICATION_CHANNEL,
+      payload: '{"jobId":1,"event":"succeeded"}',
+    });
+    fakeClient.emit('notification', {
+      channel: JOB_NOTIFICATION_CHANNEL,
+      payload: '{"jobId":2,"event":"failed"}',
+    });
+
+    expect(categorySubscriber).toHaveBeenCalledTimes(2);
+    expect(jobSubscriber).toHaveBeenCalledTimes(1);
+    unsubscribeCategory();
+    fakeClient.emit('notification', {
+      channel: JOB_NOTIFICATION_CHANNEL,
+      payload: '{"jobId":3,"event":"queued"}',
+    });
+    expect(categorySubscriber).toHaveBeenCalledTimes(2);
+    await listener.close();
+  });
 });
