@@ -7,6 +7,29 @@ import {
 export type LlmProviderCreateInput = LlmProviderConfigCreateInput;
 export type LlmProviderUpdateInput = LlmProviderConfigUpdateInput;
 
+export interface DraftProviderProbeInput {
+  providerId?: number;
+  type: LlmProviderType;
+  baseUrl: string;
+  timeoutMs?: number | null;
+  extraHeaders?: Record<string, string>;
+  apiKey?: string | null;
+  defaultModel?: string;
+}
+
+export interface DraftProviderModelListResult {
+  status: 'success' | 'error';
+  models: Array<{ modelId: string; modelName: string }>;
+  errorMessage?: string;
+  errorCode?: string;
+}
+
+export interface DraftProviderTestResult {
+  status: 'success' | 'error';
+  errorMessage?: string;
+  errorCode?: string;
+}
+
 export interface SanitizedLlmProviderConfig {
   id: number;
   name: string;

@@ -1,9 +1,11 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { KeyRound, Save } from "lucide-react";
-import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { ChevronDown, KeyRound, RefreshCw, Save } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
+import { providerConfigService } from "../services/providerConfigService";
 import type {
+  DraftProviderProbeInput,
   LlmProviderConfigInput,
   LlmProviderType,
   SanitizedLlmProviderConfig,
@@ -199,6 +201,33 @@ const toProviderConfigInput = (
   return input;
 };
 
+const toDraftProbeInput = (
+  values: ProviderFormValues,
+  provider: SanitizedLlmProviderConfig | null,
+): DraftProviderProbeInput | null => {
+  const headers = parseHeaders(values.extraHeaders);
+  const timeout = values.timeoutMs.trim();
+  if (!headers || !isPositiveIntegerOrBlank(timeout)) return null;
+  try {
+    const url = new URL(values.baseUrl.trim());
+    if (!["http:", "https:"].includes(url.protocol) || !url.hostname) return null;
+  } catch {
+    return null;
+  }
+  if (values.apiKeyMode === "set" && !values.apiKey.trim()) return null;
+  return {
+    ...(provider ? { providerId: provider.id } : {}),
+    type: values.type,
+    baseUrl: values.baseUrl.trim(),
+    timeoutMs: timeout ? Number(timeout) : null,
+    extraHeaders: headers,
+    defaultModel: values.defaultModel.trim(),
+    ...((!provider || values.apiKeyMode === "set") && values.apiKey.trim()
+      ? { apiKey: values.apiKey.trim() } : {}),
+    ...(provider && values.apiKeyMode === "clear" ? { apiKey: null } : {}),
+  };
+};
+
 interface ProviderConfigFormProps {
   provider: SanitizedLlmProviderConfig | null;
   isSubmitting: boolean;
@@ -222,14 +251,120 @@ const ProviderConfigForm: React.FC<ProviderConfigFormProps> = ({
   const [apiKeyMode, setApiKeyMode] = useState<ApiKeyMode>(
     buildDefaultValues(provider).apiKeyMode,
   );
+  const [models, setModels] = useState<Array<{ modelId: string; modelName: string }>>([]);
+  const [modelStatus, setModelStatus] = useState("Enter valid connection details to load models.");
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [isTestingModel, setIsTestingModel] = useState(false);
+  const [isModelListOpen, setIsModelListOpen] = useState(false);
+  const [showAllModels, setShowAllModels] = useState(false);
+  const [activeModelIndex, setActiveModelIndex] = useState(0);
+  const [testResult, setTestResult] = useState<{ status: "success" | "error"; message: string } | null>(null);
+  const [refreshCount, setRefreshCount] = useState(0);
+  const testController = useRef<AbortController | null>(null);
+  const modelListRef = useRef<HTMLUListElement | null>(null);
   const {
     register,
     handleSubmit,
+    control,
+    getValues,
+    setValue,
+    trigger,
     formState: { errors },
   } = useForm<ProviderFormValues>({
     resolver: zodResolver(providerFormSchema),
     defaultValues: buildDefaultValues(provider),
   });
+  const [type, baseUrl, timeoutMs, extraHeaders, apiKey, apiKeyModeValue, defaultModel] = useWatch({
+    control,
+    name: ["type", "baseUrl", "timeoutMs", "extraHeaders", "apiKey", "apiKeyMode", "defaultModel"],
+  });
+  const matchingModels = (showAllModels ? models : models.filter((model) =>
+    `${model.modelId} ${model.modelName}`.toLowerCase().includes((defaultModel ?? "").toLowerCase())
+  )).slice(0, 100);
+  const visibleActiveIndex = Math.min(activeModelIndex, matchingModels.length - 1);
+  const modelField = register("defaultModel", {
+    onChange: () => {
+      setShowAllModels(false);
+      setActiveModelIndex(0);
+      setIsModelListOpen(true);
+    },
+  });
+
+  const selectModel = (modelId: string) => {
+    setValue("defaultModel", modelId, { shouldDirty: true, shouldTouch: true, shouldValidate: true });
+    setIsModelListOpen(false);
+  };
+
+  useEffect(() => {
+    if (isModelListOpen && matchingModels.length > 0) {
+      modelListRef.current?.children[visibleActiveIndex]?.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [activeModelIndex, isModelListOpen, matchingModels.length, visibleActiveIndex]);
+
+  useEffect(() => {
+    const input = toDraftProbeInput(getValues(), provider);
+    if (!input) {
+      setModels([]);
+      setModelStatus("Enter valid connection details to load models.");
+      setIsLoadingModels(false);
+      return;
+    }
+    const controller = new AbortController();
+    setModels([]);
+    setModelStatus("Loading models…");
+    setIsLoadingModels(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await providerConfigService.previewModels(input, controller.signal);
+        if (controller.signal.aborted) return;
+        setModels(result.models);
+        if (document.activeElement?.id === "provider-default-model" && result.models.length > 0) {
+          setIsModelListOpen(true);
+        }
+        setModelStatus(result.status === "success"
+          ? result.models.length ? `${result.models.length} models available. You can also enter a model ID.` : "No models were listed. You can enter a model ID manually."
+          : `${result.errorMessage ?? "Could not load models"}. You can enter a model ID manually.`);
+      } catch {
+        if (!controller.signal.aborted) setModelStatus("Could not load models. You can enter a model ID manually.");
+      } finally {
+        if (!controller.signal.aborted) setIsLoadingModels(false);
+      }
+    }, 700);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [type, baseUrl, timeoutMs, extraHeaders, apiKey, apiKeyModeValue, refreshCount, getValues, provider]);
+
+  useEffect(() => {
+    testController.current?.abort();
+    setIsTestingModel(false);
+    setTestResult(null);
+  }, [type, baseUrl, timeoutMs, extraHeaders, apiKey, apiKeyModeValue, defaultModel]);
+
+  useEffect(() => () => { testController.current?.abort(); }, []);
+
+  const testModel = async () => {
+    if (!await trigger(["type", "baseUrl", "timeoutMs", "extraHeaders", "apiKey", "defaultModel"])) return;
+    const input = toDraftProbeInput(getValues(), provider);
+    if (!input || !input.defaultModel) {
+      setTestResult({ status: "error", message: "Enter valid connection details and a model ID first." });
+      return;
+    }
+    testController.current?.abort();
+    const controller = new AbortController();
+    testController.current = controller;
+    setIsTestingModel(true);
+    setTestResult(null);
+    try {
+      const result = await providerConfigService.previewTest(input, controller.signal);
+      if (!controller.signal.aborted) setTestResult({
+        status: result.status,
+        message: result.status === "success" ? "Model responded successfully." : result.errorMessage ?? "Model test failed.",
+      });
+    } catch {
+      if (!controller.signal.aborted) setTestResult({ status: "error", message: "Model test failed. Check the connection and try again." });
+    } finally {
+      if (!controller.signal.aborted) setIsTestingModel(false);
+    }
+  };
   const apiKeyModeField = register("apiKeyMode", {
     onChange: (event: React.ChangeEvent<HTMLInputElement>) => {
       setApiKeyMode(event.target.value as ApiKeyMode);
@@ -283,17 +418,6 @@ const ProviderConfigForm: React.FC<ProviderConfigFormProps> = ({
             disabled={isSubmitting}
           />
           <div className={errorClassName}>{errors.baseUrl?.message}</div>
-        </label>
-
-        <label className="block">
-          <span className="text-xs font-medium text-slate-700">Default Model</span>
-          <input
-            className={inputClassName}
-            placeholder="llama3.1"
-            {...register("defaultModel")}
-            disabled={isSubmitting}
-          />
-          <div className={errorClassName}>{errors.defaultModel?.message}</div>
         </label>
 
         <label className="block">
@@ -445,6 +569,110 @@ const ProviderConfigForm: React.FC<ProviderConfigFormProps> = ({
             </div>
           )}
           <div className={errorClassName}>{errors.apiKey?.message}</div>
+        </div>
+
+        <div className="lg:col-span-2 border-t border-slate-200 pt-4">
+          <label htmlFor="provider-default-model" className="text-xs font-medium text-slate-700">Default Model</label>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <div className="min-w-52 flex-1" onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsModelListOpen(false);
+            }}>
+              <div className="relative">
+                <input
+                  id="provider-default-model"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={isModelListOpen && models.length > 0}
+                  aria-controls="provider-model-suggestions"
+                  aria-activedescendant={isModelListOpen && matchingModels.length > 0
+                    ? `provider-model-option-${visibleActiveIndex}` : undefined}
+                  className={`${inputClassName} pr-9`}
+                  placeholder="Select or enter a model ID"
+                  autoComplete="off"
+                  {...modelField}
+                  onFocus={() => {
+                    setShowAllModels(models.some((model) => model.modelId === getValues("defaultModel")));
+                    setActiveModelIndex(0);
+                    setIsModelListOpen(true);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape" && isModelListOpen) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setIsModelListOpen(false);
+                    } else if (event.key === "ArrowDown" && models.length > 0) {
+                      event.preventDefault();
+                      setIsModelListOpen(true);
+                      setActiveModelIndex((index) => isModelListOpen
+                        ? Math.min(index + 1, Math.max(matchingModels.length - 1, 0)) : 0);
+                    } else if (event.key === "ArrowUp" && isModelListOpen && matchingModels.length > 0) {
+                      event.preventDefault();
+                      setActiveModelIndex((index) => Math.max(index - 1, 0));
+                    } else if (event.key === "Enter" && isModelListOpen && matchingModels.length > 0) {
+                      event.preventDefault();
+                      selectModel(matchingModels[visibleActiveIndex].modelId);
+                    }
+                  }}
+                  disabled={isSubmitting}
+                />
+                <button
+                  type="button"
+                  aria-label="Show available models"
+                  aria-expanded={isModelListOpen && models.length > 0}
+                  disabled={isSubmitting || models.length === 0}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    const nextOpen = !isModelListOpen;
+                    document.getElementById("provider-default-model")?.focus();
+                    setShowAllModels(true);
+                    setActiveModelIndex(0);
+                    setIsModelListOpen(nextOpen);
+                  }}
+                  className="absolute inset-y-0 right-0 flex w-9 items-center justify-center text-slate-500 hover:text-cyan-800 disabled:opacity-40"
+                >
+                  <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+              {isModelListOpen && models.length > 0 && (
+                <div className="mt-1 overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
+                  <ul ref={modelListRef} id="provider-model-suggestions" role="listbox" aria-label="Available models" className="max-h-52 overflow-y-auto py-1">
+                    {matchingModels.length > 0 ? matchingModels.map((model, index) => (
+                      <li
+                        key={model.modelId}
+                        id={`provider-model-option-${index}`}
+                        role="option"
+                        aria-label={model.modelName === model.modelId ? model.modelId : `${model.modelId}, ${model.modelName}`}
+                        aria-selected={model.modelId === defaultModel}
+                        title={model.modelName === model.modelId ? model.modelId : `${model.modelId} — ${model.modelName}`}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => selectModel(model.modelId)}
+                        className={`cursor-pointer px-3 py-2 text-sm ${index === visibleActiveIndex ? "bg-cyan-50 text-cyan-950" : "text-slate-800 hover:bg-slate-50"}`}
+                      >
+                        <span className="block truncate font-medium">{model.modelId}</span>
+                        {model.modelName !== model.modelId && <span className="block truncate text-xs text-slate-500">{model.modelName}</span>}
+                      </li>
+                    )) : <li className="px-3 py-2 text-xs text-slate-500">No matching models. You can use the typed ID.</li>}
+                  </ul>
+                  {matchingModels.length === 100 && <div className="border-t border-slate-100 px-3 py-1.5 text-xs text-slate-500">Showing the first 100 matches. Type to narrow the list.</div>}
+                </div>
+              )}
+            </div>
+            <button type="button" onClick={() => setRefreshCount((count) => count + 1)} disabled={isSubmitting || isLoadingModels}
+              className="inline-flex h-9 items-center gap-1 rounded-md border border-slate-200 px-3 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-60">
+              <RefreshCw className="h-4 w-4" aria-hidden="true" /> Refresh models
+            </button>
+            <button type="button" onClick={testModel} disabled={isSubmitting || isTestingModel}
+              className="h-9 rounded-md border border-cyan-700 px-3 text-sm font-medium text-cyan-800 hover:bg-cyan-50 disabled:opacity-60">
+              {isTestingModel ? "Testing…" : "Test model"}
+            </button>
+          </div>
+          <div className={errorClassName}>{errors.defaultModel?.message}</div>
+          <p role="status" className="text-xs text-slate-600">{modelStatus}</p>
+          {testResult && <p role={testResult.status === "error" ? "alert" : "status"}
+            className={`mt-2 text-sm ${testResult.status === "error" ? "text-red-700" : "text-emerald-700"}`}>
+            {testResult.message}
+          </p>}
+          <p className="mt-1 text-xs text-slate-500">Testing sends a short prompt to this model. Saving does not require a successful test.</p>
         </div>
       </div>
 

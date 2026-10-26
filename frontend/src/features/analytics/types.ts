@@ -65,6 +65,27 @@ export interface LlmProviderConfigInput {
   apiKey?: string | null;
 }
 
+export interface DraftProviderProbeInput {
+  providerId?: number;
+  type: LlmProviderType;
+  baseUrl: string;
+  timeoutMs?: number | null;
+  extraHeaders?: Record<string, string>;
+  apiKey?: string | null;
+  defaultModel?: string;
+}
+
+export interface DraftProviderModelListResult {
+  status: "success" | "error";
+  models: Array<{ modelId: string; modelName: string }>;
+  errorMessage?: string;
+}
+
+export interface DraftProviderTestResult {
+  status: "success" | "error";
+  errorMessage?: string;
+}
+
 export interface LlmListedModel {
   providerId: string;
   providerName: string;

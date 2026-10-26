@@ -193,6 +193,10 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
       return createAdapter(toProviderConfig(provider));
     },
 
+    createProviderFromConfig(config: LlmProviderConfig): ILlmProvider | null {
+      return createAdapter(config);
+    },
+
     async listAvailableModels(correlation: LlmOperationCorrelation = {}): Promise<LlmModelListResult> {
       const providers = await repository.findActive();
       const unavailableProviderIds = new Set<string>();

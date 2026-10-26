@@ -2,7 +2,7 @@ import { Response } from 'express';
 import { InvalidInputError } from '../../../errors';
 import { AuthenticatedRequest } from '../../../types/authenticatedRequest';
 import { LlmProviderService } from './llmProvider.service';
-import { LlmProviderCreateInput, LlmProviderUpdateInput } from './llmProvider.types';
+import { DraftProviderProbeInput, LlmProviderCreateInput, LlmProviderUpdateInput } from './llmProvider.types';
 
 function parseProviderId(value: string): number {
   const id = parseInt(value, 10);
@@ -29,6 +29,18 @@ export function createLlmProviderController(dependencies: Partial<LlmProviderCon
       const data = req.body as LlmProviderCreateInput;
       const provider = await serviceDependency.createProvider(data);
       res.status(201).json({ data: provider });
+    },
+
+    async previewProviderModels(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const result = await serviceDependency.previewProviderModels(req.body as DraftProviderProbeInput, { requestId: req.requestId });
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).json({ data: result });
+    },
+
+    async previewProviderModelTest(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const result = await serviceDependency.previewProviderModelTest(req.body as DraftProviderProbeInput, { requestId: req.requestId });
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).json({ data: result });
     },
 
     async getProvider(req: AuthenticatedRequest, res: Response): Promise<void> {

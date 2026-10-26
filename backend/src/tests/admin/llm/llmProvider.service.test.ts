@@ -224,6 +224,63 @@ describe('LlmProviderService', () => {
   });
 
   describe('provider operations', () => {
+    it('lists models from unsaved draft settings without writing a provider', async () => {
+      const listModels = jest.spyOn(OllamaProvider.prototype, 'listModels')
+        .mockResolvedValue([createListedModel('draft-model')]);
+
+      const result = await LlmProviderService.previewProviderModels({
+        type: 'ollama', baseUrl: 'http://localhost:11434', apiKey: 'draft-secret',
+      });
+
+      expect(result).toEqual({ status: 'success', models: [{ modelId: 'draft-model', modelName: 'draft-model' }] });
+      expect(listModels).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.llmProviderConfig.create).not.toHaveBeenCalled();
+      expect(JSON.stringify(result)).not.toContain('draft-secret');
+    });
+
+    it('tests the unsaved model with the stored secret when the edit key is unchanged', async () => {
+      const complete = jest.spyOn(OllamaProvider.prototype, 'complete')
+        .mockResolvedValue({ model: 'draft-model', content: 'OK' });
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider());
+
+      const result = await LlmProviderService.previewProviderModelTest({
+        providerId: 1, type: 'ollama', baseUrl: 'http://localhost:11434', defaultModel: 'draft-model',
+      });
+
+      expect(result).toEqual({ status: 'success' });
+      expect(complete).toHaveBeenCalledWith(expect.objectContaining({
+        model: 'draft-model', messages: [{ role: 'user', content: 'Reply with OK.' }],
+      }), expect.any(Object));
+      expect((complete.mock.contexts[0] as OllamaProvider).config.apiKey).toBe('secret-key');
+      expect(mockPrisma.llmProviderConfig.update).not.toHaveBeenCalled();
+    });
+
+    it('uses a replacement draft key without changing the saved key', async () => {
+      const complete = jest.spyOn(OllamaProvider.prototype, 'complete')
+        .mockResolvedValue({ model: 'draft-model', content: 'OK' });
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider());
+
+      await LlmProviderService.previewProviderModelTest({
+        providerId: 1, type: 'ollama', baseUrl: 'http://localhost:11434',
+        apiKey: 'replacement-secret', defaultModel: 'draft-model',
+      });
+
+      expect((complete.mock.contexts[0] as OllamaProvider).config.apiKey).toBe('replacement-secret');
+      expect(mockPrisma.llmProviderConfig.update).not.toHaveBeenCalled();
+    });
+
+    it('returns a safe error when the draft model request fails', async () => {
+      jest.spyOn(OllamaProvider.prototype, 'complete')
+        .mockRejectedValue(new InvalidInputError('Bearer private-token; secret prompt'));
+
+      const result = await LlmProviderService.previewProviderModelTest({
+        type: 'ollama', baseUrl: 'http://localhost:11434', defaultModel: 'invalid-model',
+      });
+
+      expect(result).toEqual({ status: 'error', errorMessage: 'Provider rejected the request', errorCode: 'PROVIDER_INVALID_REQUEST' });
+      expect(JSON.stringify(result)).not.toContain('private-token');
+    });
+
     it('returns a safe error code when provider initialization rejects input', async () => {
       jest.spyOn(OllamaProvider.prototype, 'initialise')
         .mockRejectedValue(new InvalidInputError('Bearer private-token; prompt: private chat'));

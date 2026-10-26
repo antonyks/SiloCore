@@ -10,6 +10,16 @@ function isStringRecord(value: unknown): boolean {
   return Object.values(value).every((headerValue) => typeof headerValue === 'string');
 }
 
+function isHttpUrl(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && Boolean(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 function isGenerationDefaults(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return false;
@@ -39,6 +49,20 @@ export const validateProviderId = [
   param('id')
     .isInt({ min: 1 })
     .withMessage('Valid provider ID is required'),
+];
+
+export const validateDraftProviderProbe = [
+  body('providerId').optional().custom((value) => Number.isInteger(value) && value > 0).withMessage('Valid provider ID is required'),
+  body('type').isIn(SUPPORTED_LLM_PROVIDER_TYPES).withMessage('Unsupported provider type'),
+  body('baseUrl').custom(isHttpUrl).withMessage('Valid HTTP or HTTPS Base URL is required'),
+  body('timeoutMs').optional({ nullable: true }).custom((value) => Number.isInteger(value) && value > 0).withMessage('Timeout must be a positive integer'),
+  body('extraHeaders').optional().custom(isStringRecord).withMessage('Extra headers must be an object with string values'),
+  body('apiKey').optional({ nullable: true }).isString().withMessage('API key must be a string or null'),
+];
+
+export const validateDraftProviderTest = [
+  ...validateDraftProviderProbe,
+  body('defaultModel').isString().trim().notEmpty().withMessage('Default model is required'),
 ];
 
 export const validateProviderCreate = [
@@ -138,4 +162,21 @@ export const handleValidationErrors = (req: Request, res: Response, next: NextFu
     });
   }
   next();
+};
+
+/** Draft probes may contain API keys or secret header values; never echo rejected input. */
+export const handleDraftValidationErrors = (req: Request, res: Response, next: NextFunction) => {
+  const errors = validationResult(req);
+  if (errors.isEmpty()) {
+    next();
+    return;
+  }
+  res.status(400).json({
+    success: false,
+    message: 'Validation failed',
+    errors: errors.array().map((error) => ({
+      msg: error.msg,
+      ...(error.type === 'field' ? { path: error.path, location: error.location } : {}),
+    })),
+  });
 };

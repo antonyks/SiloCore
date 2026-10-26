@@ -57,6 +57,37 @@ const registerProviders = () => {
 };
 
 describe('ProviderConfigsPage capabilities', () => {
+  it('suggests draft models and tests the selected model before saving', async () => {
+    registerProviders();
+    const previewRequest = vi.fn();
+    const testRequest = vi.fn();
+    server.use(
+      http.post(`${API_BASE_URL}/admin/llm/providers/preview/models`, async ({ request }) => {
+        previewRequest(await request.json());
+        return HttpResponse.json({ data: { status: 'success', models: [{ modelId: 'draft-model', modelName: 'Draft Model' }] } });
+      }),
+      http.post(`${API_BASE_URL}/admin/llm/providers/preview/test`, async ({ request }) => {
+        testRequest(await request.json());
+        return HttpResponse.json({ data: { status: 'success' } });
+      }),
+    );
+    renderWithProviders(<ProviderConfigsPage />, { initialEntries: ['/admin/llm/providers'] });
+    await userEvent.click(screen.getByRole('button', { name: 'Add Provider' }));
+    const dialog = screen.getByRole('dialog', { name: 'Add provider' });
+    await waitFor(() => expect(previewRequest).toHaveBeenCalled());
+    const modelInput = within(dialog).getByRole('combobox', { name: 'Default Model' });
+    expect(modelInput).toHaveAttribute('aria-controls', 'provider-model-suggestions');
+    await userEvent.click(modelInput);
+    const modelList = within(dialog).getByRole('listbox', { name: 'Available models' });
+    expect(within(modelList).getByRole('option')).toHaveTextContent('draft-model');
+    await userEvent.keyboard('{ArrowDown}{Enter}');
+    expect(modelInput).toHaveValue('draft-model');
+    expect(modelInput).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Test model' }));
+    await waitFor(() => expect(testRequest).toHaveBeenCalledWith(expect.objectContaining({ defaultModel: 'draft-model' })));
+    expect(await within(dialog).findByText('Model responded successfully.')).toBeInTheDocument();
+  });
+
   it('lets an admin change the effective default and refreshes the badge', async () => {
     let effectiveId = 1;
     server.use(
@@ -211,7 +242,7 @@ describe('ProviderConfigsPage capabilities', () => {
     await userEvent.click(addButton);
     const form = screen.getByRole('dialog', { name: 'Add provider' });
     await userEvent.type(within(form).getByRole('textbox', { name: 'Name' }), 'New Provider');
-    await userEvent.type(within(form).getByRole('textbox', { name: 'Default Model' }), 'new-model');
+    await userEvent.type(within(form).getByRole('combobox', { name: 'Default Model' }), 'new-model');
     await userEvent.click(within(form).getByRole('button', { name: 'Save Provider' }));
     expect(await screen.findByRole('status')).toHaveTextContent('New Provider was created.');
     expect(createRequest).toHaveBeenCalledTimes(1);

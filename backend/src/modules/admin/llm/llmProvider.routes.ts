@@ -4,6 +4,9 @@ import { UserRole } from '../../user/user.model';
 import { LlmProviderController } from './llmProvider.controller';
 import {
   handleValidationErrors,
+  handleDraftValidationErrors,
+  validateDraftProviderProbe,
+  validateDraftProviderTest,
   validateModelPull,
   validateProviderCreate,
   validateProviderId,
@@ -27,6 +30,20 @@ export function createLlmProviderRoutes(dependencies: {
     validateProviderCreate,
     handleValidationErrors,
     controller.createProvider,
+  );
+
+  router.post(
+    '/providers/preview/models',
+    validateDraftProviderProbe,
+    handleDraftValidationErrors,
+    controller.previewProviderModels,
+  );
+
+  router.post(
+    '/providers/preview/test',
+    validateDraftProviderTest,
+    handleDraftValidationErrors,
+    controller.previewProviderModelTest,
   );
 
   router.get(

@@ -5,7 +5,14 @@ import { SelectedLlmProviderConfig } from '../../llm/llmProviderConfig.model';
 import { LlmProviderConfigRepository } from '../../llm/llmProviderConfig.repository';
 import { fromDbProviderType } from '../../llm/llmProviderConfig.types';
 import { UNSUPPORTED_LLM_PROVIDER_CAPABILITIES } from '../../llm/llm.types';
+import type { LlmProviderConfig } from '../../llm/llm.types';
+import { ensureLlmProviderCapability } from '../../llm/llm.capabilities';
+import { createLlmOperationContext, LlmOperationCorrelation } from '../../llm/llm.operation';
+import { getPublicLlmErrorCode, getPublicLlmErrorMessage, normalizeAdapterError } from '../../llm/llm.safeError';
 import {
+  DraftProviderModelListResult,
+  DraftProviderProbeInput,
+  DraftProviderTestResult,
   LlmProviderCreateInput,
   LlmProviderUpdateInput,
   SanitizedLlmProviderConfig,
@@ -43,6 +50,31 @@ export function createLlmProviderService(dependencies: Partial<LlmProviderServic
     };
   }
 
+  async function draftConfig(input: DraftProviderProbeInput, timeoutCap: number): Promise<LlmProviderConfig> {
+    const saved = input.providerId === undefined ? null : await llm.getProviderConfigById(input.providerId);
+    return {
+      id: saved ? String(saved.id) : 'draft',
+      name: saved?.name ?? 'Draft provider',
+      type: input.type,
+      enabled: true,
+      baseUrl: input.baseUrl.trim(),
+      apiKey: input.apiKey === undefined ? saved?.apiKey ?? undefined : input.apiKey ?? undefined,
+      defaultModel: input.defaultModel?.trim() ?? saved?.defaultModel ?? '',
+      timeoutMs: Math.min(input.timeoutMs ?? timeoutCap, timeoutCap),
+      extraHeaders: input.extraHeaders ?? {},
+      generationDefaults: {},
+    };
+  }
+
+  function probeError(error: unknown, providerId: string) {
+    const safeError = normalizeAdapterError(error, providerId);
+    return {
+      status: 'error' as const,
+      errorMessage: getPublicLlmErrorMessage(safeError),
+      errorCode: getPublicLlmErrorCode(safeError),
+    };
+  }
+
   const service = {
     async listProviders(): Promise<SanitizedLlmProviderConfig[]> {
       await llm.ensureBootstrapProviderConfig();
@@ -54,6 +86,53 @@ export function createLlmProviderService(dependencies: Partial<LlmProviderServic
     async getProvider(id: number): Promise<SanitizedLlmProviderConfig> {
       const provider = await llm.getProviderConfigById(id);
       return sanitizeProvider(provider);
+    },
+
+    async previewProviderModels(input: DraftProviderProbeInput, correlation: LlmOperationCorrelation = {}): Promise<DraftProviderModelListResult> {
+      const config = await draftConfig(input, 15000);
+      let adapter;
+      try {
+        adapter = llm.createProviderFromConfig(config);
+        if (!adapter) return { status: 'error', models: [], errorMessage: 'No adapter is available for this provider type', errorCode: 'ADAPTER_UNAVAILABLE' };
+        ensureLlmProviderCapability(adapter, 'modelListing');
+        const models = await adapter.listModels(createLlmOperationContext(correlation));
+        return {
+          status: 'success',
+          models: models
+            .filter((model) => typeof model.modelId === 'string' && model.modelId.trim().length > 0)
+            .map(({ modelId, modelName }) => ({
+              modelId,
+              modelName: typeof modelName === 'string' && modelName.trim() ? modelName : modelId,
+            })),
+        };
+      } catch (error) {
+        return { ...probeError(error, config.id), models: [] };
+      } finally {
+        await adapter?.destroy().catch(() => undefined);
+      }
+    },
+
+    async previewProviderModelTest(input: DraftProviderProbeInput, correlation: LlmOperationCorrelation = {}): Promise<DraftProviderTestResult> {
+      const config = await draftConfig(input, 120000);
+      let adapter;
+      try {
+        adapter = llm.createProviderFromConfig(config);
+        if (!adapter) return { status: 'error', errorMessage: 'No adapter is available for this provider type', errorCode: 'ADAPTER_UNAVAILABLE' };
+        ensureLlmProviderCapability(adapter, 'completion');
+        const result = await adapter.complete({
+          model: config.defaultModel,
+          messages: [{ role: 'user', content: 'Reply with OK.' }],
+          maxTokens: 128,
+        }, createLlmOperationContext(correlation));
+        if (!result.content?.trim() && !result.reasoning?.trim()) {
+          return { status: 'error', errorMessage: 'Provider returned an empty response' };
+        }
+        return { status: 'success' };
+      } catch (error) {
+        return probeError(error, config.id);
+      } finally {
+        await adapter?.destroy().catch(() => undefined);
+      }
     },
 
     async createProvider(data: LlmProviderCreateInput): Promise<SanitizedLlmProviderConfig> {

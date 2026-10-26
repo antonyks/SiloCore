@@ -1,12 +1,29 @@
 import axiosClient from "../../../lib/axiosClient";
 import type { ApiResponse } from "../../../types/api";
 import type {
+  DraftProviderModelListResult,
+  DraftProviderProbeInput,
+  DraftProviderTestResult,
   LlmProviderConfigInput,
   LlmProviderOperationResult,
   SanitizedLlmProviderConfig,
 } from "../types";
 
 export const providerConfigService = {
+  async previewModels(input: DraftProviderProbeInput, signal?: AbortSignal): Promise<DraftProviderModelListResult> {
+    const { data } = await axiosClient.post<ApiResponse<DraftProviderModelListResult>>(
+      "/admin/llm/providers/preview/models", input, { signal, timeout: 20000 },
+    );
+    return data.data;
+  },
+
+  async previewTest(input: DraftProviderProbeInput, signal?: AbortSignal): Promise<DraftProviderTestResult> {
+    const { data } = await axiosClient.post<ApiResponse<DraftProviderTestResult>>(
+      "/admin/llm/providers/preview/test", input, { signal, timeout: 125000 },
+    );
+    return data.data;
+  },
+
   async getProviders(): Promise<SanitizedLlmProviderConfig[]> {
     const { data } = await axiosClient.get<ApiResponse<SanitizedLlmProviderConfig[]>>(
       "/admin/llm/providers",
