@@ -341,6 +341,15 @@ const getMessageStyles = (author: ChatSessionMessage["author"]) => {
   return "border-slate-200 bg-white";
 };
 
+const getCollapsedMessagePreview = (message: ChatSessionMessage) => {
+  const content = message.content.replace(/\s+/g, " ").trim();
+  if (!content) {
+    return message.metadata?.reasoning ? "Reasoning available" : "No message content";
+  }
+
+  return content.length > 120 ? `${content.slice(0, 120).trimEnd()}…` : content;
+};
+
 const MessageAuthorIcon: React.FC<{ author: ChatSessionMessage["author"] }> = ({ author }) => {
   if (author === "ASSISTANT") {
     return <Bot className="h-4 w-4" aria-hidden="true" />;
@@ -495,6 +504,7 @@ const Home: React.FC = () => {
   const [streamError, setStreamError] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<number | null>(null);
   const [copyErrorMessageId, setCopyErrorMessageId] = useState<number | null>(null);
+  const [collapsedMessageIds, setCollapsedMessageIds] = useState<Set<number>>(() => new Set());
 
   const listParams = useMemo(
     () => ({
@@ -614,10 +624,12 @@ const Home: React.FC = () => {
   useEffect(() => {
     if (!selectedSessionId) {
       setPromptDraft("");
+      setCollapsedMessageIds(new Set());
       return;
     }
 
     setPromptDraft(promptDraftsBySessionRef.current[selectedSessionId] || "");
+    setCollapsedMessageIds(new Set());
     setPromptValidationError(null);
     setStreamError(null);
     shouldStickToBottomRef.current = true;
@@ -982,6 +994,19 @@ const Home: React.FC = () => {
 
   const reconcileAssistantMessage = (sessionId: number, assistantMessage: ChatSessionMessage) => {
     const streamingAssistantId = streamingAssistantIdRef.current;
+
+    if (streamingAssistantId !== null) {
+      setCollapsedMessageIds((current) => {
+        if (!current.has(streamingAssistantId)) {
+          return current;
+        }
+
+        const next = new Set(current);
+        next.delete(streamingAssistantId);
+        next.add(assistantMessage.id);
+        return next;
+      });
+    }
 
     updateCachedMessages(sessionId, (messages) => {
       if (messages.some((message) => message.id === assistantMessage.id)) {
@@ -1755,61 +1780,97 @@ const Home: React.FC = () => {
                     const isCopied = copiedMessageId === message.id;
                     const copyFailed = copyErrorMessageId === message.id;
                     const hasCopyableContent = message.content.length > 0;
+                    const isCollapsed = collapsedMessageIds.has(message.id);
+                    const messageBodyId = `chat-message-${message.id}-body`;
+                    const messagePreview = getCollapsedMessagePreview(message);
 
                     return (
                       <article
                         key={message.id}
-                        className={`max-w-full rounded-md border p-4 ${getMessageStyles(message.author)}`}
+                        className={`max-w-full rounded-md border ${isCollapsed ? "p-3" : "p-4"} ${getMessageStyles(message.author)}`}
                       >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-100 text-slate-600">
-                              <MessageAuthorIcon author={message.author} />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCollapsedMessageIds((current) => {
+                              const next = new Set(current);
+                              if (next.has(message.id)) {
+                                next.delete(message.id);
+                              } else {
+                                next.add(message.id);
+                              }
+                              return next;
+                            })
+                          }
+                          aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${message.author.toLowerCase()} message: ${messagePreview}`}
+                          aria-expanded={!isCollapsed}
+                          aria-controls={messageBodyId}
+                          className="flex w-full min-w-0 items-start gap-3 rounded-md text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600"
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                <span className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-100 text-slate-600">
+                                  <MessageAuthorIcon author={message.author} />
+                                </span>
+                                {message.author}
+                              </span>
+                              <time className="text-xs text-slate-400">
+                                {formatMessageTime(message.createdAt)}
+                              </time>
                             </span>
-                            {message.author}
-                          </div>
-                          <time className="text-xs text-slate-400">
-                            {formatMessageTime(message.createdAt)}
-                          </time>
-                        </div>
-                        {message.author === "ASSISTANT" && (
-                          <AssistantReasoning
-                            message={message}
-                            isStreaming={
-                              isStreaming && message.id === streamingAssistantIdRef.current
-                            }
-                          />
-                        )}
-                        {message.content && (
-                          <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">
-                            {message.content}
-                          </p>
-                        )}
-                        {message.author === "ASSISTANT" && (
-                          <AssistantIncompleteNotice message={message} />
-                        )}
-                        {message.author === "ASSISTANT" && <AssistantMetadata message={message} />}
-                        <div className="mt-3 flex items-center justify-end gap-2">
-                          {copyFailed && (
-                            <span className="text-xs font-medium text-red-600">
-                              Copy failed
-                            </span>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => void handleCopyMessage(message)}
-                            disabled={!hasCopyableContent}
-                            title="Copy message"
-                            aria-label="Copy message"
-                            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {isCopied ? (
-                              <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                            ) : (
-                              <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                            {isCollapsed && (
+                              <span className="mt-1 block truncate text-sm text-slate-600">
+                                {messagePreview}
+                              </span>
                             )}
-                            {isCopied ? "Copied" : "Copy"}
-                          </button>
+                          </span>
+                          {isCollapsed ? (
+                            <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
+                          ) : (
+                            <ChevronDown className="mt-1 h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
+                          )}
+                        </button>
+                        <div id={messageBodyId} hidden={isCollapsed}>
+                          {message.author === "ASSISTANT" && (
+                            <AssistantReasoning
+                              message={message}
+                              isStreaming={
+                                isStreaming && message.id === streamingAssistantIdRef.current
+                              }
+                            />
+                          )}
+                          {message.content && (
+                            <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">
+                              {message.content}
+                            </p>
+                          )}
+                          {message.author === "ASSISTANT" && (
+                            <AssistantIncompleteNotice message={message} />
+                          )}
+                          {message.author === "ASSISTANT" && <AssistantMetadata message={message} />}
+                          <div className="mt-3 flex items-center justify-end gap-2">
+                            {copyFailed && (
+                              <span className="text-xs font-medium text-red-600">
+                                Copy failed
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => void handleCopyMessage(message)}
+                              disabled={!hasCopyableContent}
+                              title="Copy message"
+                              aria-label="Copy message"
+                              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {isCopied ? (
+                                <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                              ) : (
+                                <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                              )}
+                              {isCopied ? "Copied" : "Copy"}
+                            </button>
+                          </div>
                         </div>
                       </article>
                     );
