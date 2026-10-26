@@ -1587,7 +1587,9 @@ const Home: React.FC = () => {
                         {modelsQuery.isLoading
                           ? "Loading models..."
                           : availableModels.length > 0
-                            ? "Use default model"
+                            ? modelsQuery.data?.defaultModelName
+                              ? `Use default model (${modelsQuery.data.defaultModelName})`
+                              : "Use default model"
                             : "No models available"}
                       </option>
                       {selectedModel && !selectedModelDetails && (

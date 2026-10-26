@@ -256,6 +256,7 @@ export interface LlmProviderModelListResult {
 export interface LlmModelListResult {
   models: LlmListedModel[];
   providers: LlmProviderModelListResult[];
+  defaultModelName?: string;
 }
 
 export interface LlmProviderOperationResult {

@@ -226,7 +226,7 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
         } satisfies ILlmProvider;
       });
 
-      return new LlmRegistryService(adapters, (observation) => {
+      const result = await new LlmRegistryService(adapters, (observation) => {
         if (observation.provider.status === 'error'
           && unavailableProviderIds.has(observation.provider.providerId)) {
           logLlmEvent({
@@ -245,6 +245,16 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
           observation.context,
         );
       }).listAvailableModels(correlation);
+      const defaultProvider = providers[0];
+      const defaultModel = defaultProvider && result.models.find((model) =>
+        model.providerId === String(defaultProvider.id)
+        && model.modelId.toLowerCase() === defaultProvider.defaultModel.toLowerCase(),
+      );
+
+      return {
+        ...result,
+        ...(defaultModel ? { defaultModelName: defaultModel.modelName } : {}),
+      };
     },
 
     async listProviderModels(id: number, correlation: LlmOperationCorrelation = {}): Promise<LlmModelListResult> {

@@ -263,4 +263,57 @@ describe('Home workspace route context', () => {
     expect(within(header).queryByRole('button', { name: /New Chat/i })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /New Chat/i }).length).toBeGreaterThan(0);
   });
+
+  it.each([
+    ['A readable model', 'Use default model (A readable model)'],
+    [undefined, 'Use default model'],
+  ])('labels the default option as %s when a display name is available', async (defaultModelName, expectedLabel) => {
+    seedAuthStorage();
+    window.history.pushState({}, '', '/workspaces/25/chat/home');
+    const session = {
+      id: 70,
+      title: 'Model chat',
+      userId: 1,
+      workspaceId: 25,
+      createdAt: personalWorkspace.createdAt,
+      updatedAt: personalWorkspace.updatedAt,
+    };
+
+    server.use(
+      http.get(`${API_BASE_URL}/workspaces`, () =>
+        HttpResponse.json({ data: [personalWorkspace] }),
+      ),
+      http.get(`${API_BASE_URL}/chat`, () => HttpResponse.json({ data: [session] })),
+      http.get(`${API_BASE_URL}/chat/70`, () =>
+        HttpResponse.json({ data: { ...session, messages: [] } }),
+      ),
+      http.get(`${API_BASE_URL}/chat/70/messages`, () => HttpResponse.json({ data: [] })),
+      http.get(`${API_BASE_URL}/llm/models`, () =>
+        HttpResponse.json({
+          data: {
+            models: [{
+              providerId: '1',
+              providerName: 'Provider',
+              providerType: 'ollama',
+              modelId: 'some-model',
+              modelName: 'A readable model',
+            }],
+            providers: [],
+            ...(defaultModelName ? { defaultModelName } : {}),
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<Home />, {
+      workspaceLayout: true,
+      initialEntries: ['/workspaces/25/chat/home'],
+      routePath: '/workspaces/:workspaceId/chat/home',
+    });
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Model chat' }));
+    const modelSelect = await screen.findByRole('combobox', { name: 'Model' });
+    await waitFor(() => expect(within(modelSelect).getByRole('option', { name: expectedLabel })).toBeInTheDocument());
+    expect(modelSelect).toHaveValue('');
+  });
 });

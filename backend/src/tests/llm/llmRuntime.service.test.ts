@@ -315,3 +315,74 @@ describe('LlmRuntimeService embeddings', () => {
     expect(JSON.stringify(errors.mock.calls)).not.toContain('private database detail');
   });
 });
+
+describe('LlmRuntimeService default model display', () => {
+  beforeEach(() => {
+    mockedFetch.mockReset();
+    mockPrisma.providerHealthSample.create.mockReset();
+  });
+
+  const createRuntime = (defaultModel: string) => {
+    const primary = createProviderConfig({
+      id: 1,
+      baseUrl: 'https://primary.example.com/v1',
+      defaultModel,
+    });
+    const secondary = createProviderConfig({
+      id: 2,
+      baseUrl: 'https://secondary.example.com/v1',
+      defaultModel: 'secondary-model',
+    });
+    const runtime = createLlmRuntimeService({
+      repository: {
+        ...LlmProviderConfigRepository,
+        findActive: async () => [primary, secondary],
+      },
+    });
+    return { runtime, primary };
+  };
+
+  it('names only the first active provider default and matches its model ID without case sensitivity', async () => {
+    mockedFetch.mockImplementation(async (url) =>
+      String(url).includes('primary.example.com')
+        ? mockModelListResponse(['PRIMARY-MODEL'])
+        : mockModelListResponse(['secondary-model']),
+    );
+    const { runtime, primary } = createRuntime('primary-model');
+
+    const result = await runtime.listAvailableModels();
+
+    expect(result.models).toHaveLength(2);
+    expect(result.defaultModelName).toBe('PRIMARY-MODEL');
+    const resolved = await runtime.resolveGenerationProvider({});
+    expect(resolved.providerConfig.id).toBe(primary.id);
+    expect(resolved.model).toBe(primary.defaultModel);
+  });
+
+  it('does not use a different provider model when the default is unlisted', async () => {
+    mockedFetch.mockImplementation(async (url) =>
+      String(url).includes('primary.example.com')
+        ? mockModelListResponse(['another-model'])
+        : mockModelListResponse(['primary-model']),
+    );
+    const { runtime } = createRuntime('primary-model');
+
+    const result = await runtime.listAvailableModels();
+
+    expect(result.models).toHaveLength(2);
+    expect(result.defaultModelName).toBeUndefined();
+  });
+
+  it('omits the display name when model listing fails', async () => {
+    mockedFetch.mockRejectedValue(new Error('Model listing unavailable'));
+    const { runtime } = createRuntime('primary-model');
+
+    const result = await runtime.listAvailableModels();
+
+    expect(result.defaultModelName).toBeUndefined();
+    expect(result.providers).toEqual([
+      expect.objectContaining({ status: 'error' }),
+      expect.objectContaining({ status: 'error' }),
+    ]);
+  });
+});

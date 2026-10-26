@@ -79,6 +79,7 @@ describe('LlmController', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({
       data: {
+        defaultModelName: TEST_MODEL_ID,
         models: [
           expect.objectContaining({
             providerId: '1',
