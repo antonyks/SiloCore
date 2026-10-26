@@ -19,6 +19,7 @@ import {
   useDeleteProviderConfig,
   usePullProviderModel,
   useProviderConfigs,
+  useSetDefaultProviderConfig,
   useTestProviderConfig,
   useUpdateProviderConfig,
 } from "../hooks/useProviderConfigs";
@@ -108,6 +109,7 @@ const ProviderConfigsPage: React.FC = () => {
   const deleteProvider = useDeleteProviderConfig();
   const testProvider = useTestProviderConfig();
   const pullModel = usePullProviderModel();
+  const setDefaultProvider = useSetDefaultProviderConfig();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingProvider, setEditingProvider] = useState<SanitizedLlmProviderConfig | null>(null);
   const [deletingProvider, setDeletingProvider] = useState<SanitizedLlmProviderConfig | null>(null);
@@ -231,6 +233,16 @@ const ProviderConfigsPage: React.FC = () => {
       });
     } finally {
       setTestingProviderId(null);
+    }
+  };
+
+  const handleSetDefaultProvider = async (provider: SanitizedLlmProviderConfig) => {
+    setNotice(null);
+    try {
+      await setDefaultProvider.mutateAsync(provider.id);
+      setNotice({ message: `${provider.name} is now the default provider.`, tone: "success" });
+    } catch (error) {
+      setNotice({ message: getErrorMessage(error), tone: "error" });
     }
   };
 
@@ -445,7 +457,14 @@ const ProviderConfigsPage: React.FC = () => {
               {providers?.map((provider) => (
                 <tr key={provider.id} className="hover:bg-slate-50">
                   <td className="px-4 py-3">
-                    <div className="font-medium text-slate-900">{provider.name}</div>
+                    <div className="flex flex-wrap items-center gap-2 font-medium text-slate-900">
+                      <span>{provider.name}</span>
+                      {provider.isDefault && (
+                        <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[11px] font-semibold text-cyan-800">
+                          Default · {provider.defaultSource === "ADMIN" ? "Admin" : "Automatic"}
+                        </span>
+                      )}
+                    </div>
                     <div className="mt-0.5 text-xs text-slate-500">
                       Updated {formatDateTime(provider.updatedAt)}
                     </div>
@@ -475,6 +494,16 @@ const ProviderConfigsPage: React.FC = () => {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-1.5">
+                      {!provider.isDefault && (
+                        <button
+                          type="button"
+                          onClick={() => void handleSetDefaultProvider(provider)}
+                          disabled={!provider.enabled || setDefaultProvider.isPending}
+                          className="inline-flex h-8 items-center rounded-md border border-cyan-200 px-2 text-xs font-medium text-cyan-800 hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {setDefaultProvider.isPending && setDefaultProvider.variables === provider.id ? "Setting..." : "Set default"}
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => openEditForm(provider)}

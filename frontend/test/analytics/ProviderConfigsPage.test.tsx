@@ -23,6 +23,8 @@ const baseProvider = {
   type: 'ollama',
   baseUrl: 'http://localhost:11434',
   enabled: true,
+  isDefault: true,
+  defaultSource: 'AUTO',
   defaultModel: 'llama3',
   timeoutMs: 5000,
   generationDefaults: {},
@@ -55,6 +57,26 @@ const registerProviders = () => {
 };
 
 describe('ProviderConfigsPage capabilities', () => {
+  it('lets an admin change the effective default and refreshes the badge', async () => {
+    let effectiveId = 1;
+    server.use(
+      http.get(`${API_BASE_URL}/admin/llm/providers`, () => HttpResponse.json({ data: [1, 2].map((id) => ({
+        ...baseProvider, id, name: id === 1 ? 'Primary' : 'Backup',
+        isDefault: id === effectiveId, defaultSource: id === effectiveId ? 'ADMIN' : null,
+        capabilities: pullCapableCapabilities,
+      })) })),
+      http.put(`${API_BASE_URL}/admin/llm/providers/2/default`, () => {
+        effectiveId = 2;
+        return HttpResponse.json({ data: { ...baseProvider, id: 2, name: 'Backup', isDefault: true, defaultSource: 'ADMIN' } });
+      }),
+    );
+    renderWithProviders(<ProviderConfigsPage />, { initialEntries: ['/admin/llm/providers'] });
+    const backup = (await screen.findByText('Backup')).closest('tr')!;
+    await userEvent.click(within(backup).getByRole('button', { name: 'Set default' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Backup is now the default provider.');
+    await waitFor(() => expect(within(backup).getByText('Default · Admin')).toBeInTheDocument());
+  });
+
   it('summarizes provider configurations and updates counts after refresh', async () => {
     let listedProviders = [
       { ...baseProvider, capabilities: pullCapableCapabilities },

@@ -75,12 +75,14 @@ export interface IChatGenerationServiceInput extends IChatGenerationInput {
 export interface IChatGenerationResult {
   userMessage: import('./chat.model').SelectedChatMessage;
   assistantMessage: import('./chat.model').SelectedChatMessage;
+  providerSwitch?: { fromProviderName: string; toProviderName: string };
 }
 
 export type ChatGenerationStreamEvent =
   | { event: 'user_message'; data: import('./chat.model').SelectedChatMessage }
   | { event: 'delta'; data: { content?: string; reasoning?: string } }
   | { event: 'assistant_message'; data: import('./chat.model').SelectedChatMessage }
+  | { event: 'provider_switch'; data: { fromProviderName: string; toProviderName: string; status: 'retrying' | 'succeeded' } }
   | { event: 'done'; data: { done: true } };
 
 export interface IChatSessionListParams {

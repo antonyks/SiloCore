@@ -211,6 +211,17 @@ describe("chat message collapse", () => {
     await user.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(emit).toBeDefined());
 
+    act(() => emit!({ event: "provider_switch", data: {
+      fromProviderName: "Primary", toProviderName: "Backup", status: "retrying",
+    } }));
+    expect(screen.getByRole("status")).toHaveTextContent("Switching provider from Primary to Backup");
+    act(() => emit!({ event: "provider_switch", data: {
+      fromProviderName: "Primary", toProviderName: "Backup", status: "succeeded",
+    } }));
+    expect(screen.getByRole("status")).toHaveTextContent("Provider switched to Backup.");
+    await user.click(screen.getByRole("button", { name: "Dismiss provider switch notice" }));
+    expect(screen.queryByText("Provider switched to Backup.")).not.toBeInTheDocument();
+
     act(() => emit!({ event: "delta", data: { content: "Partial answer" } }));
     const streamingArticle = (
       await screen.findByText("Partial answer")

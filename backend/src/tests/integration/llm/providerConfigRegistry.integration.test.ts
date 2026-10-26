@@ -9,6 +9,7 @@ import {
 import { logger } from '../../../config/logger';
 import { authenticate, authorizeRoles } from '../../../middleware';
 import { LlmProviderController } from '../../../modules/admin/llm/llmProvider.controller';
+import { LlmProviderConfigRepository } from '../../../modules/llm/llmProviderConfig.repository';
 import { LlmController } from '../../../modules/llm/llm.controller';
 import { WorkspaceProvisioningService } from '../../../modules/workspace/workspaceProvisioning.service';
 import { AuthenticatedRequest } from '../../../types/authenticatedRequest';
@@ -190,6 +191,39 @@ afterEach(() => {
 });
 
 describe('Persisted LLM provider and model registry integration', () => {
+  it('keeps one durable effective default through admin selection, failover, disable and delete', async () => {
+    const first = await createPersistedProvider({
+      name: 'First', type: 'OLLAMA', baseUrl: 'http://localhost:11434', defaultModel: 'first',
+    });
+    const second = await createPersistedProvider({
+      name: 'Second', type: 'OLLAMA', baseUrl: 'http://localhost:11434', defaultModel: 'second',
+    });
+    const third = await createPersistedProvider({
+      name: 'Third', type: 'OLLAMA', baseUrl: 'http://localhost:11434', defaultModel: 'third',
+    });
+
+    expect((await LlmProviderConfigRepository.getOrSelectDefault())?.id).toBe(first.id);
+    expect((await LlmProviderConfigRepository.setDefault(second.id))?.defaultSource).toBe('ADMIN');
+    expect(await LlmProviderConfigRepository.promoteDefault(first.id, third.id)).toBe(false);
+    expect(await LlmProviderConfigRepository.promoteDefault(second.id, third.id)).toBe(true);
+    expect((await LlmProviderConfigRepository.getOrSelectDefault())?.id).toBe(third.id);
+
+    await LlmProviderConfigRepository.update(third.id, { enabled: false });
+    expect((await LlmProviderConfigRepository.getOrSelectDefault())?.id).toBe(first.id);
+    await LlmProviderConfigRepository.softDelete(first.id);
+    const selected = await LlmProviderConfigRepository.getOrSelectDefault();
+    expect(selected).toMatchObject({ id: second.id, defaultSource: 'AUTO' });
+    expect(await integrationPrisma.llmProviderConfig.count({ where: { isDefault: true } })).toBe(1);
+    expect(await integrationPrisma.llmDefaultProviderSwitch.findMany({
+      orderBy: { id: 'asc' }, select: { oldProviderId: true, newProviderId: true, reason: true },
+    })).toEqual([
+      { oldProviderId: null, newProviderId: first.id, reason: 'INITIAL_SELECTION' },
+      { oldProviderId: second.id, newProviderId: third.id, reason: 'AVAILABILITY_FAILURE' },
+      { oldProviderId: third.id, newProviderId: first.id, reason: 'PROVIDER_DISABLED' },
+      { oldProviderId: first.id, newProviderId: second.id, reason: 'PROVIDER_DELETED' },
+    ]);
+  });
+
   it('returns sanitized admin provider responses and tests persisted provider configs', async () => {
     const ollamaUpstream = await createMockLlmUpstream(createOllamaRoutes(OLLAMA_MODEL_ID));
     const openAiUpstream = await createMockLlmUpstream(createOpenAiRoutes(OPENAI_MODEL_ID));

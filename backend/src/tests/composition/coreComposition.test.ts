@@ -53,7 +53,7 @@ function provider(config: LlmProviderConfig, model: string): ILlmProvider {
 
 function providerOperationGraph(name: string) {
   const row: SelectedLlmProviderConfig = {
-    id: 7, name, type: 'OLLAMA', enabled: true, baseUrl: `http://unused/${name}`,
+    id: 7, name, type: 'OLLAMA', enabled: true, isDefault: true, defaultSource: 'AUTO', baseUrl: `http://unused/${name}`,
     apiKey: null, defaultModel: 'default', timeoutMs: null, generationDefaults: null,
     extraHeaders: null, deletedAt: null, createdAt: new Date(), updatedAt: new Date(),
   };
@@ -128,7 +128,7 @@ describe('Core composition', () => {
 
   it('isolates adapter registrations and records health through the supplied service', async () => {
     const row: SelectedLlmProviderConfig = {
-      id: 7, name: 'Test provider', type: 'OLLAMA', enabled: true, baseUrl: 'http://unused',
+      id: 7, name: 'Test provider', type: 'OLLAMA', enabled: true, isDefault: true, defaultSource: 'AUTO', baseUrl: 'http://unused',
       apiKey: null, defaultModel: 'default', timeoutMs: null, generationDefaults: null,
       extraHeaders: null, deletedAt: null, createdAt: new Date(), updatedAt: new Date(),
     };
@@ -220,7 +220,7 @@ describe('Core composition', () => {
 
   it('records generation usage through the composed replacement without changing chat delivery', async () => {
     const row: SelectedLlmProviderConfig = {
-      id: 7, name: 'Test', type: 'OLLAMA', enabled: true, baseUrl: 'http://unused',
+      id: 7, name: 'Test', type: 'OLLAMA', enabled: true, isDefault: true, defaultSource: 'AUTO', baseUrl: 'http://unused',
       apiKey: null, defaultModel: 'model', timeoutMs: null, generationDefaults: null,
       extraHeaders: null, deletedAt: null, createdAt: new Date(), updatedAt: new Date(),
     };

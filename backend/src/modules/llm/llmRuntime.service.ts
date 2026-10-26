@@ -245,7 +245,7 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
           observation.context,
         );
       }).listAvailableModels(correlation);
-      const defaultProvider = providers[0];
+      const defaultProvider = providers.find((provider) => provider.isDefault) ?? providers[0];
       const defaultModel = defaultProvider && result.models.find((model) =>
         model.providerId === String(defaultProvider.id)
         && model.modelId.toLowerCase() === defaultProvider.defaultModel.toLowerCase(),
@@ -489,7 +489,7 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
       generationDefaults: LlmGenerationDefaults;
     }> {
       const providerConfig = params.providerId === undefined
-        ? (await repository.findActive())[0]
+        ? await repository.getOrSelectDefault()
         : await repository.findById(params.providerId);
 
       if (!providerConfig || providerConfig.deletedAt) {
@@ -518,6 +518,17 @@ export function createLlmRuntimeService(dependencies: Partial<LlmRuntimeServiceD
         model: params.model ?? providerConfig.defaultModel,
         generationDefaults: normalizeGenerationDefaults(providerConfig.generationDefaults),
       };
+    },
+
+    async listFallbackProviderIds(currentId: number): Promise<number[]> {
+      const active = await repository.findActive();
+      const index = active.findIndex((provider) => provider.id === currentId);
+      if (index < 0) return [];
+      return [...active.slice(index + 1), ...active.slice(0, index)].map((provider) => provider.id);
+    },
+
+    promoteDefaultProvider(fromId: number, toId: number): Promise<boolean> {
+      return repository.promoteDefault(fromId, toId);
     },
   };
 

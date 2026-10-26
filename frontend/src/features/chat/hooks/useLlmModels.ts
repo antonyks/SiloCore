@@ -20,5 +20,6 @@ export const useLlmModels = (workspaceId: number | null, enabled = true) => {
       return llmService.getModels({ workspaceId });
     },
     enabled: workspaceId !== null && enabled,
+    refetchOnWindowFocus: true,
   });
 };

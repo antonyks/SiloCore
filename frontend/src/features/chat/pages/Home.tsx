@@ -49,7 +49,7 @@ import {
   useDeleteChatSession,
   useUpdateChatSession,
 } from "../hooks/useChatSessions";
-import { useLlmModels } from "../hooks/useLlmModels";
+import { llmModelQueryKeys, useLlmModels } from "../hooks/useLlmModels";
 import { chatService } from "../services/chatService";
 import type {
   ChatGenerationParams,
@@ -502,6 +502,8 @@ const Home: React.FC = () => {
   const [settingsValidationError, setSettingsValidationError] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [providerSwitchNotice, setProviderSwitchNotice] = useState<string | null>(null);
+  const providerSwitchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<number | null>(null);
   const [copyErrorMessageId, setCopyErrorMessageId] = useState<number | null>(null);
   const [collapsedMessageIds, setCollapsedMessageIds] = useState<Set<number>>(() => new Set());
@@ -1029,6 +1031,16 @@ const Home: React.FC = () => {
     abortControllerRef.current?.abort();
   };
 
+  const showProviderSwitchNotice = (message: string) => {
+    if (providerSwitchTimerRef.current) clearTimeout(providerSwitchTimerRef.current);
+    setProviderSwitchNotice(message);
+    providerSwitchTimerRef.current = setTimeout(() => setProviderSwitchNotice(null), 5000);
+  };
+
+  useEffect(() => () => {
+    if (providerSwitchTimerRef.current) clearTimeout(providerSwitchTimerRef.current);
+  }, []);
+
   const submitPrompt = async () => {
     if (!selectedSessionId || isStreaming || activeWorkspaceId === null || !isWorkspaceValidated) {
       return;
@@ -1054,6 +1066,7 @@ const Home: React.FC = () => {
     shouldStickToBottomRef.current = true;
     setIsStreaming(true);
     setStreamError(null);
+    setProviderSwitchNotice(null);
 
     try {
       await chatService.streamGenerateMessage(
@@ -1081,6 +1094,16 @@ const Home: React.FC = () => {
               return;
             }
 
+            if (event.event === "provider_switch") {
+              showProviderSwitchNotice(event.data.status === "retrying"
+                ? `Switching provider from ${event.data.fromProviderName} to ${event.data.toProviderName}…`
+                : `Provider switched to ${event.data.toProviderName}.`);
+              if (event.data.status === "succeeded") {
+                void queryClient.invalidateQueries({ queryKey: llmModelQueryKeys.all });
+              }
+              return;
+            }
+
             if (event.event === "assistant_message") {
               reconcileAssistantMessage(selectedSessionId, event.data);
               void queryClient.invalidateQueries({
@@ -1096,6 +1119,7 @@ const Home: React.FC = () => {
         },
       );
     } catch (error) {
+      setProviderSwitchNotice(null);
       const hasPartialAssistant = streamingAssistantHasOutputRef.current;
       const isAbortError = error instanceof DOMException && error.name === "AbortError";
 
@@ -1943,6 +1967,14 @@ const Home: React.FC = () => {
             </div>
           )}
         </main>
+        {providerSwitchNotice && (
+          <div role="status" className="fixed bottom-4 right-4 z-50 flex max-w-sm items-center gap-3 rounded-md border border-cyan-200 bg-white px-4 py-3 text-sm text-slate-800 shadow-lg">
+            <span className="flex-1">{providerSwitchNotice}</span>
+            <button type="button" aria-label="Dismiss provider switch notice" onClick={() => setProviderSwitchNotice(null)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900">
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

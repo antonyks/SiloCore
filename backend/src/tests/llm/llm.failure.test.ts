@@ -2,7 +2,7 @@ import { InvalidInputError } from '../../errors';
 import { safeErrorDiagnostic } from '../../config/safeErrorDiagnostic';
 import { LlmCapabilityError } from '../../modules/llm/llm.capabilities';
 import {
-  classifyProviderFailure, confirmedDeadline, providerHttpError,
+  classifyProviderFailure, confirmedDeadline, isGenerationFallbackEligible, providerHttpError,
   ProviderFailureOperation, ProviderFailureStage,
 } from '../../modules/llm/llm.failure';
 import { LlmProviderError, LlmProviderType, LlmStreamingError } from '../../modules/llm/llm.types';
@@ -21,6 +21,18 @@ function classify(
 }
 
 describe('shared provider failure classification', () => {
+  it('allows generation HTTP 404 to try another default provider without treating other 404s as availability failures', () => {
+    for (const operation of ['complete', 'stream'] as const) {
+      const failure = classify(providerHttpError({ providerType: 'ollama', providerId: 'provider-1', operation }, 404), 'ollama', operation);
+      expect(failure.retryable).toBeUndefined();
+      expect(isGenerationFallbackEligible(failure.error)).toBe(true);
+    }
+    const listingFailure = classify(providerHttpError({ providerType: 'ollama', providerId: 'provider-1', operation: 'listModels' }, 404), 'ollama', 'listModels');
+    expect(isGenerationFallbackEligible(listingFailure.error)).toBe(false);
+    const badRequest = classify(providerHttpError({ providerType: 'ollama', providerId: 'provider-1', operation: 'complete' }, 400), 'ollama', 'complete');
+    expect(isGenerationFallbackEligible(badRequest.error)).toBe(false);
+  });
+
   it.each([
     ['openai-compatible', 'complete', 401, 'AUTHENTICATION_ERROR', 'PROVIDER_AUTHENTICATION_ERROR', 'authentication', false],
     ['openai-compatible', 'embed', 403, 'AUTHENTICATION_ERROR', 'PROVIDER_AUTHENTICATION_ERROR', 'authentication', false],
@@ -31,7 +43,7 @@ describe('shared provider failure classification', () => {
     ['openai-compatible', 'stream', 502, 'HTTP_502', 'HTTP_502', 'http', true],
     ['ollama', 'initialise', 503, 'HEALTH_CHECK_FAILED', 'HEALTH_CHECK_FAILED', 'http', true],
     ['ollama', 'complete', 401, 'HTTP_401', 'HTTP_401', 'authentication', false],
-    ['ollama', 'pullModel', 500, 'HTTP_500', 'HTTP_500', 'http', undefined],
+    ['ollama', 'pullModel', 500, 'HTTP_500', 'HTTP_500', 'http', true],
   ] as const)('%s %s HTTP %i retains its public code', (providerType, operation, status, code, publicCode, category, retryable) => {
     const error = providerHttpError({ providerType, providerId: 'provider-1', operation }, status);
     const failure = classify(error, providerType, operation);

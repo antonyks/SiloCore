@@ -44,6 +44,13 @@ export const providerConfigService = {
     return data.data;
   },
 
+  async setDefaultProvider(id: number): Promise<SanitizedLlmProviderConfig> {
+    const { data } = await axiosClient.put<ApiResponse<SanitizedLlmProviderConfig>>(
+      `/admin/llm/providers/${id}/default`,
+    );
+    return data.data;
+  },
+
   async testProvider(id: number): Promise<LlmProviderOperationResult> {
     const { data } = await axiosClient.post<ApiResponse<LlmProviderOperationResult>>(
       `/admin/llm/providers/${id}/test`,

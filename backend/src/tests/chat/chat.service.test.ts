@@ -12,6 +12,8 @@ import { LlmRuntimeService } from '../../modules/llm/llmRuntime.service';
 import { OllamaProvider } from '../../modules/llm/providers/ollama.provider';
 import { OpenAiCompatibleProvider } from '../../modules/llm/providers/openaiCompatible.provider';
 import { IChatWorkspaceContext } from '../../modules/chat/chat.types';
+import { classifyProviderFailure } from '../../modules/llm/llm.failure';
+import { LlmProviderError } from '../../modules/llm/llm.types';
 
 jest.mock('node-fetch', () => jest.fn());
 jest.mock('../../config/logger', () => ({
@@ -88,6 +90,8 @@ function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): Sel
     baseUrl: 'http://localhost:11434',
     enabled: true,
     defaultModel: TEST_MODEL_ID,
+    isDefault: true,
+    defaultSource: 'AUTO',
     timeoutMs: 5000,
     generationDefaults: {},
     extraHeaders: {},
@@ -493,6 +497,57 @@ describe('ChatService', () => {
   });
 
   describe('generateAssistantResponse', () => {
+    it('keeps an explicitly selected provider fixed when its model returns HTTP 404', async () => {
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(createProvider());
+      mockPrisma.chatMessage.create.mockResolvedValue({
+        id: 1, content: 'Hello', author: 'USER', sessionId: 1, metadata: null, createdAt: new Date(),
+      });
+      const failure = classifyProviderFailure({
+        providerType: 'ollama', providerId: '1', operation: 'complete', stage: 'upstream_request',
+        error: new LlmProviderError('Missing model', '1', 'HTTP_404', 404), diagnostics: {},
+      }).error;
+      const complete = jest.spyOn(OllamaProvider.prototype, 'complete').mockRejectedValue(failure);
+
+      await expect(ChatService.generateAssistantResponse({
+        sessionId: 1, content: 'Hello', providerId: 1, model: 'missing-model',
+      }, createWorkspaceContextFor(1))).rejects.toBe(failure);
+
+      expect(complete).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.llmDefaultProviderSwitch.create).not.toHaveBeenCalled();
+    });
+
+    it.each([503, 404])('retries a default provider HTTP %i, persists one prompt, and promotes the successful provider', async (status) => {
+      const primary = createProvider();
+      const backup = createProvider({ id: 2, name: 'Backup', defaultModel: 'backup-model', isDefault: false, defaultSource: null });
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([primary, backup]);
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(backup);
+      mockPrisma.chatMessage.create
+        .mockResolvedValueOnce({ id: 1, content: 'Hello', author: 'USER', sessionId: 1, metadata: null, createdAt: new Date() })
+        .mockResolvedValueOnce({ id: 2, content: 'From backup', author: 'ASSISTANT', sessionId: 1, metadata: null, createdAt: new Date() });
+      const failure = classifyProviderFailure({
+        providerType: 'ollama', providerId: '1', operation: 'complete', stage: 'upstream_request',
+        error: new LlmProviderError('Unavailable', '1', `HTTP_${status}`, status), diagnostics: {},
+      }).error;
+      const complete = jest.spyOn(OllamaProvider.prototype, 'complete').mockImplementation(async function (this: OllamaProvider) {
+        if (this.id === '1') throw failure;
+        return { content: 'From backup', model: 'backup-model' };
+      });
+
+      const result = await ChatService.generateAssistantResponse(
+        { sessionId: 1, content: 'Hello' }, createWorkspaceContextFor(1),
+      );
+
+      expect(complete).toHaveBeenCalledTimes(2);
+      expect(complete.mock.calls[1][0].model).toBe('backup-model');
+      expect(mockPrisma.chatMessage.create).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.llmDefaultProviderSwitch.create).toHaveBeenCalledWith({
+        data: { oldProviderId: 1, newProviderId: 2, reason: 'AVAILABILITY_FAILURE' },
+      });
+      expect(result.providerSwitch).toEqual({ fromProviderName: 'Local Ollama', toProviderName: 'Backup' });
+    });
+
     it('should persist user and assistant messages with provider metadata', async () => {
       const userMessage: SelectedChatMessage = {
         id: 1,
@@ -837,6 +892,18 @@ describe('ChatService', () => {
       expect(mockPrisma.generationUsage.create).not.toHaveBeenCalled();
     });
 
+    it('does not save a prompt if the fallback order cannot be loaded', async () => {
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
+      jest.spyOn(LlmRuntimeService, 'listFallbackProviderIds').mockRejectedValue(new Error('Database unavailable'));
+
+      await expect(ChatService.generateAssistantResponse({
+        sessionId: 1, content: 'Hello',
+      }, createWorkspaceContextFor(1))).rejects.toThrow('Database unavailable');
+
+      expect(mockPrisma.chatMessage.create).not.toHaveBeenCalled();
+    });
+
     it('should reject unsupported completion before persisting the user message', async () => {
       mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
       const ollamaComplete = jest.spyOn(OllamaProvider.prototype, 'complete').mockResolvedValue({
@@ -983,6 +1050,86 @@ describe('ChatService', () => {
   });
 
   describe('streamAssistantResponse', () => {
+    it.each([503, 404])('emits retry and success notices after streaming HTTP %i', async (status) => {
+      const primary = createProvider();
+      const backup = createProvider({ id: 2, name: 'Backup', defaultModel: 'backup-model', isDefault: false, defaultSource: null });
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([primary, backup]);
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(backup);
+      mockPrisma.chatMessage.create.mockResolvedValue({
+        id: 1, content: 'Hello', author: 'USER', sessionId: 1, metadata: null, createdAt: new Date(),
+      });
+      const failure = classifyProviderFailure({
+        providerType: 'ollama', providerId: '1', operation: 'stream', stage: 'upstream_request',
+        error: new LlmProviderError('Unavailable', '1', `HTTP_${status}`, status), diagnostics: {},
+      }).error;
+      jest.spyOn(OllamaProvider.prototype, 'streamComplete').mockImplementation(function (this: OllamaProvider) {
+        const id = this.id;
+        return (async function* () {
+          if (id === '1') throw failure;
+          yield { content: 'From backup' };
+          yield { done: true, finishReason: 'stop' };
+        })();
+      });
+
+      const events = [];
+      for await (const event of ChatService.streamAssistantResponse(
+        { sessionId: 1, content: 'Hello' }, createWorkspaceContextFor(1),
+      )) {
+        events.push(event);
+        if (event.event === 'assistant_message') {
+          expect(mockPrisma.llmDefaultProviderSwitch.create).toHaveBeenCalledTimes(1);
+        }
+      }
+
+      expect(events.map((event) => event.event)).toEqual([
+        'user_message', 'provider_switch', 'delta', 'assistant_message', 'provider_switch', 'done',
+      ]);
+      expect(events[1]).toEqual({ event: 'provider_switch', data: {
+        fromProviderName: 'Local Ollama', toProviderName: 'Backup', status: 'retrying',
+      } });
+      expect(events[4]).toEqual({ event: 'provider_switch', data: {
+        fromProviderName: 'Local Ollama', toProviderName: 'Backup', status: 'succeeded',
+      } });
+      expect(mockPrisma.llmDefaultProviderSwitch.create).toHaveBeenCalledWith({
+        data: { oldProviderId: 1, newProviderId: 2, reason: 'AVAILABILITY_FAILURE' },
+      });
+    });
+
+    it('announces a retry before streaming and does not retry after reasoning appears', async () => {
+      const primary = createProvider();
+      const backup = createProvider({ id: 2, name: 'Backup', defaultModel: 'backup-model', isDefault: false, defaultSource: null });
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([primary, backup]);
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(backup);
+      mockPrisma.chatMessage.create.mockResolvedValue({
+        id: 1, content: 'Hello', author: 'USER', sessionId: 1, metadata: null, createdAt: new Date(),
+      });
+      const failure = classifyProviderFailure({
+        providerType: 'ollama', providerId: '1', operation: 'stream', stage: 'upstream_request',
+        error: new LlmProviderError('Unavailable', '1', 'HTTP_503', 503), diagnostics: {},
+      }).error;
+      const stream = jest.spyOn(OllamaProvider.prototype, 'streamComplete').mockImplementation(function (this: OllamaProvider) {
+        const id = this.id;
+        return (async function* () {
+          if (id === '1') throw failure;
+          yield { reasoning: 'Thinking' };
+          throw failure;
+        })();
+      });
+
+      const events: string[] = [];
+      await expect((async () => {
+        for await (const event of ChatService.streamAssistantResponse(
+          { sessionId: 1, content: 'Hello' }, createWorkspaceContextFor(1),
+        )) events.push(event.event);
+      })()).rejects.toBe(failure);
+
+      expect(events).toEqual(['user_message', 'provider_switch', 'delta', 'assistant_message']);
+      expect(stream).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.llmDefaultProviderSwitch.create).not.toHaveBeenCalled();
+    });
+
     async function* streamChunks() {
       yield { reasoning: 'Think first. ' };
       yield { content: 'Hi' };

@@ -46,8 +46,20 @@ export type ProviderFailure = {
 };
 
 const TRANSIENT_CODES = new Set([
-  'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'EPIPE', 'EHOSTUNREACH', 'ENETUNREACH',
+  'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'EPIPE', 'EHOSTUNREACH', 'ENETUNREACH',
 ]);
+const availabilityFailures = new WeakMap<Error, ProviderFailureCode>();
+const generationNotFoundFailures = new WeakSet<Error>();
+
+export function availabilityFailureCode(error: unknown): ProviderFailureCode | null {
+  return error instanceof Error ? availabilityFailures.get(error) ?? null : null;
+}
+
+/** A missing configured model can be retried on another provider in default mode. */
+export function isGenerationFallbackEligible(error: unknown): boolean {
+  return availabilityFailureCode(error) !== null
+    || (error instanceof Error && generationNotFoundFailures.has(error));
+}
 const MALFORMED_CODES = new Set([
   'MALFORMED_RESPONSE', 'MALFORMED_STREAM_CHUNK', 'MALFORMED_MODEL_LIST', 'MALFORMED_EMBEDDING_RESPONSE',
 ]);
@@ -171,13 +183,25 @@ export function classifyProviderFailure(input: FailureInput): ProviderFailure {
     failureCategory = 'rate_limit'; providerFailureCode = 'RATE_LIMIT'; retryable = true;
   } else if (typeof status === 'number' && status >= 100 && status <= 599) {
     failureCategory = 'http'; providerFailureCode = 'HTTP_ERROR';
-    if ([502, 503, 504].includes(status)) retryable = true;
+    if (status >= 500) retryable = true;
   } else if (typeof diagnostics.failureCode === 'string' && TRANSIENT_CODES.has(diagnostics.failureCode)) {
     failureCategory = 'connection'; providerFailureCode = 'CONNECTION'; retryable = true;
   } else if (code === 'CONNECTION_ERROR') {
-    failureCategory = 'connection'; providerFailureCode = 'CONNECTION';
+    failureCategory = 'connection'; providerFailureCode = 'CONNECTION'; retryable = true;
+  } else if (stage === 'upstream_request' && !aborted &&
+    (error instanceof TypeError || (error instanceof Error && error.name === 'FetchError'))) {
+    failureCategory = 'connection'; providerFailureCode = 'CONNECTION'; retryable = true;
   } else if (stage === 'stream_read' && !aborted) {
     failureCategory = 'stream'; providerFailureCode = 'STREAM_ERROR';
+  }
+
+  if (retryable === true) availabilityFailures.set(normalized, providerFailureCode);
+  else availabilityFailures.delete(normalized);
+  if (status === 404 && code === 'HTTP_404'
+    && (input.operation === 'complete' || input.operation === 'stream')) {
+    generationNotFoundFailures.add(normalized);
+  } else {
+    generationNotFoundFailures.delete(normalized);
   }
 
   return {

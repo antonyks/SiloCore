@@ -47,6 +47,7 @@ const parseSseEvent = (eventText: string): ChatGenerationStreamEvent | null => {
     eventName === "user_message" ||
     eventName === "delta" ||
     eventName === "assistant_message" ||
+    eventName === "provider_switch" ||
     eventName === "done" ||
     eventName === "error"
   ) {

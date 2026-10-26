@@ -50,6 +50,12 @@ export function createLlmProviderController(dependencies: Partial<LlmProviderCon
       res.status(200).json({ data: provider });
     },
 
+    async setDefaultProvider(req: AuthenticatedRequest, res: Response): Promise<void> {
+      const id = parseProviderId(req.params.id);
+      const provider = await serviceDependency.setDefaultProvider(id);
+      res.status(200).json({ data: provider });
+    },
+
     async testProvider(req: AuthenticatedRequest, res: Response): Promise<void> {
       const id = parseProviderId(req.params.id);
       const result = await serviceDependency.testProvider(id, { requestId: req.requestId });

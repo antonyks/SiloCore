@@ -30,6 +30,8 @@ function createProvider(overrides: Partial<SelectedLlmProviderConfig> = {}): Sel
     baseUrl: 'http://localhost:11434',
     enabled: true,
     defaultModel: TEST_MODEL_ID,
+    isDefault: true,
+    defaultSource: 'AUTO',
     timeoutMs: 5000,
     generationDefaults: {},
     extraHeaders: {},

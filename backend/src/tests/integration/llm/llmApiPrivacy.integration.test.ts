@@ -341,7 +341,11 @@ describe('LLM API response privacy integration', () => {
           }),
         }),
       ]);
-      expect(providerRegistryResponse.body.data).toEqual(registryResponse.body.data);
+      expect(providerRegistryResponse.body.data).toEqual({
+        models: registryResponse.body.data.models,
+        providers: registryResponse.body.data.providers,
+      });
+      expect(registryResponse.body.data).toEqual(expect.objectContaining({ defaultModelName: MODEL_ID }));
       expectNoApiSecrets([registryResponse.body, providerRegistryResponse.body]);
       expectNoApiSecrets(loggedPayloadText());
       expect(loggedEvents('provider.listModels')).toEqual(expect.arrayContaining([

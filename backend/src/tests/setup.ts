@@ -82,9 +82,14 @@ const mockPrisma = {
   llmProviderConfig: {
     create: jest.fn<() => Promise<SelectedLlmProviderConfig>>(),
     findUnique: jest.fn<() => Promise<SelectedLlmProviderConfig | null>>(),
+    findFirst: jest.fn<() => Promise<SelectedLlmProviderConfig | null>>(),
     findMany: jest.fn<() => Promise<SelectedLlmProviderConfig[]>>(),
     update: jest.fn<() => Promise<SelectedLlmProviderConfig>>(),
+    updateMany: jest.fn<() => Promise<{ count: number }>>(),
     count: jest.fn<() => Promise<number>>(),
+  },
+  llmDefaultProviderSwitch: {
+    create: jest.fn<() => Promise<unknown>>(),
   },
   workspace: {
     create: jest.fn<() => Promise<unknown>>(),
@@ -141,6 +146,10 @@ mockPrisma.$transaction.mockImplementation(
 
     return (callback as (transactionClient: typeof mockPrisma) => unknown)(mockPrisma);
   },
+);
+
+mockPrisma.llmProviderConfig.findFirst.mockImplementation(async () =>
+  (await mockPrisma.llmProviderConfig.findMany() ?? [])[0] ?? null,
 );
 
 
@@ -200,6 +209,13 @@ jest.mock('@prisma/client', () => ({
   LlmProviderConfigType: {
     OLLAMA: 'OLLAMA',
     OPENAI_COMPATIBLE: 'OPENAI_COMPATIBLE',
+  },
+  LlmDefaultSource: { ADMIN: 'ADMIN', AUTO: 'AUTO' },
+  LlmDefaultSwitchReason: {
+    INITIAL_SELECTION: 'INITIAL_SELECTION',
+    PROVIDER_DISABLED: 'PROVIDER_DISABLED',
+    PROVIDER_DELETED: 'PROVIDER_DELETED',
+    AVAILABILITY_FAILURE: 'AVAILABILITY_FAILURE',
   },
   JobStatus: {
     QUEUED: 'QUEUED',
@@ -280,9 +296,12 @@ beforeEach(() => {
     mockPrisma.chatMessage.delete.mockClear();
     mockPrisma.llmProviderConfig.create.mockClear();
     mockPrisma.llmProviderConfig.findUnique.mockClear();
+    mockPrisma.llmProviderConfig.findFirst.mockClear();
     mockPrisma.llmProviderConfig.findMany.mockClear();
     mockPrisma.llmProviderConfig.update.mockClear();
+    mockPrisma.llmProviderConfig.updateMany.mockClear();
     mockPrisma.llmProviderConfig.count.mockClear();
+    mockPrisma.llmDefaultProviderSwitch.create.mockClear();
     mockPrisma.workspace.create.mockClear();
     mockPrisma.workspace.findFirst.mockClear();
     mockPrisma.workspace.findMany.mockClear();

@@ -40,6 +40,8 @@ export interface SanitizedLlmProviderConfig {
   type: LlmProviderType;
   baseUrl: string;
   enabled: boolean;
+  isDefault: boolean;
+  defaultSource: "ADMIN" | "AUTO" | null;
   defaultModel: string;
   timeoutMs: number | null;
   generationDefaults: GenerationDefaults;

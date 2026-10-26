@@ -49,6 +49,9 @@ describe('chatService.streamGenerateMessage', () => {
           'event: delta',
           'data: {"content":"Hi"}',
           '',
+          'event: provider_switch',
+          'data: {"fromProviderName":"Primary","toProviderName":"Backup","status":"retrying"}',
+          '',
           'event: done',
           'data: {}',
           '',
@@ -79,6 +82,9 @@ describe('chatService.streamGenerateMessage', () => {
     );
     expect(onEvent).toHaveBeenCalledWith({ event: 'user_message', data: { id: 1, content: 'Hello' } });
     expect(onEvent).toHaveBeenCalledWith({ event: 'delta', data: { content: 'Hi' } });
+    expect(onEvent).toHaveBeenCalledWith({ event: 'provider_switch', data: {
+      fromProviderName: 'Primary', toProviderName: 'Backup', status: 'retrying',
+    } });
     expect(onEvent).toHaveBeenCalledWith({ event: 'done', data: {} });
   });
 

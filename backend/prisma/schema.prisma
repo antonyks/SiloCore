@@ -57,6 +57,8 @@ model LlmProviderConfig {
   type         LlmProviderConfigType
   baseUrl      String
   enabled      Boolean  @default(true)
+  isDefault    Boolean  @default(false)
+  defaultSource LlmDefaultSource?
   defaultModel String
   timeoutMs    Int?
   generationDefaults Json    @default("{}")
@@ -67,10 +69,26 @@ model LlmProviderConfig {
   updatedAt    DateTime @updatedAt
   generationUsages GenerationUsage[]
   providerHealthSamples ProviderHealthSample[]
+  switchesFrom LlmDefaultProviderSwitch[] @relation("DefaultProviderSwitchFrom")
+  switchesTo   LlmDefaultProviderSwitch[] @relation("DefaultProviderSwitchTo")
 
   @@index([enabled])
   @@index([deletedAt])
   @@map("llm_provider_configs")
+}
+
+model LlmDefaultProviderSwitch {
+  id            Int      @id @default(autoincrement())
+  oldProviderId Int?
+  newProviderId Int
+  reason        LlmDefaultSwitchReason
+  createdAt     DateTime @default(now())
+  oldProvider   LlmProviderConfig? @relation("DefaultProviderSwitchFrom", fields: [oldProviderId], references: [id], onDelete: Restrict)
+  newProvider   LlmProviderConfig  @relation("DefaultProviderSwitchTo", fields: [newProviderId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+  @@index([newProviderId, createdAt])
+  @@map("llm_default_provider_switches")
 }
 
 model Workspace {
@@ -211,6 +229,18 @@ model ProviderHealthSample {
 enum LlmProviderConfigType {
   OLLAMA
   OPENAI_COMPATIBLE
+}
+
+enum LlmDefaultSource {
+  ADMIN
+  AUTO
+}
+
+enum LlmDefaultSwitchReason {
+  INITIAL_SELECTION
+  PROVIDER_DISABLED
+  PROVIDER_DELETED
+  AVAILABILITY_FAILURE
 }
 
 enum MessageAuthor {

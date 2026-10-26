@@ -9,6 +9,8 @@ const llmProviderConfigSelection = {
   type: true,
   baseUrl: true,
   enabled: true,
+  isDefault: true,
+  defaultSource: true,
   defaultModel: true,
   timeoutMs: true,
   generationDefaults: true,

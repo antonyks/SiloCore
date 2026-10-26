@@ -18,10 +18,11 @@ import { NotFoundError } from '../../errors';
 import { SelectedChatSession, ChatSessionWithMessages, SelectedChatMessage, MessageAuthor } from './chat.model';
 import { LlmRuntimeService } from '../llm/llmRuntime.service';
 import { ILlmProvider } from '../llm/llm.interface';
-import { LlmCompletionRequest, LlmMessage, TokenUsage } from '../llm/llm.types';
+import { LlmCompletionRequest, LlmMessage, LlmProviderError, LlmStreamingError, TokenUsage } from '../llm/llm.types';
 import { getLlmErrorCode, logLlmEvent } from '../llm/llm.logging';
 import { createLlmOperationContext, LlmOperationContext } from '../llm/llm.operation';
 import { getPublicLlmErrorMessage, normalizeAdapterError } from '../llm/llm.safeError';
+import { isGenerationFallbackEligible } from '../llm/llm.failure';
 import { CoreSingleOwnerWorkspaceAuthorizationPolicy, WorkspaceAuthorizationPolicy, WorkspaceAction } from '../workspace';
 import { GenerationUsageOutcome, GenerationUsageService } from '../generationUsage';
 
@@ -29,6 +30,7 @@ type ChatGenerationOperation = 'completion' | 'streaming';
 
 type PreparedGeneration = {
   provider: ILlmProvider;
+  fallbackProviderIds: number[];
   workspaceId: number;
   providerMetadata: {
     providerId: string;
@@ -41,6 +43,10 @@ type PreparedGeneration = {
   params: IChatGenerationParams;
   operationContext: LlmOperationContext;
 };
+
+function isDefaultGeneration(input: IChatGenerationServiceInput): boolean {
+  return input.providerId === undefined && input.model === undefined;
+}
 
 const WORKSPACE_NOT_FOUND_MESSAGE = 'Workspace not found';
 
@@ -207,6 +213,57 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
     }
   }
 
+  async function prepareFallback(
+    initial: PreparedGeneration,
+    input: IChatGenerationServiceInput,
+    providerId: number,
+    operation: ChatGenerationOperation,
+  ): Promise<PreparedGeneration> {
+    const resolved = await llm.resolveGenerationProvider({ providerId, operation });
+    const params = applyGenerationDefaults(resolved.generationDefaults, input);
+    return {
+      ...initial,
+      provider: resolved.provider,
+      providerMetadata: {
+        providerId: String(resolved.providerConfig.id),
+        providerName: resolved.providerConfig.name,
+        providerType: resolved.provider.config.type,
+      },
+      request: {
+        ...initial.request,
+        model: resolved.model,
+        temperature: params.temperature,
+        topP: params.topP,
+        maxTokens: params.maxTokens,
+        stopSequences: params.stopSequences,
+      },
+      params,
+      startedAt: Date.now(),
+    };
+  }
+
+  async function nextFallback(
+    initial: PreparedGeneration,
+    input: IChatGenerationServiceInput,
+    ids: number[],
+    operation: ChatGenerationOperation,
+  ): Promise<PreparedGeneration | null> {
+    while (ids.length) {
+      const id = ids.shift();
+      if (id === undefined) break;
+      try {
+        return await prepareFallback(initial, input, id, operation);
+      } catch (error) {
+        logLlmEvent({
+          layer: 'chat', ...initial.operationContext,
+          operation: 'chat.fallback.resolve', status: 'error',
+          errorCode: getLlmErrorCode(error), ...safeErrorDiagnostic(error),
+        });
+      }
+    }
+    return null;
+  }
+
   const service = {
     async createSession(
       data: IChatSessionCreateInput,
@@ -311,83 +368,115 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
       context: IChatWorkspaceContext,
     ): Promise<IChatGenerationResult> {
       ensureAuthorizedWorkspace(context, WorkspaceAction.CREATE_RESOURCE);
-      const prepared = await this.prepareGeneration(input, context, 'completion');
-      logLlmEvent({
-        layer: 'chat',
-        ...prepared.operationContext,
-        providerId: prepared.providerMetadata.providerId,
-        providerType: prepared.providerMetadata.providerType,
-        model: prepared.request.model,
-        operation: 'chat.complete',
-        status: 'started',
-      });
+      const initial = await this.prepareGeneration(input, context, 'completion');
+      let prepared = initial;
+      const fallbackIds = [...initial.fallbackProviderIds];
+      let switched = false;
+      while (true) {
+        let emptyResponse = false;
+        logLlmEvent({
+          layer: 'chat',
+          ...prepared.operationContext,
+          providerId: prepared.providerMetadata.providerId,
+          providerType: prepared.providerMetadata.providerType,
+          model: prepared.request.model,
+          operation: 'chat.complete',
+          status: 'started',
+        });
 
-      try {
-        const completion = await completeFromAdapter(prepared.provider, prepared.request, prepared.operationContext);
-        const latencyMs = Date.now() - prepared.startedAt;
-        const assistantMessage = await repository.createMessage({
-          content: completion.content,
-          author: MessageAuthor.ASSISTANT,
-          sessionId: input.sessionId,
-          metadata: createAssistantMetadata({
-            ...prepared.providerMetadata,
-            model: prepared.request.model,
-            reasoning: completion.reasoning,
-            finishReason: completion.finishReason,
-            incomplete: isIncompleteGeneration({
-              content: completion.content,
+        try {
+          const completion = await completeFromAdapter(prepared.provider, prepared.request, prepared.operationContext);
+          if (!completion.content?.trim() && !completion.reasoning?.trim()) {
+            emptyResponse = true;
+            throw new LlmProviderError('Provider returned no response', prepared.providerMetadata.providerId, 'UPSTREAM_ERROR');
+          }
+          const latencyMs = Date.now() - prepared.startedAt;
+          const assistantMessage = await repository.createMessage({
+            content: completion.content,
+            author: MessageAuthor.ASSISTANT,
+            sessionId: input.sessionId,
+            metadata: createAssistantMetadata({
+              ...prepared.providerMetadata,
+              model: prepared.request.model,
               reasoning: completion.reasoning,
               finishReason: completion.finishReason,
+              incomplete: isIncompleteGeneration({
+                content: completion.content,
+                reasoning: completion.reasoning,
+                finishReason: completion.finishReason,
+              }),
+              usage: completion.usage,
+              latencyMs: completion.latencyMs,
+              params: prepared.params,
             }),
+          });
+          await recordGenerationUsageSafely({
+            prepared,
+            streaming: false,
+            outcome: GenerationUsageOutcome.SUCCEEDED,
+            latencyMs,
             usage: completion.usage,
-            latencyMs: completion.latencyMs,
-            params: prepared.params,
-          }),
-        });
-        await recordGenerationUsageSafely({
-          prepared,
-          streaming: false,
-          outcome: GenerationUsageOutcome.SUCCEEDED,
-          latencyMs,
-          usage: completion.usage,
-        });
-        logLlmEvent({
-          layer: 'chat',
-          ...prepared.operationContext,
-          providerId: prepared.providerMetadata.providerId,
-          providerType: prepared.providerMetadata.providerType,
-          model: prepared.request.model,
-          operation: 'chat.complete',
-          latencyMs,
-          status: 'success',
-        });
+          });
+          if (switched) {
+            try {
+              await llm.promoteDefaultProvider(
+                Number(initial.providerMetadata.providerId), Number(prepared.providerMetadata.providerId),
+              );
+            } catch (error) {
+              logLlmEvent({ layer: 'chat', ...prepared.operationContext,
+                operation: 'chat.default.promote', status: 'error', ...safeErrorDiagnostic(error) });
+            }
+          }
+          logLlmEvent({
+            layer: 'chat',
+            ...prepared.operationContext,
+            providerId: prepared.providerMetadata.providerId,
+            providerType: prepared.providerMetadata.providerType,
+            model: prepared.request.model,
+            operation: 'chat.complete',
+            latencyMs,
+            status: 'success',
+          });
 
-        return {
-          userMessage: prepared.userMessage,
-          assistantMessage,
-        };
-      } catch (error) {
-        const latencyMs = Date.now() - prepared.startedAt;
-        await recordGenerationUsageSafely({
-          prepared,
-          streaming: false,
-          outcome: GenerationUsageOutcome.FAILED,
-          latencyMs,
-          errorCode: getLlmErrorCode(error),
-        });
-        logLlmEvent({
-          layer: 'chat',
-          ...prepared.operationContext,
-          providerId: prepared.providerMetadata.providerId,
-          providerType: prepared.providerMetadata.providerType,
-          model: prepared.request.model,
-          operation: 'chat.complete',
-          latencyMs,
-          status: 'error',
-          errorCode: getLlmErrorCode(error),
-          ...safeErrorDiagnostic(error),
-        });
-        throw error;
+          return {
+            userMessage: prepared.userMessage,
+            assistantMessage,
+            ...(switched ? { providerSwitch: {
+              fromProviderName: initial.providerMetadata.providerName,
+              toProviderName: prepared.providerMetadata.providerName,
+            } } : {}),
+          };
+        } catch (error) {
+          const latencyMs = Date.now() - prepared.startedAt;
+          await recordGenerationUsageSafely({
+            prepared,
+            streaming: false,
+            outcome: GenerationUsageOutcome.FAILED,
+            latencyMs,
+            errorCode: getLlmErrorCode(error),
+          });
+          logLlmEvent({
+            layer: 'chat',
+            ...prepared.operationContext,
+            providerId: prepared.providerMetadata.providerId,
+            providerType: prepared.providerMetadata.providerType,
+            model: prepared.request.model,
+            operation: 'chat.complete',
+            latencyMs,
+            status: 'error',
+            errorCode: getLlmErrorCode(error),
+            ...safeErrorDiagnostic(error),
+          });
+          if ((emptyResponse || isGenerationFallbackEligible(error)) && fallbackIds.length) {
+            const fallback = await nextFallback(initial, input, fallbackIds, 'completion');
+            if (fallback) {
+              prepared = fallback;
+              switched = true;
+              continue;
+            }
+          }
+          throw error;
+        }
       }
     },
 
@@ -396,7 +485,10 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
       context: IChatWorkspaceContext,
     ): AsyncIterable<ChatGenerationStreamEvent> {
       ensureAuthorizedWorkspace(context, WorkspaceAction.CREATE_RESOURCE);
-      const prepared = await this.prepareGeneration(input, context, 'streaming');
+      const initial = await this.prepareGeneration(input, context, 'streaming');
+      let prepared = initial;
+      const fallbackIds = [...initial.fallbackProviderIds];
+      let switched = false;
       logLlmEvent({
         layer: 'chat',
         ...prepared.operationContext,
@@ -450,40 +542,75 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
       };
 
       try {
-        for await (const chunk of streamFromAdapter(prepared.provider, prepared.request, prepared.operationContext)) {
-          if (chunk.usage) {
-            usage = chunk.usage;
-          }
+        while (true) {
+          let attemptError: unknown;
+          let emptyResponse = false;
+          const previousPrepared = prepared;
+          try {
+            for await (const chunk of streamFromAdapter(prepared.provider, prepared.request, prepared.operationContext)) {
+              if (chunk.usage) {
+                usage = chunk.usage;
+              }
 
-          if (chunk.finishReason) {
-            finishReason = chunk.finishReason;
-          }
+              if (chunk.finishReason) {
+                finishReason = chunk.finishReason;
+              }
 
-          if (!chunk.content && !chunk.reasoning) {
-            continue;
-          }
+              if (!chunk.content && !chunk.reasoning) {
+                continue;
+              }
 
-          if (chunk.content) {
-            content += chunk.content;
-          }
+              if (chunk.content) {
+                content += chunk.content;
+              }
 
-          if (chunk.reasoning) {
-            reasoning += chunk.reasoning;
-          }
+              if (chunk.reasoning) {
+                reasoning += chunk.reasoning;
+              }
 
-          yield {
-            event: 'delta',
-            data: removeUndefinedValues({
-              content: chunk.content,
-              reasoning: chunk.reasoning,
-            }),
-          };
+              yield {
+                event: 'delta',
+                data: removeUndefinedValues({
+                  content: chunk.content,
+                  reasoning: chunk.reasoning,
+                }),
+              };
+            }
+            emptyResponse = !content && !reasoning;
+            if (emptyResponse) {
+              attemptError = new LlmStreamingError(
+                'Provider returned no response', prepared.providerMetadata.providerId, 'UPSTREAM_STREAM_ERROR',
+              );
+            }
+          } catch (error) {
+            attemptError = error;
+          }
+          if (!attemptError) break;
+          if ((!content && !reasoning) && fallbackIds.length
+            && (emptyResponse || isGenerationFallbackEligible(attemptError))) {
+            const fallback = await nextFallback(initial, input, fallbackIds, 'streaming');
+            if (fallback) {
+              await recordGenerationUsageSafely({
+                prepared: previousPrepared, streaming: true, outcome: GenerationUsageOutcome.FAILED,
+                latencyMs: Date.now() - previousPrepared.startedAt, usage,
+                errorCode: getLlmErrorCode(attemptError),
+              });
+              prepared = fallback;
+              switched = true;
+              usage = undefined;
+              finishReason = undefined;
+              yield { event: 'provider_switch', data: {
+                fromProviderName: previousPrepared.providerMetadata.providerName,
+                toProviderName: fallback.providerMetadata.providerName,
+                status: 'retrying',
+              } };
+              continue;
+            }
+          }
+          throw attemptError;
         }
 
         const assistantMessage = await persistAssistantMessage();
-        if (assistantMessage) {
-          yield { event: 'assistant_message', data: assistantMessage };
-        }
         completed = true;
         const latencyMs = Date.now() - prepared.startedAt;
         await recordGenerationUsageSafely({
@@ -493,6 +620,16 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
           latencyMs,
           usage,
         });
+        if (switched) {
+          try {
+            await llm.promoteDefaultProvider(
+              Number(initial.providerMetadata.providerId), Number(prepared.providerMetadata.providerId),
+            );
+          } catch (error) {
+            logLlmEvent({ layer: 'chat', ...prepared.operationContext,
+              operation: 'chat.default.promote', status: 'error', ...safeErrorDiagnostic(error) });
+          }
+        }
         logLlmEvent({
           layer: 'chat',
           ...prepared.operationContext,
@@ -503,6 +640,16 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
           latencyMs,
           status: 'success',
         });
+        if (assistantMessage) {
+          yield { event: 'assistant_message', data: assistantMessage };
+        }
+        if (switched) {
+          yield { event: 'provider_switch', data: {
+            fromProviderName: initial.providerMetadata.providerName,
+            toProviderName: prepared.providerMetadata.providerName,
+            status: 'succeeded',
+          } };
+        }
         yield { event: 'done', data: { done: true } };
       } catch (error) {
         failed = true;
@@ -577,6 +724,8 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
         model: input.model,
         operation,
       });
+      const fallbackProviderIds = isDefaultGeneration(input)
+        ? await llm.listFallbackProviderIds(resolved.providerConfig.id) : [];
 
       const userMessage = await repository.createMessage({
         content: input.content,
@@ -588,6 +737,7 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
 
       return {
         provider: resolved.provider,
+        fallbackProviderIds,
         workspaceId,
         operationContext: createLlmOperationContext({ requestId: input.requestId }),
         providerMetadata: {

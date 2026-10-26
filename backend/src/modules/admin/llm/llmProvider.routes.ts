@@ -51,6 +51,13 @@ export function createLlmProviderRoutes(dependencies: {
     controller.deleteProvider,
   );
 
+  router.put(
+    '/providers/:id/default',
+    validateProviderId,
+    handleValidationErrors,
+    controller.setDefaultProvider,
+  );
+
   router.post(
     '/providers/:id/test',
     validateProviderId,

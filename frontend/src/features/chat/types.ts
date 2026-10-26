@@ -117,6 +117,7 @@ export type ChatGenerationStreamEvent =
   | { event: "user_message"; data: ChatSessionMessage }
   | { event: "delta"; data: { content?: string; reasoning?: string } }
   | { event: "assistant_message"; data: ChatSessionMessage }
+  | { event: "provider_switch"; data: { fromProviderName: string; toProviderName: string; status: "retrying" | "succeeded" } }
   | { event: "done"; data: { done: true } }
   | { event: "error"; data: { message?: string } };
 

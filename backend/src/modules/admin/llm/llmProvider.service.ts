@@ -1,4 +1,5 @@
 import type { LlmRuntimeServiceContract } from '../../llm/llmRuntime.service';
+import { InvalidInputError } from '../../../errors';
 import { LlmRuntimeService } from '../../llm/llmRuntime.service';
 import { SelectedLlmProviderConfig } from '../../llm/llmProviderConfig.model';
 import { LlmProviderConfigRepository } from '../../llm/llmProviderConfig.repository';
@@ -28,6 +29,8 @@ export function createLlmProviderService(dependencies: Partial<LlmProviderServic
       type: fromDbProviderType(provider.type),
       baseUrl: provider.baseUrl,
       enabled: provider.enabled,
+      isDefault: provider.isDefault,
+      defaultSource: provider.defaultSource,
       defaultModel: provider.defaultModel,
       timeoutMs: provider.timeoutMs,
       generationDefaults: llm.normalizeGenerationDefaults(provider.generationDefaults),
@@ -43,6 +46,7 @@ export function createLlmProviderService(dependencies: Partial<LlmProviderServic
   const service = {
     async listProviders(): Promise<SanitizedLlmProviderConfig[]> {
       await llm.ensureBootstrapProviderConfig();
+      await repository.getOrSelectDefault();
       const providers = await repository.findAll();
       return providers.map(sanitizeProvider);
     },
@@ -54,7 +58,16 @@ export function createLlmProviderService(dependencies: Partial<LlmProviderServic
 
     async createProvider(data: LlmProviderCreateInput): Promise<SanitizedLlmProviderConfig> {
       const provider = await repository.create(data);
-      return sanitizeProvider(provider);
+      await repository.getOrSelectDefault();
+      return sanitizeProvider((await repository.findById(provider.id)) ?? provider);
+    },
+
+    async setDefaultProvider(id: number): Promise<SanitizedLlmProviderConfig> {
+      const provider = await llm.getProviderConfigById(id);
+      if (!provider.enabled) throw new InvalidInputError('LLM provider is disabled');
+      const selected = await repository.setDefault(id);
+      if (!selected) throw new InvalidInputError('LLM provider cannot be made default');
+      return sanitizeProvider(selected);
     },
 
     async updateProvider(id: number, data: LlmProviderUpdateInput): Promise<SanitizedLlmProviderConfig> {

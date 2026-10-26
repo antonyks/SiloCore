@@ -12,6 +12,7 @@ export const useProviderConfigs = () => {
   return useQuery({
     queryKey: providerConfigQueryKeys.providers,
     queryFn: providerConfigService.getProviders,
+    refetchOnWindowFocus: true,
   });
 };
 
@@ -51,6 +52,18 @@ export const useDeleteProviderConfig = () => {
       void queryClient.invalidateQueries({ queryKey: providerConfigQueryKeys.providers });
       void queryClient.invalidateQueries({ queryKey: adminDashboardQueryKeys.summaryRoot });
       void queryClient.invalidateQueries({ queryKey: adminDashboardQueryKeys.systemStatus });
+    },
+  });
+};
+
+export const useSetDefaultProviderConfig = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => providerConfigService.setDefaultProvider(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: providerConfigQueryKeys.providers });
+      void queryClient.invalidateQueries({ queryKey: providerConfigQueryKeys.models });
+      void queryClient.invalidateQueries({ queryKey: adminDashboardQueryKeys.summaryRoot });
     },
   });
 };

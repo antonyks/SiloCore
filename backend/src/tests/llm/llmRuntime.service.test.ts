@@ -49,6 +49,8 @@ function createProviderConfig(overrides: Partial<SelectedLlmProviderConfig> = {}
     baseUrl: 'https://api.example.com/v1',
     enabled: true,
     defaultModel: TEST_MODEL_ID,
+    isDefault: true,
+    defaultSource: 'AUTO',
     timeoutMs: 5000,
     generationDefaults: {},
     extraHeaders: {},
@@ -337,6 +339,7 @@ describe('LlmRuntimeService default model display', () => {
       repository: {
         ...LlmProviderConfigRepository,
         findActive: async () => [primary, secondary],
+        getOrSelectDefault: async () => primary,
       },
     });
     return { runtime, primary };
