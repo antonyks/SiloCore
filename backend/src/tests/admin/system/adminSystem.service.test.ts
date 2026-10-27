@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import {
+  GenerationUsageOperation,
   GenerationUsageOutcome,
   JobMetricOutcome,
   JobStatus,
@@ -115,6 +116,19 @@ describe('AdminSystemService', () => {
           outputTokens: 0,
           totalTokens: 0,
         },
+        titleGeneration: {
+          total: 0,
+          succeeded: 0,
+          failed: 0,
+          aborted: 0,
+          successRate: 0,
+          failureRate: 0,
+          abortRate: 0,
+          averageLatencyMs: null,
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+        },
         jobs: {
           total: 0,
           current: {
@@ -167,15 +181,21 @@ describe('AdminSystemService', () => {
         .mockResolvedValueOnce(7)
         .mockResolvedValueOnce(2)
         .mockResolvedValueOnce(1);
-      mockPrisma.generationUsage.count.mockResolvedValue(10);
-      mockPrisma.generationUsage.groupBy.mockResolvedValue([
+      mockPrisma.generationUsage.count.mockResolvedValueOnce(10).mockResolvedValueOnce(3);
+      mockPrisma.generationUsage.groupBy.mockResolvedValueOnce([
         { outcome: GenerationUsageOutcome.SUCCEEDED, _count: { _all: 7 } },
         { outcome: GenerationUsageOutcome.FAILED, _count: { _all: 2 } },
         { outcome: GenerationUsageOutcome.ABORTED, _count: { _all: 1 } },
+      ]).mockResolvedValueOnce([
+        { outcome: GenerationUsageOutcome.SUCCEEDED, _count: { _all: 2 } },
+        { outcome: GenerationUsageOutcome.FAILED, _count: { _all: 1 } },
       ]);
-      mockPrisma.generationUsage.aggregate.mockResolvedValue({
+      mockPrisma.generationUsage.aggregate.mockResolvedValueOnce({
         _avg: { latencyMs: 123.4 },
         _sum: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+      }).mockResolvedValueOnce({
+        _avg: { latencyMs: 50.6 },
+        _sum: { inputTokens: 12, outputTokens: 6, totalTokens: 18 },
       });
       mockPrisma.job.count.mockResolvedValue(12);
       mockPrisma.job.groupBy.mockResolvedValue([
@@ -223,6 +243,19 @@ describe('AdminSystemService', () => {
           outputTokens: 50,
           totalTokens: 150,
         },
+        titleGeneration: {
+          total: 3,
+          succeeded: 2,
+          failed: 1,
+          aborted: 0,
+          successRate: 2 / 3,
+          failureRate: 1 / 3,
+          abortRate: 0,
+          averageLatencyMs: 51,
+          inputTokens: 12,
+          outputTokens: 6,
+          totalTokens: 18,
+        },
         jobs: {
           total: 12,
           current: {
@@ -253,7 +286,12 @@ describe('AdminSystemService', () => {
           latestSampleAt: '2026-08-14T12:00:00.000Z',
         },
       });
-      expect(mockPrisma.generationUsage.count).toHaveBeenCalledWith({ where: createdAtWhere });
+      expect(mockPrisma.generationUsage.count).toHaveBeenCalledWith({
+        where: { ...createdAtWhere, operation: GenerationUsageOperation.CHAT_REPLY },
+      });
+      expect(mockPrisma.generationUsage.count).toHaveBeenCalledWith({
+        where: { ...createdAtWhere, operation: GenerationUsageOperation.SESSION_TITLE },
+      });
       expect(mockPrisma.jobMetric.count).toHaveBeenCalledWith({ where: createdAtWhere });
       expect(mockPrisma.providerHealthSample.count).toHaveBeenCalledWith({ where: createdAtWhere });
       expect(mockPrisma.job.count).toHaveBeenCalledWith();

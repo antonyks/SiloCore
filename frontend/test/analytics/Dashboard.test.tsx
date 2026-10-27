@@ -50,6 +50,19 @@ const summary = {
     outputTokens: 50,
     totalTokens: 150,
   },
+  titleGeneration: {
+    total: 3,
+    succeeded: 2,
+    failed: 1,
+    aborted: 0,
+    successRate: 2 / 3,
+    failureRate: 1 / 3,
+    abortRate: 0,
+    averageLatencyMs: 42,
+    inputTokens: 12,
+    outputTokens: 6,
+    totalTokens: 18,
+  },
   jobs: {
     total: 3,
     current: {
@@ -279,7 +292,7 @@ describe('Dashboard analytics summary', () => {
       routePath: '/analytics/dashboard',
     });
 
-    expect(await screen.findByText('Generations')).toBeInTheDocument();
+    expect(await screen.findByText('Chat Generations')).toBeInTheDocument();
     const shortcuts = [
       ['Provider Configs', '/admin/llm/providers'],
       ['User Directory', '/admin/users'],
@@ -303,9 +316,15 @@ describe('Dashboard analytics summary', () => {
       routePath: '/analytics/dashboard',
     });
 
-    expect(await screen.findByText('Generations')).toBeInTheDocument();
+    expect(await screen.findByText('Chat Generations')).toBeInTheDocument();
     expect(await screen.findByText('80% success, 0% aborted')).toBeInTheDocument();
-    expect(await screen.findByText('Generation Usage')).toBeInTheDocument();
+    expect(await screen.findByText('Chat Generation Usage')).toBeInTheDocument();
+    const titleCalls = screen.getByRole('heading', { name: 'Session Title Calls' }).parentElement;
+    expect(titleCalls).not.toBeNull();
+    expect(within(titleCalls as HTMLElement).getByText('Calls')).toBeInTheDocument();
+    expect(within(titleCalls as HTMLElement).getByText('18')).toBeInTheDocument();
+    expect(within(titleCalls as HTMLElement).getByText('1 / 0')).toBeInTheDocument();
+    expect(within(titleCalls as HTMLElement).getByText('12 / 6')).toBeInTheDocument();
     expect(await screen.findByText('Job Operations')).toBeInTheDocument();
     expect(await screen.findByText('Provider Samples')).toBeInTheDocument();
 
@@ -328,7 +347,7 @@ describe('Dashboard analytics summary', () => {
       routePath: '/analytics/dashboard',
     });
 
-    expect(await screen.findByText('Generations')).toBeInTheDocument();
+    expect(await screen.findByText('Chat Generations')).toBeInTheDocument();
 
     const refreshButton = screen.getByRole('button', {
       name: 'Refresh operational analytics',

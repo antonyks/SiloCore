@@ -3,7 +3,7 @@ import { UserRole, WorkspaceStatus, WorkspaceType } from '@prisma/client';
 import { logger } from '../../config/logger';
 import { ChatService } from '../../modules/chat/chat.service';
 import { mockPrisma } from '../setup';
-import { GenerationUsageOutcome, GenerationUsageTokenCountSource } from '../../modules/generationUsage';
+import { GenerationUsageOperation, GenerationUsageOutcome, GenerationUsageTokenCountSource } from '../../modules/generationUsage';
 import { InvalidInputError, NotFoundError } from '../../errors';
 import { SelectedChatSession, ChatSessionWithMessages, SelectedChatMessage, SelectedChatSessionFields, ChatSessionWithMessagesFields, SelectedChatMessageFields } from '../../modules/chat/chat.model';
 import { SelectedLlmProviderConfig } from '../../modules/llm/llmProviderConfig.model';
@@ -635,6 +635,7 @@ describe('ChatService', () => {
           workspaceId: 25,
           providerId: 1,
           model: TEST_MODEL_ID,
+          operation: GenerationUsageOperation.CHAT_REPLY,
           streaming: false,
           inputTokens: 3,
           outputTokens: 4,

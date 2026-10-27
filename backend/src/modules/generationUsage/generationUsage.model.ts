@@ -1,13 +1,14 @@
 import { prisma } from '../../config/database';
-import { GenerationUsage, GenerationUsageOutcome, GenerationUsageTokenCountSource, Prisma } from '@prisma/client';
+import { GenerationUsage, GenerationUsageOperation, GenerationUsageOutcome, GenerationUsageTokenCountSource, Prisma } from '@prisma/client';
 
-export { GenerationUsage, GenerationUsageOutcome, GenerationUsageTokenCountSource };
+export { GenerationUsage, GenerationUsageOperation, GenerationUsageOutcome, GenerationUsageTokenCountSource };
 
 export const GenerationUsageSelectFields = {
   id: true,
   workspaceId: true,
   providerId: true,
   model: true,
+  operation: true,
   streaming: true,
   latencyMs: true,
   inputTokens: true,

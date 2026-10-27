@@ -1,6 +1,7 @@
 import { Server } from 'node:http';
 import jwt from 'jsonwebtoken';
 import {
+  GenerationUsageOperation,
   GenerationUsageOutcome,
   GenerationUsageTokenCountSource,
   JobMetricOutcome,
@@ -157,6 +158,29 @@ describe('Admin analytics integration', () => {
             errorCode: 'SECRET_FREE_ERROR',
             createdAt: outsideWindow,
           },
+          {
+            workspaceId: workspace.id,
+            providerId: provider.id,
+            model: 'title-model',
+            operation: GenerationUsageOperation.SESSION_TITLE,
+            streaming: false,
+            latencyMs: 40,
+            inputTokens: 6,
+            outputTokens: 2,
+            totalTokens: 8,
+            tokenCountSource: GenerationUsageTokenCountSource.PROVIDER_REPORTED,
+            outcome: GenerationUsageOutcome.SUCCEEDED,
+            createdAt: inWindow,
+          },
+          {
+            workspaceId: workspace.id,
+            providerId: provider.id,
+            model: 'title-model',
+            operation: GenerationUsageOperation.SESSION_TITLE,
+            streaming: false,
+            outcome: GenerationUsageOutcome.FAILED,
+            createdAt: outsideWindow,
+          },
         ],
       });
       await integrationPrisma.jobMetric.create({
@@ -214,6 +238,14 @@ describe('Admin analytics integration', () => {
           outputTokens: 20,
           totalTokens: 30,
         },
+        titleGeneration: {
+          total: 1,
+          succeeded: 1,
+          failed: 0,
+          inputTokens: 6,
+          outputTokens: 2,
+          totalTokens: 8,
+        },
         jobs: {
           total: 1,
           current: {
@@ -238,6 +270,17 @@ describe('Admin analytics integration', () => {
       expect(responseText).not.toContain('private-job-result');
       expect(responseText).not.toContain('analytics-secret-api-key');
       expect(responseText).not.toContain('secret-provider.example.com');
+      expect(responseText).not.toContain('title-model');
+      const usageOperations = await integrationPrisma.generationUsage.findMany({
+        orderBy: { id: 'asc' },
+        select: { operation: true },
+      });
+      expect(usageOperations.map((row) => row.operation)).toEqual([
+        GenerationUsageOperation.CHAT_REPLY,
+        GenerationUsageOperation.CHAT_REPLY,
+        GenerationUsageOperation.SESSION_TITLE,
+        GenerationUsageOperation.SESSION_TITLE,
+      ]);
       expect(responseText).not.toContain('OUTSIDE_WINDOW');
     } finally {
       await server.close();

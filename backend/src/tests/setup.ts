@@ -16,6 +16,7 @@ type generationUsageResult = {
   workspaceId: number;
   providerId: number;
   model: string;
+  operation?: string;
   streaming: boolean;
   latencyMs: number | null;
   inputTokens: number | null;
@@ -234,6 +235,10 @@ jest.mock('@prisma/client', () => ({
     SUCCEEDED: 'SUCCEEDED',
     FAILED: 'FAILED',
     ABORTED: 'ABORTED',
+  },
+  GenerationUsageOperation: {
+    CHAT_REPLY: 'CHAT_REPLY',
+    SESSION_TITLE: 'SESSION_TITLE',
   },
   GenerationUsageTokenCountSource: {
     PROVIDER_REPORTED: 'PROVIDER_REPORTED',

@@ -27,6 +27,7 @@ export function createGenerationUsageService(dependencies: Partial<GenerationUsa
         workspaceId: input.workspaceId,
         providerId: input.providerId,
         model: input.model,
+        operation: input.operation,
         streaming: input.streaming,
         latencyMs: normalizeLatencyMs(input.latencyMs),
         inputTokens: usage?.promptTokens,

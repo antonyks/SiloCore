@@ -22,10 +22,13 @@ reply. A partial job index supports active `chat.session_title` lookups by
 workspace and `payload.sessionId`.
 
 `GenerationUsage.operation` distinguishes `CHAT_REPLY` from `SESSION_TITLE`.
-Its database default is `CHAT_REPLY`, classifying historical rows and existing
-chat writes without changing usage totals. An `(operation, createdAt)` index
-supports later operation-filtered analytics. This schema change does not
-schedule title jobs, make title model calls, or change API response fields.
+Its database default is `CHAT_REPLY`, classifying historical rows; chat writes
+set that operation explicitly. Admin analytics keep chat reply totals in
+`generation` and report title model calls separately in `titleGeneration`.
+The same date window applies to both summaries. A `NOT_ENOUGH_CONTEXT` response
+is a successful model call even though a later title job would apply no title.
+The `(operation, createdAt)` index supports these filtered aggregates. Title
+jobs and model calls are not yet scheduled or implemented.
 
 The migration is `backend/prisma/migrations/20261026000200_session_title_usage_schema`.
 Under `instructions.txt`, the user applies it to the intended database and

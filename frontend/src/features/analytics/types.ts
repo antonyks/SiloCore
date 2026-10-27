@@ -152,6 +152,20 @@ export interface AdminUserUpdateInput {
   email: string;
 }
 
+export interface GenerationAnalyticsSummary {
+  total: number;
+  succeeded: number;
+  failed: number;
+  aborted: number;
+  successRate: number;
+  failureRate: number;
+  abortRate: number;
+  averageLatencyMs: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
 export interface AdminAnalyticsSummary {
   period: {
     from: string | null;
@@ -169,19 +183,8 @@ export interface AdminAnalyticsSummary {
     deleted: number;
     review: number;
   };
-  generation: {
-    total: number;
-    succeeded: number;
-    failed: number;
-    aborted: number;
-    successRate: number;
-    failureRate: number;
-    abortRate: number;
-    averageLatencyMs: number | null;
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-  };
+  generation: GenerationAnalyticsSummary;
+  titleGeneration: GenerationAnalyticsSummary;
   jobs: {
     total: number;
     current: {

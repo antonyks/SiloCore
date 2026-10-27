@@ -1,5 +1,6 @@
 import type { LlmRuntimeServiceContract } from '../../llm/llmRuntime.service';
 import {
+  GenerationUsageOperation,
   GenerationUsageOutcome,
   JobMetricOutcome,
   JobStatus,
@@ -20,6 +21,7 @@ import {
   AdminAnalyticsSummary,
   AdminAnalyticsSummaryInput,
   AdminSystemStatus,
+  GenerationAnalyticsSummary,
 } from './adminSystem.types';
 import { InvalidInputError } from '../../../errors';
 
@@ -46,7 +48,8 @@ export function createAdminSystemService(dependencies: Partial<AdminSystemServic
   const service = {
     async getAnalyticsSummary(input: AdminAnalyticsSummaryInput = {}): Promise<AdminAnalyticsSummary> {
       const period = parseAnalyticsPeriod(input);
-      const generationWhere = toGenerationUsageWhere(period);
+      const generationWhere = toGenerationUsageWhere(period, GenerationUsageOperation.CHAT_REPLY);
+      const titleGenerationWhere = toGenerationUsageWhere(period, GenerationUsageOperation.SESSION_TITLE);
       const jobMetricWhere = toJobMetricWhere(period);
       const providerHealthWhere = toProviderHealthSampleWhere(period);
       const [
@@ -60,6 +63,9 @@ export function createAdminSystemService(dependencies: Partial<AdminSystemServic
         generationTotal,
         generationOutcomes,
         generationAggregates,
+        titleGenerationTotal,
+        titleGenerationOutcomes,
+        titleGenerationAggregates,
         jobTotal,
         jobStatuses,
         jobMetricTotal,
@@ -85,6 +91,17 @@ export function createAdminSystemService(dependencies: Partial<AdminSystemServic
         }),
         database.generationUsage.aggregate({
           where: generationWhere,
+          _avg: { latencyMs: true },
+          _sum: { inputTokens: true, outputTokens: true, totalTokens: true },
+        }),
+        database.generationUsage.count({ where: titleGenerationWhere }),
+        database.generationUsage.groupBy({
+          by: ['outcome'],
+          where: titleGenerationWhere,
+          _count: { _all: true },
+        }),
+        database.generationUsage.aggregate({
+          where: titleGenerationWhere,
           _avg: { latencyMs: true },
           _sum: { inputTokens: true, outputTokens: true, totalTokens: true },
         }),
@@ -120,9 +137,6 @@ export function createAdminSystemService(dependencies: Partial<AdminSystemServic
         }),
       ]);
 
-      const generationSucceeded = countGrouped(generationOutcomes, 'outcome', GenerationUsageOutcome.SUCCEEDED);
-      const generationFailed = countGrouped(generationOutcomes, 'outcome', GenerationUsageOutcome.FAILED);
-      const generationAborted = countGrouped(generationOutcomes, 'outcome', GenerationUsageOutcome.ABORTED);
       const jobMetricSucceeded = countGrouped(jobMetricOutcomes, 'outcome', JobMetricOutcome.SUCCEEDED);
       const jobMetricFailed = countGrouped(jobMetricOutcomes, 'outcome', JobMetricOutcome.FAILED);
       const jobMetricCancelled = countGrouped(jobMetricOutcomes, 'outcome', JobMetricOutcome.CANCELLED);
@@ -147,19 +161,12 @@ export function createAdminSystemService(dependencies: Partial<AdminSystemServic
           deleted: deletedUsers,
           review: bannedUsers + deletedUsers,
         },
-        generation: {
-          total: generationTotal,
-          succeeded: generationSucceeded,
-          failed: generationFailed,
-          aborted: generationAborted,
-          successRate: rate(generationSucceeded, generationTotal),
-          failureRate: rate(generationFailed, generationTotal),
-          abortRate: rate(generationAborted, generationTotal),
-          averageLatencyMs: nullableRounded(generationAggregates._avg.latencyMs),
-          inputTokens: generationAggregates._sum.inputTokens ?? 0,
-          outputTokens: generationAggregates._sum.outputTokens ?? 0,
-          totalTokens: generationAggregates._sum.totalTokens ?? 0,
-        },
+        generation: summarizeGeneration(generationTotal, generationOutcomes, generationAggregates),
+        titleGeneration: summarizeGeneration(
+          titleGenerationTotal,
+          titleGenerationOutcomes,
+          titleGenerationAggregates,
+        ),
         jobs: {
           total: jobTotal,
           current: {
@@ -273,14 +280,18 @@ export function createAdminSystemService(dependencies: Partial<AdminSystemServic
     return date;
   }
 
-  function toGenerationUsageWhere(period: AnalyticsPeriod): Prisma.GenerationUsageWhereInput {
-    if (!period.from && !period.to) return {};
-
+  function toGenerationUsageWhere(
+    period: AnalyticsPeriod,
+    operation: GenerationUsageOperation,
+  ): Prisma.GenerationUsageWhereInput {
     return {
-      createdAt: {
-        ...(period.from ? { gte: period.from } : {}),
-        ...(period.to ? { lt: period.to } : {}),
-      },
+      operation,
+      ...((period.from || period.to) ? {
+        createdAt: {
+          ...(period.from ? { gte: period.from } : {}),
+          ...(period.to ? { lt: period.to } : {}),
+        },
+      } : {}),
     };
   }
 
@@ -313,6 +324,32 @@ export function createAdminSystemService(dependencies: Partial<AdminSystemServic
   ): number {
     const count = groups.find((group) => group[key] === value)?._count;
     return typeof count === 'object' ? count._all ?? 0 : 0;
+  }
+
+  function summarizeGeneration(
+    total: number,
+    outcomes: GroupedCount<'outcome', GenerationUsageOutcome>[],
+    aggregates: {
+      _avg: { latencyMs: number | null };
+      _sum: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null };
+    },
+  ): GenerationAnalyticsSummary {
+    const succeeded = countGrouped(outcomes, 'outcome', GenerationUsageOutcome.SUCCEEDED);
+    const failed = countGrouped(outcomes, 'outcome', GenerationUsageOutcome.FAILED);
+    const aborted = countGrouped(outcomes, 'outcome', GenerationUsageOutcome.ABORTED);
+    return {
+      total,
+      succeeded,
+      failed,
+      aborted,
+      successRate: rate(succeeded, total),
+      failureRate: rate(failed, total),
+      abortRate: rate(aborted, total),
+      averageLatencyMs: nullableRounded(aggregates._avg.latencyMs),
+      inputTokens: aggregates._sum.inputTokens ?? 0,
+      outputTokens: aggregates._sum.outputTokens ?? 0,
+      totalTokens: aggregates._sum.totalTokens ?? 0,
+    };
   }
 
   function rate(count: number, total: number): number {

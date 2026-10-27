@@ -182,7 +182,7 @@ const buildMetrics = (
           : `${summary.providers.disabled} disabled config${summary.providers.disabled === 1 ? "" : "s"}`,
     },
     {
-      label: "Generations",
+      label: "Chat Generations",
       value: summary ? formatNumber(summary.generation.total) : "...",
       detail: summary
         ? `${formatPercent(summary.generation.successRate)} success, ${formatPercent(summary.generation.abortRate)} aborted`
@@ -337,9 +337,9 @@ const Dashboard: React.FC = () => {
         ))}
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-3">
+      <section className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-md border border-slate-200 bg-white px-4 py-3">
-          <h2 className="text-sm font-semibold text-slate-950">Generation Usage</h2>
+          <h2 className="text-sm font-semibold text-slate-950">Chat Generation Usage</h2>
           <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
             <div>
               <dt className="text-xs text-slate-500">Succeeded</dt>
@@ -356,6 +356,39 @@ const Dashboard: React.FC = () => {
             <div>
               <dt className="text-xs text-slate-500">Tokens</dt>
               <dd className="font-medium text-slate-900">{formatNumber(summary?.generation.totalTokens)}</dd>
+            </div>
+          </dl>
+        </div>
+        <div className="rounded-md border border-slate-200 bg-white px-4 py-3">
+          <h2 className="text-sm font-semibold text-slate-950">Session Title Calls</h2>
+          <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <dt className="text-xs text-slate-500">Calls</dt>
+              <dd className="font-medium text-slate-900">{formatNumber(summary?.titleGeneration.total)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-slate-500">Succeeded</dt>
+              <dd className="font-medium text-slate-900">{formatNumber(summary?.titleGeneration.succeeded)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-slate-500">Failed / Aborted</dt>
+              <dd className="font-medium text-slate-900">
+                {summary ? `${formatNumber(summary.titleGeneration.failed)} / ${formatNumber(summary.titleGeneration.aborted)}` : "..."}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-slate-500">Average Latency</dt>
+              <dd className="font-medium text-slate-900">{formatNullableMs(summary?.titleGeneration.averageLatencyMs)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-slate-500">Tokens</dt>
+              <dd className="font-medium text-slate-900">{formatNumber(summary?.titleGeneration.totalTokens)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-slate-500">Input / Output Tokens</dt>
+              <dd className="font-medium text-slate-900">
+                {summary ? `${formatNumber(summary.titleGeneration.inputTokens)} / ${formatNumber(summary.titleGeneration.outputTokens)}` : "..."}
+              </dd>
             </div>
           </dl>
         </div>

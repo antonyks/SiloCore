@@ -1,6 +1,6 @@
 import { GenerationUsageSelectFields } from '../../modules/generationUsage/generationUsage.model';
 import { GenerationUsageService } from '../../modules/generationUsage/generationUsage.service';
-import { GenerationUsageOutcome, GenerationUsageTokenCountSource } from '../../modules/generationUsage';
+import { GenerationUsageOperation, GenerationUsageOutcome, GenerationUsageTokenCountSource } from '../../modules/generationUsage';
 import { mockPrisma } from '../setup';
 
 describe('GenerationUsageService', () => {
@@ -11,6 +11,7 @@ describe('GenerationUsageService', () => {
       workspaceId: 25,
       providerId: 3,
       model: 'test-model',
+      operation: GenerationUsageOperation.CHAT_REPLY,
       streaming: false,
       latencyMs: 13,
       inputTokens: 5,
@@ -26,6 +27,7 @@ describe('GenerationUsageService', () => {
       workspaceId: 25,
       providerId: 3,
       model: 'test-model',
+      operation: GenerationUsageOperation.CHAT_REPLY,
       streaming: false,
       latencyMs: 12.7,
       usage: { promptTokens: 5, completionTokens: 7, totalTokens: 12 },
@@ -38,6 +40,7 @@ describe('GenerationUsageService', () => {
         workspaceId: 25,
         providerId: 3,
         model: 'test-model',
+        operation: GenerationUsageOperation.CHAT_REPLY,
         streaming: false,
         latencyMs: 13,
         inputTokens: 5,
@@ -55,13 +58,14 @@ describe('GenerationUsageService', () => {
     expect(JSON.stringify(createArg.data)).not.toContain('secret');
   });
 
-  it('records missing token usage as unknown with null token counts', async () => {
+  it('records a failed title call without provider token counts as unknown', async () => {
     mockPrisma.generationUsage.create.mockResolvedValue({
       id: 2,
       workspaceId: 25,
       providerId: 3,
       model: 'test-model',
-      streaming: true,
+      operation: GenerationUsageOperation.SESSION_TITLE,
+      streaming: false,
       latencyMs: 9,
       inputTokens: null,
       outputTokens: null,
@@ -76,7 +80,8 @@ describe('GenerationUsageService', () => {
       workspaceId: 25,
       providerId: 3,
       model: 'test-model',
-      streaming: true,
+      operation: GenerationUsageOperation.SESSION_TITLE,
+      streaming: false,
       latencyMs: 9,
       outcome: GenerationUsageOutcome.FAILED,
       errorCode: 'UPSTREAM_STREAM_ERROR',
@@ -87,7 +92,8 @@ describe('GenerationUsageService', () => {
         workspaceId: 25,
         providerId: 3,
         model: 'test-model',
-        streaming: true,
+        operation: GenerationUsageOperation.SESSION_TITLE,
+        streaming: false,
         latencyMs: 9,
         inputTokens: undefined,
         outputTokens: undefined,
@@ -98,5 +104,53 @@ describe('GenerationUsageService', () => {
       },
       select: GenerationUsageSelectFields,
     });
+  });
+
+  it('records a title call with insufficient context as a successful content-free model call', async () => {
+    mockPrisma.generationUsage.create.mockResolvedValue({
+      id: 3,
+      workspaceId: 25,
+      providerId: 3,
+      model: 'title-model',
+      operation: GenerationUsageOperation.SESSION_TITLE,
+      streaming: false,
+      latencyMs: 20,
+      inputTokens: 8,
+      outputTokens: 3,
+      totalTokens: 11,
+      tokenCountSource: GenerationUsageTokenCountSource.PROVIDER_REPORTED,
+      outcome: GenerationUsageOutcome.SUCCEEDED,
+      errorCode: null,
+      createdAt: new Date(),
+    });
+
+    await GenerationUsageService.recordGeneration({
+      workspaceId: 25,
+      providerId: 3,
+      model: 'title-model',
+      operation: GenerationUsageOperation.SESSION_TITLE,
+      streaming: false,
+      latencyMs: 19.6,
+      usage: { promptTokens: 8, completionTokens: 3, totalTokens: 11 },
+      outcome: GenerationUsageOutcome.SUCCEEDED,
+      errorCode: 'NOT_ENOUGH_CONTEXT',
+    });
+
+    const createArg = mockPrisma.generationUsage.create.mock.lastCall?.[0] as { data: Record<string, unknown> };
+    const { data } = createArg;
+    expect(data).toMatchObject({
+      operation: GenerationUsageOperation.SESSION_TITLE,
+      outcome: GenerationUsageOutcome.SUCCEEDED,
+      streaming: false,
+      latencyMs: 20,
+      inputTokens: 8,
+      outputTokens: 3,
+      totalTokens: 11,
+      errorCode: undefined,
+    });
+    expect(Object.keys(data).sort()).toEqual([
+      'errorCode', 'inputTokens', 'latencyMs', 'model', 'operation', 'outcome', 'outputTokens',
+      'providerId', 'streaming', 'tokenCountSource', 'totalTokens', 'workspaceId',
+    ]);
   });
 });

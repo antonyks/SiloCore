@@ -24,7 +24,7 @@ import { createLlmOperationContext, LlmOperationContext } from '../llm/llm.opera
 import { getPublicLlmErrorMessage, normalizeAdapterError } from '../llm/llm.safeError';
 import { isGenerationFallbackEligible } from '../llm/llm.failure';
 import { CoreSingleOwnerWorkspaceAuthorizationPolicy, WorkspaceAuthorizationPolicy, WorkspaceAction } from '../workspace';
-import { GenerationUsageOutcome, GenerationUsageService } from '../generationUsage';
+import { GenerationUsageOperation, GenerationUsageOutcome, GenerationUsageService } from '../generationUsage';
 
 type ChatGenerationOperation = 'completion' | 'streaming';
 
@@ -192,6 +192,7 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
         workspaceId: data.prepared.workspaceId,
         providerId: Number(data.prepared.providerMetadata.providerId),
         model: data.prepared.request.model,
+        operation: GenerationUsageOperation.CHAT_REPLY,
         streaming: data.streaming,
         latencyMs: data.latencyMs,
         usage: data.usage,
