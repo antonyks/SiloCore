@@ -10,7 +10,7 @@ import { createMockLlmUpstream, sendJson } from '../helpers/mockLlmUpstream';
 
 beforeEach(resetIntegrationDatabase);
 
-async function fixture(baseUrl: string, options: { timeoutMs?: number; model?: string } = {}) {
+async function fixture(baseUrl: string, options: { timeoutMs?: number; model?: string; maxTokens?: number } = {}) {
   const owner = await createIntegrationTestUser();
   const { workspace } = await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(owner.id);
   const provider = await integrationPrisma.llmProviderConfig.create({
@@ -18,6 +18,7 @@ async function fixture(baseUrl: string, options: { timeoutMs?: number; model?: s
       name: 'Title provider', type: LlmProviderConfigType.OLLAMA,
       baseUrl, enabled: true, defaultModel: 'different-default',
       timeoutMs: options.timeoutMs ?? null,
+      generationDefaults: options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
       apiKey: 'private-provider-secret',
     },
   });
@@ -74,8 +75,11 @@ describe('session title job', () => {
         .toMatchObject({ workspaceId: data.workspace.id, jobType: SESSION_TITLE_JOB_TYPE });
       expect(await integrationPrisma.chatSession.findUniqueOrThrow({ where: { id: data.session.id } }))
         .toMatchObject({ title: 'Red Maple Care', titleSource: ChatSessionTitleSource.GENERATED });
-      const request = JSON.parse(upstream.requests[0].body) as { model: string; messages: { content: string }[] };
+      const request = JSON.parse(upstream.requests[0].body) as {
+        model: string; messages: { content: string }[]; options: { num_predict: number };
+      };
       expect(request.model).toBe('actual-reply-model');
+      expect(request.options.num_predict).toBe(2048);
       expect(request.messages[1].content).toContain('Private conversation about red maple trees');
       expect(request.messages[1].content).not.toContain('private chain of thought');
       const usage = await integrationPrisma.generationUsage.findMany();
@@ -87,6 +91,18 @@ describe('session title job', () => {
       });
       expect(JSON.stringify({ job: persistedJob, usage })).not.toContain('Red Maple Care');
       expect(JSON.stringify({ job: persistedJob, usage })).not.toContain('Private conversation');
+    } finally { await upstream.close(); }
+  });
+
+  it('uses the admin configured token limit for title generation', async () => {
+    const upstream = await createMockLlmUpstream({
+      'POST /api/chat': (_request, response) => sendJson(response, 200, { message: { content: 'Red Maple Care' } }),
+    });
+    try {
+      const data = await fixture(upstream.baseUrl, { maxTokens: 384 });
+      expect(await run(data.job)).toEqual({ outcome: 'APPLIED' });
+      const request = JSON.parse(upstream.requests[0].body) as { options: { num_predict: number } };
+      expect(request.options.num_predict).toBe(384);
     } finally { await upstream.close(); }
   });
 
