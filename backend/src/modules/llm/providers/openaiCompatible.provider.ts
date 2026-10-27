@@ -7,6 +7,7 @@ import fetch from 'node-fetch';
 import { AbstractLlmProvider } from '../llm.base';
 import {
   LlmCompletionRequest,
+  LlmCompletionOptions,
   LlmCompletionResponse,
   LlmEmbeddingRequest,
   LlmEmbeddingResponse,
@@ -153,6 +154,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
   private operationOptions(
     operation: ProviderFailureOperation, model: string | undefined,
     context: LlmOperationContext | undefined, signal: () => AbortSignal | undefined,
+    abortCause: () => 'deadline' | 'local_cancel' | undefined = () => confirmedDeadline(signal()),
   ) {
     return {
       providerType: this.config.type,
@@ -161,7 +163,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
       classify: (error: unknown, stage: ProviderFailureStage, diagnostics: Record<string, string | number>) =>
         classifyProviderFailure({
           providerType: this.config.type, providerId: this.id, operation, stage, error,
-          diagnostics, abortCause: confirmedDeadline(signal()),
+          diagnostics, abortCause: abortCause(),
         }),
     };
   }
@@ -226,9 +228,9 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
     });
   }
 
-  async complete(request: LlmCompletionRequest, context?: LlmOperationContext): Promise<LlmCompletionResponse> {
+  async complete(request: LlmCompletionRequest, context?: LlmOperationContext, options?: LlmCompletionOptions): Promise<LlmCompletionResponse> {
     const enriched = this.enrichRequest({ ...request, stream: false });
-    const signal = this.buildAbortSignal();
+    const { signal, abortCause } = this.buildCompletionAbort(options);
     const body: OpenAiCompatibleChatRequest = {
       model: enriched.model,
       messages: enriched.messages,
@@ -238,7 +240,7 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
       max_tokens: enriched.maxTokens,
       stop: enriched.stopSequences,
     };
-    return runProviderOperation(this.operationOptions('complete', enriched.model, context, () => signal), async ({ setStage }) => {
+    return runProviderOperation(this.operationOptions('complete', enriched.model, context, () => signal, abortCause), async ({ setStage }) => {
       const result = await this.withLatency(async () => {
         const res = await fetch(buildChatCompletionsUrl(this.config.baseUrl), {
           method: 'POST',

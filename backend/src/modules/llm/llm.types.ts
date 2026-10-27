@@ -54,6 +54,13 @@ export interface LlmCompletionRequest {
   stream?: boolean;
 }
 
+/** Optional controls for a single non-streaming provider request. */
+export interface LlmCompletionOptions {
+  signal?: AbortSignal;
+  /** Applied only when the provider has no configured timeout. */
+  fallbackTimeoutMs?: number;
+}
+
 /** Token usage breakdown returned by the provider. */
 export interface TokenUsage {
   promptTokens: number;

@@ -5,6 +5,7 @@
 
 import {
   LlmCompletionRequest,
+  LlmCompletionOptions,
   LlmCompletionResponse,
   LlmEmbeddingRequest,
   LlmEmbeddingResponse,
@@ -51,7 +52,7 @@ export interface ILlmProvider {
   /**
    * Send a non-streaming completion request and return the full response.
    */
-  complete(request: LlmCompletionRequest, context?: LlmOperationContext): Promise<LlmCompletionResponse>;
+  complete(request: LlmCompletionRequest, context?: LlmOperationContext, options?: LlmCompletionOptions): Promise<LlmCompletionResponse>;
 
   /**
    * Return an async iterable that yields chunks for streaming responses.

@@ -72,6 +72,39 @@ describe('shared provider failure classification', () => {
     expect(cancelled.retryable).toBe(false);
   });
 
+  it.each([
+    ['deadline', 'timeout', 'TIMEOUT', true],
+    ['local_cancel', 'cancelled', 'CANCELLED', false],
+  ] as const)('recognizes a cross-realm style AbortError with a confirmed %s', (cause, category, code, retryable) => {
+    const error = { name: 'AbortError', message: 'private abort reason' };
+    expect(error).not.toBeInstanceOf(Error);
+    const failure = classify(error, 'ollama', 'complete', 'upstream_request', cause);
+    expect(failure.error).toMatchObject({ code: 'REQUEST_TIMEOUT' });
+    expect(failure.failureCategory).toBe(category);
+    expect(failure.providerFailureCode).toBe(code);
+    expect(failure.retryable).toBe(retryable);
+  });
+
+  it.each(['deadline', 'local_cancel'] as const)(
+    'does not relabel an HTTP error when %s also fires', (cause) => {
+      const error = providerHttpError({ providerType: 'openai-compatible', providerId: 'provider-1', operation: 'complete' }, 401);
+      const failure = classify(error, 'openai-compatible', 'complete', 'upstream_request', cause);
+      expect(failure.error).toBe(error);
+      expect(failure.failureCategory).toBe('authentication');
+      expect(failure.providerFailureCode).toBe('AUTHENTICATION');
+      expect(failure.retryable).toBe(false);
+    },
+  );
+
+  it('does not relabel a malformed response when the deadline also fires', () => {
+    const error = new LlmProviderError('private content', 'provider-1', 'MALFORMED_RESPONSE');
+    const failure = classify(error, 'openai-compatible', 'complete', 'response_parse', 'deadline');
+    expect(failure.error).toBe(error);
+    expect(failure.failureCategory).toBe('malformed_response');
+    expect(failure.providerFailureCode).toBe('MALFORMED_RESPONSE');
+    expect(failure.retryable).toBe(false);
+  });
+
   it('recognizes only an owned, triggered timeout signal as a confirmed deadline', () => {
     expect(confirmedDeadline(undefined)).toBeUndefined();
     const controller = new AbortController();

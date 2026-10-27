@@ -64,7 +64,11 @@ function failureSite(): string | undefined {
 
 export function safeErrorDiagnostic(error: unknown): Record<string, string | number> {
   try {
-    if (!(error instanceof Error)) return { failureKind: 'NonErrorThrow' };
+    if (!(error instanceof Error)) {
+      // Fetch AbortError instances can cross a JavaScript realm boundary.
+      return { failureKind: error !== null && typeof error === 'object'
+        && 'name' in error && error.name === 'AbortError' ? 'AbortError' : 'NonErrorThrow' };
+    }
 
     const code = safeCode((error as Error & { code?: unknown }).code);
     const cause = (error as Error & { cause?: unknown }).cause;

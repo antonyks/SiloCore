@@ -57,6 +57,22 @@ describe('safeErrorDiagnostic', () => {
     expect(safeErrorDiagnostic({ apiKey: 'private' })).toEqual({ failureKind: 'NonErrorThrow' });
   });
 
+  it('recognizes a cross-realm style AbortError without logging private properties', () => {
+    const error = {
+      name: 'AbortError',
+      message: 'private prompt',
+      stack: 'private stack',
+      reason: 'private shutdown reason',
+    };
+    expect(error).not.toBeInstanceOf(Error);
+    expect(safeErrorDiagnostic(error)).toEqual({ failureKind: 'AbortError' });
+  });
+
+  it('does not copy an arbitrary name from a non-Error object', () => {
+    expect(safeErrorDiagnostic({ name: 'private-token', message: 'private prompt' }))
+      .toEqual({ failureKind: 'NonErrorThrow' });
+  });
+
   it('retains known library error classes without logging arbitrary error names', () => {
     const known = new Error('private');
     known.name = 'PrismaClientKnownRequestError';

@@ -5,8 +5,10 @@
 
 import { ILlmProvider } from './llm.interface';
 import { LlmOperationContext } from './llm.operation';
+import { confirmedDeadline } from './llm.failure';
 import {
   LlmCompletionRequest,
+  LlmCompletionOptions,
   LlmCompletionResponse,
   LlmEmbeddingRequest,
   LlmEmbeddingResponse,
@@ -53,7 +55,7 @@ export abstract class AbstractLlmProvider implements ILlmProvider {
   // Core methods – MUST be implemented by subclasses
   // ------------------------------------------------------------------------
 
-  abstract complete(request: LlmCompletionRequest, context?: LlmOperationContext): Promise<LlmCompletionResponse>;
+  abstract complete(request: LlmCompletionRequest, context?: LlmOperationContext, options?: LlmCompletionOptions): Promise<LlmCompletionResponse>;
   abstract streamComplete(request: LlmCompletionRequest, context?: LlmOperationContext): AsyncIterable<LlmStreamChunk>;
   abstract embed(request: LlmEmbeddingRequest, context?: LlmOperationContext): Promise<LlmEmbeddingResponse>;
   abstract listModels(context?: LlmOperationContext): Promise<LlmProviderListedModel[]>;
@@ -83,6 +85,36 @@ export abstract class AbstractLlmProvider implements ILlmProvider {
   protected buildAbortSignal(timeoutMs: number | undefined = this.config.timeoutMs): AbortSignal | undefined {
     if (!timeoutMs) return undefined;
     return AbortSignal.timeout(timeoutMs);
+  }
+
+  /** Combine a caller cancellation signal with the configured or fallback completion deadline. */
+  protected buildCompletionAbort(options?: LlmCompletionOptions): {
+    signal: AbortSignal | undefined;
+    abortCause: () => 'deadline' | 'local_cancel' | undefined;
+  } {
+    const timeoutSignal = this.buildAbortSignal(this.config.timeoutMs ?? options?.fallbackTimeoutMs);
+    const callerSignal = options?.signal;
+    const signal = timeoutSignal && callerSignal
+      ? AbortSignal.any([timeoutSignal, callerSignal])
+      : timeoutSignal ?? callerSignal;
+
+    return {
+      signal,
+      abortCause: () => {
+        if (!signal?.aborted) return undefined;
+        try {
+          if (timeoutSignal?.aborted && signal.reason === timeoutSignal.reason) {
+            return confirmedDeadline(timeoutSignal);
+          }
+          if (callerSignal?.aborted && signal.reason === callerSignal.reason) {
+            return 'local_cancel';
+          }
+        } catch {
+          // Native signals expose reasons; fall back to their aborted state if one does not.
+        }
+        return callerSignal?.aborted ? 'local_cancel' : confirmedDeadline(timeoutSignal);
+      },
+    };
   }
 
   /** Throw a typed error with provider context attached. */

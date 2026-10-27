@@ -142,7 +142,9 @@ function genericError(context: Context, aborted: boolean): LlmProviderError {
 
 export function classifyProviderFailure(input: FailureInput): ProviderFailure {
   const { error, diagnostics } = input;
-  const aborted = error instanceof Error && error.name === 'AbortError';
+  // Fetch errors can cross a JavaScript realm boundary, where instanceof Error is false.
+  const aborted = error !== null && typeof error === 'object'
+    && 'name' in error && error.name === 'AbortError';
   const abortCause = aborted ? input.abortCause : undefined;
   let normalized: Error;
   if (error instanceof LlmCapabilityError) {

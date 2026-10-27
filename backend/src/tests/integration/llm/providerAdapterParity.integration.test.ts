@@ -1,5 +1,6 @@
 import { ServerResponse } from 'node:http';
 import { logger } from '../../../config/logger';
+import { createSessionTitleCompletionOptions } from '../../../modules/chat/sessionTitleCompletion.options';
 import { LlmStreamingError } from '../../../modules/llm/llm.types';
 import { OllamaProvider } from '../../../modules/llm/providers/ollama.provider';
 import { OpenAiCompatibleProvider } from '../../../modules/llm/providers/openaiCompatible.provider';
@@ -234,6 +235,40 @@ describe('LLM provider adapter parity integration', () => {
       usage: { promptTokens: 3, completionTokens: 4, totalTokens: 7 },
     });
   });
+
+  it.each(['ollama', 'openai-compatible'] as const)(
+    'aborts a real %s completion request when the worker signal aborts', async (type) => {
+      let markReceived: () => void = () => {};
+      const received = new Promise<void>((resolve) => { markReceived = resolve; });
+      let heldResponse: ServerResponse | undefined;
+      const route = type === 'ollama' ? 'POST /api/chat' : 'POST /chat/completions';
+      const upstream = await createMockLlmUpstream({
+        [route]: (_request, response) => {
+          heldResponse = response;
+          markReceived();
+        },
+      });
+      const shutdown = new AbortController();
+      const provider = type === 'ollama'
+        ? createOllamaProvider(upstream)
+        : createOpenAiProvider(upstream);
+
+      try {
+        const completion = provider.complete(
+          { model: TEST_MODEL_ID, messages: [{ role: 'user', content: PRIVATE_PROMPT }] },
+          undefined,
+          createSessionTitleCompletionOptions(shutdown.signal),
+        );
+        await received;
+        shutdown.abort();
+        await expect(completion).rejects.toMatchObject({ code: 'REQUEST_TIMEOUT' });
+        expect(upstream.requests).toHaveLength(1);
+      } finally {
+        heldResponse?.end();
+        await upstream.close();
+      }
+    },
+  );
 
   it('normalizes streaming responses to compatible internal chunk shapes', async () => {
     const request = {
