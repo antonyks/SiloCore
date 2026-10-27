@@ -68,6 +68,11 @@ describe('safeErrorDiagnostic', () => {
     expect(safeErrorDiagnostic(error)).toEqual({ failureKind: 'AbortError' });
   });
 
+  it('recognizes a cross-realm style TimeoutError without logging its reason', () => {
+    expect(safeErrorDiagnostic({ name: 'TimeoutError', message: 'private timeout reason' }))
+      .toEqual({ failureKind: 'TimeoutError' });
+  });
+
   it('does not copy an arbitrary name from a non-Error object', () => {
     expect(safeErrorDiagnostic({ name: 'private-token', message: 'private prompt' }))
       .toEqual({ failureKind: 'NonErrorThrow' });

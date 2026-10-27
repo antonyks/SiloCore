@@ -85,6 +85,14 @@ describe('shared provider failure classification', () => {
     expect(failure.retryable).toBe(retryable);
   });
 
+  it('recognizes a cross-realm style TimeoutError only with a confirmed deadline', () => {
+    const error = { name: 'TimeoutError', message: 'private timeout reason' };
+    expect(classify(error, 'ollama', 'complete', 'upstream_request', 'deadline'))
+      .toMatchObject({ failureCategory: 'timeout', providerFailureCode: 'TIMEOUT',
+        error: { code: 'REQUEST_TIMEOUT' } });
+    expect(classify(error).failureCategory).toBe('unknown');
+  });
+
   it.each(['deadline', 'local_cancel'] as const)(
     'does not relabel an HTTP error when %s also fires', (cause) => {
       const error = providerHttpError({ providerType: 'openai-compatible', providerId: 'provider-1', operation: 'complete' }, 401);

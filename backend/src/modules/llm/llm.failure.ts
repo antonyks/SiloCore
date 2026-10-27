@@ -144,7 +144,8 @@ export function classifyProviderFailure(input: FailureInput): ProviderFailure {
   const { error, diagnostics } = input;
   // Fetch errors can cross a JavaScript realm boundary, where instanceof Error is false.
   const aborted = error !== null && typeof error === 'object'
-    && 'name' in error && error.name === 'AbortError';
+    && 'name' in error && (error.name === 'AbortError'
+      || (input.abortCause === 'deadline' && error.name === 'TimeoutError'));
   const abortCause = aborted ? input.abortCause : undefined;
   let normalized: Error;
   if (error instanceof LlmCapabilityError) {

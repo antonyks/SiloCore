@@ -34,6 +34,7 @@ const KNOWN_CODES: Record<string, string> = {
 
 const KNOWN_ERROR_NAMES = new Set([
   'AbortError',
+  'TimeoutError',
   'FetchError',
   'LlmProviderError',
   'PrismaClientInitializationError',
@@ -67,7 +68,8 @@ export function safeErrorDiagnostic(error: unknown): Record<string, string | num
     if (!(error instanceof Error)) {
       // Fetch AbortError instances can cross a JavaScript realm boundary.
       return { failureKind: error !== null && typeof error === 'object'
-        && 'name' in error && error.name === 'AbortError' ? 'AbortError' : 'NonErrorThrow' };
+        && 'name' in error && (error.name === 'AbortError' || error.name === 'TimeoutError')
+        ? error.name : 'NonErrorThrow' };
     }
 
     const code = safeCode((error as Error & { code?: unknown }).code);

@@ -10,6 +10,7 @@ import { ApiQueueClient, createJobQueueClient } from '../../modules/job/jobQueue
 import { WorkerCpuTaskPool } from '../../modules/worker/workerTaskPool';
 import { VALIDATION_JOB_QUEUE } from '../../modules/worker/validationJob';
 import { PROVIDER_HEALTH_SAMPLING_JOB_QUEUE } from '../../modules/worker/providerHealthSamplingJob';
+import { SESSION_TITLE_JOB_QUEUE } from '../../modules/worker/sessionTitleJob';
 import { SelectedJob } from '../../modules/job/job.model';
 import { JobQueuePayload } from '../../modules/job/job.types';
 
@@ -65,7 +66,7 @@ describe('worker composition', () => {
     expect(f.startScheduler).not.toHaveBeenCalled();
     await Promise.all([worker.start(), worker.start()]);
     expect(f.queue.start).toHaveBeenCalledTimes(1);
-    expect([...f.callbacks.keys()]).toEqual([VALIDATION_JOB_QUEUE, PROVIDER_HEALTH_SAMPLING_JOB_QUEUE]);
+    expect([...f.callbacks.keys()]).toEqual([VALIDATION_JOB_QUEUE, PROVIDER_HEALTH_SAMPLING_JOB_QUEUE, SESSION_TITLE_JOB_QUEUE]);
     const queueJob = {
       id: 'message', name: VALIDATION_JOB_QUEUE, data: { jobId: 5 },
       signal: new AbortController().signal, retryCount: 0, retryLimit: 1,
@@ -90,7 +91,7 @@ describe('worker composition', () => {
     await workerA.start();
     await workerB.start();
     expect([...a.callbacks.keys()]).toEqual(['replacement']);
-    expect([...b.callbacks.keys()]).toEqual([VALIDATION_JOB_QUEUE, PROVIDER_HEALTH_SAMPLING_JOB_QUEUE]);
+    expect([...b.callbacks.keys()]).toEqual([VALIDATION_JOB_QUEUE, PROVIDER_HEALTH_SAMPLING_JOB_QUEUE, SESSION_TITLE_JOB_QUEUE]);
     await a.callbacks.get('replacement')!([{
       id: 'message', name: 'replacement', data: { jobId: 5 }, signal: new AbortController().signal,
     } as JobWithMetadata<JobQueuePayload>]);

@@ -7,6 +7,7 @@ import { ensurePgBossQueue, PgBossJobQueueTransport } from '../modules/job/jobQu
 import { importPgBoss } from '../modules/job/pgBoss.loader.cjs';
 import { createValidationJobHandler, VALIDATION_JOB_QUEUE } from '../modules/worker/validationJob';
 import { createProviderHealthSampling, PROVIDER_HEALTH_SAMPLING_JOB_QUEUE, ProviderHealthSamplingScheduler } from '../modules/worker/providerHealthSamplingJob';
+import { createSessionTitleJobHandler, SESSION_TITLE_JOB_QUEUE } from '../modules/worker/sessionTitleJob';
 import { createWorkerCpuTaskPool, WorkerCpuTaskPool } from '../modules/worker/workerTaskPool';
 import { CoreServices, CoreServiceOverrides, createCoreServices } from './coreServices';
 
@@ -39,6 +40,9 @@ export function createWorkerComposition(overrides: WorkerCompositionOverrides = 
     return overrides.handlers?.(services, cpuPool) ?? [
       { queueName: VALIDATION_JOB_QUEUE, handler: createValidationJobHandler(cpuPool, services.jobs) },
       { queueName: PROVIDER_HEALTH_SAMPLING_JOB_QUEUE, handler: sampling.createProviderHealthSamplingJobHandler() },
+      { queueName: SESSION_TITLE_JOB_QUEUE, handler: createSessionTitleJobHandler({
+        llm: services.llm, usage: services.usage,
+      }) },
     ];
   }
 

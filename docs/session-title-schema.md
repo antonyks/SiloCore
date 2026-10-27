@@ -27,8 +27,11 @@ set that operation explicitly. Admin analytics keep chat reply totals in
 `generation` and report title model calls separately in `titleGeneration`.
 The same date window applies to both summaries. A `NOT_ENOUGH_CONTEXT` response
 is a successful model call even though a later title job would apply no title.
-The `(operation, createdAt)` index supports these filtered aggregates. Title
-jobs and model calls are not yet scheduled or implemented.
+The `(operation, createdAt)` index supports these filtered aggregates. The
+worker now has a `chat.session_title` handler that reads eligible linked
+exchanges, calls the reply's provider and model, records title-call usage, and
+conditionally applies a safe generated title. Chat replies do not yet mark
+eligibility, and no title jobs are scheduled until later tasks.
 
 The migration is `backend/prisma/migrations/20261026000200_session_title_usage_schema`.
 Under `instructions.txt`, the user applies it to the intended database and
