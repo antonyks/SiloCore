@@ -264,6 +264,7 @@ export async function startStack() {
       WORKER_STALE_JOB_MS: "300000",
       PROVIDER_HEALTH_SAMPLE_INTERVAL_MS: "300000",
       PROVIDER_HEALTH_SAMPLE_RECENT_MS: "900000",
+      SESSION_TITLE_SCHEDULER_INTERVAL_MS: "1000",
       PGBOSS_SCHEMA: "pgboss",
     };
     containerAttempted = true;
@@ -460,7 +461,7 @@ export async function startStack() {
         return { email, actor: await login(email) };
       },
       async startWorker() {
-        if (worker) throw new Error("Worker already started");
+        if (worker) return;
         const offset = logs.length;
         worker = launch(process.execPath, ["dist/worker.js"], backend, env);
         await waitUntil(

@@ -504,3 +504,64 @@ test("authenticated job SSE follows real worker success and cancellation with ow
     await stream.close();
   }
 });
+
+test("chat titles refresh from background jobs and respect insufficient context and manual names", async ({ page, context, stack }) => {
+  test.setTimeout(120_000);
+  const { email, actor } = await stack.createUser();
+  const personal = actor.user.personalWorkspace.id;
+  await login(page, email);
+  await stack.startWorker();
+
+  const titled = await newChat(page, stack, actor, personal);
+  await send(page, stack, "ollama", "title-topic-question");
+  await expect(page.getByRole("button", { name: "Open Synthetic Chat Topic" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Synthetic Chat Topic" })).toBeVisible();
+  expect(await data<{ title: string }>(await stack.request(actor, personal, `/chat/${titled.id}`)))
+    .toMatchObject({ title: "Synthetic Chat Topic" });
+
+  const insufficient = await newChat(page, stack, actor, personal);
+  await send(page, stack, "ollama", "title-insufficient");
+  await expect.poll(async () => {
+    const job = await stack.db.job.findFirst({
+      where: { type: "chat.session_title", payload: { path: ["sessionId"], equals: insufficient.id } },
+    });
+    return job?.result;
+  }).toMatchObject({ outcome: "NOT_ENOUGH_CONTEXT" });
+  await expect(page.getByRole("heading", { name: "New Chat" })).toBeVisible();
+  await send(page, stack, "ollama", "title-retry");
+  await expect(page.getByRole("heading", { name: "Synthetic Chat Topic" })).toBeVisible();
+
+  const manual = await newChat(page, stack, actor, personal);
+  await data(await stack.request(actor, personal, `/chat/${manual.id}`, "PUT", {
+    title: "User Owned Topic",
+  }));
+  await send(page, stack, "ollama", "title-manual-question");
+  await page.reload();
+  await selectChat(page, "User Owned Topic");
+  await expect(page.getByRole("heading", { name: "User Owned Topic" })).toBeVisible();
+  expect(await stack.db.job.count({
+    where: { type: "chat.session_title", payload: { path: ["sessionId"], equals: manual.id } },
+  })).toBe(0);
+
+  const standard = await data<{ id: number }>(
+    await stack.request(actor, personal, "/workspaces", "POST", { name: "Title isolation workspace" }), 201,
+  );
+  stack.trackWorkspace(actor, standard.id);
+  const otherTab = await context.newPage();
+  await otherTab.goto(`/workspaces/${standard.id}/chat/home`);
+  await newChat(otherTab, stack, actor, standard.id);
+  let otherTabChatReads = 0;
+  otherTab.on("request", (request) => {
+    if (request.url().startsWith(`${stack.apiUrl}/chat?`) && request.method() === "GET") {
+      otherTabChatReads += 1;
+    }
+  });
+  const anotherPersonal = await newChat(page, stack, actor, personal);
+  const readsBeforeTitle = otherTabChatReads;
+  await send(page, stack, "ollama", "title-cross-workspace");
+  await expect(page.getByRole("heading", { name: "Synthetic Chat Topic" })).toBeVisible();
+  await expect(otherTab.getByRole("heading", { name: "New Chat" })).toBeVisible();
+  expect(otherTabChatReads).toBe(readsBeforeTitle);
+  expect(await data<{ title: string }>(await stack.request(actor, personal, `/chat/${anotherPersonal.id}`)))
+    .toMatchObject({ title: "Synthetic Chat Topic" });
+});

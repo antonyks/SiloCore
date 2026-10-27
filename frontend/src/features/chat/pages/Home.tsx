@@ -38,6 +38,7 @@ import { Navigate } from "react-router-dom";
 import UserProfileDropdown from "../../../components/ui/UserProfileDropdown";
 import { useAuth } from "../../auth/hooks/useAuth";
 import { useWorkspaceContext } from "../../workspace/workspaceContext";
+import { useJobEventSubscription } from "../../jobEvents/useJobEventSubscription";
 import { WorkspaceControls } from "../../workspace/components/WorkspaceControls";
 import { WorkspaceExtensionNavigation } from "../../../extensions/WorkspaceExtensionNavigation";
 import {
@@ -540,6 +541,23 @@ const Home: React.FC = () => {
   const createSession = useCreateChatSession(activeWorkspaceId);
   const updateSession = useUpdateChatSession(activeWorkspaceId);
   const deleteSession = useDeleteChatSession(activeWorkspaceId);
+
+  const refreshSessionTitles = () => {
+    if (activeWorkspaceId === null || !isWorkspaceValidated) return;
+    void queryClient.invalidateQueries({ queryKey: chatSessionQueryKeys.lists(activeWorkspaceId) });
+    if (selectedSessionId !== null) {
+      void queryClient.invalidateQueries({
+        queryKey: chatSessionQueryKeys.detail(activeWorkspaceId, selectedSessionId),
+      });
+    }
+  };
+  useJobEventSubscription({
+    types: ["chat.session_title"],
+    statuses: ["SUCCEEDED", "FAILED", "CANCELLED"],
+    onJob: refreshSessionTitles,
+    onReady: refreshSessionTitles,
+    enabled: activeWorkspaceId !== null && isWorkspaceValidated,
+  });
 
   const sessions = useMemo(() => sessionsQuery.data || [], [sessionsQuery.data]);
   const filteredSessions = useMemo(() => {

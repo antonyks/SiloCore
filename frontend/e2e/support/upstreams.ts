@@ -36,7 +36,12 @@ export async function startUpstreams() {
         body.messages.filter((item) => item.role === "user").at(-1)?.content ||
         "";
       const prefix = `${provider}:${body.model}:`;
-      const answer = prefix + prompt;
+      const isTitleRequest = body.messages[0]?.role === "system" &&
+        body.messages[0].content.startsWith("Write a concise topic phrase for this chat");
+      const answer = isTitleRequest
+        ? prompt.includes("title-retry") ? "Synthetic Chat Topic" :
+          prompt.includes("title-insufficient") ? "NOT_ENOUGH_CONTEXT" : "Synthetic Chat Topic"
+        : prefix + prompt;
       if (!body.stream) {
         return json(
           response,

@@ -27,6 +27,11 @@ opens or reopens so features can reconcile changes that occurred while offline;
 the feed does not replay every transition. A registration added to an already
 ready stream also receives `onReady`.
 
+The workspace chat page subscribes to terminal `chat.session_title` jobs. It
+invalidates the workspace session list and selected-session detail on both a
+terminal event and `ready`, so the sidebar and heading read the current title
+from the chat API. Job events and results do not supply the displayed title.
+
 The client uses the existing bearer token and validated `X-Workspace-Id` header.
 Missing credentials or HTTP 401 for the current token use the existing logout
 path. A 401 from a request sent with an older token reconnects with the current

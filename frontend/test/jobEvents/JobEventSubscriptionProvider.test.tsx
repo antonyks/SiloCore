@@ -52,6 +52,30 @@ function Probe({ onJob, onReady }: { onJob: ReturnType<typeof vi.fn>; onReady: R
 describe("workspace job event subscription provider", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("keeps the default test SSE stream open until unmount", async () => {
+    seedAuth();
+    server.use(http.get(`${API_BASE_URL}/workspaces`, () =>
+      HttpResponse.json({ data: [personal] }),
+    ));
+    const originalFetch = window.fetch.bind(window);
+    const fetchMock = vi.spyOn(window, "fetch").mockImplementation((input, init) => originalFetch(input, init));
+    const onReady = vi.fn();
+    const view = renderWithProviders(<Probe onJob={vi.fn()} onReady={onReady} />, {
+      workspaceLayout: true,
+      fallbackRoutes: false,
+      routePath: "/workspaces/:workspaceId/chat/home",
+      initialEntries: ["/workspaces/25/chat/home"],
+    });
+
+    await waitFor(() => expect(onReady).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(onReady).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const signal = (fetchMock.mock.calls[0][1] as RequestInit).signal as AbortSignal;
+    view.unmount();
+    expect(signal.aborted).toBe(true);
+  });
+
   it("waits for validation, switches workspaces, and aborts on unmount", async () => {
     seedAuth();
     let resolveWorkspaces!: (value: HttpResponse) => void;
