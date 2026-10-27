@@ -16,7 +16,7 @@ const axiosClient: AxiosInstance = axios.create({
 axiosClient.interceptors.request.use(
   (config) => {
     const token = storage.getToken();
-    if (token) {
+    if (token && config.url !== "/auth/login") {
       config.headers.Authorization = `Bearer ${token}`;
 
       const hasWorkspaceHeader =
@@ -55,7 +55,15 @@ axiosClient.interceptors.response.use(
         ? error.response.data.message
         : error.message;
 
-    if (isAuthSessionError(error.response?.status, responseMessage)) {
+    const authorization = error.config?.headers?.get("Authorization");
+    const requestToken = typeof authorization === "string" && authorization.startsWith("Bearer ")
+      ? authorization.slice("Bearer ".length)
+      : null;
+    if (
+      error.config?.url !== "/auth/login" &&
+      isAuthSessionError(error.response?.status, responseMessage) &&
+      storage.getToken() === requestToken
+    ) {
       logoutAndRedirect();
     }
     return Promise.reject(error);

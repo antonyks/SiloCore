@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import axiosClient from '../../src/lib/axiosClient';
 import { API_BASE_URL, TOKEN_KEY, USER_KEY } from '../../src/config/constants';
@@ -116,5 +116,61 @@ describe('axiosClient', () => {
     });
 
     expect(data).toEqual({ workspaceId: '25' });
+  });
+
+  it('preserves a newer token when an old authenticated request receives 401', async () => {
+    localStorage.setItem(TOKEN_KEY, 'old-token');
+    localStorage.setItem(USER_KEY, JSON.stringify({ id: 1 }));
+    const unauthorized = vi.fn();
+    window.addEventListener('unauthorized-access', unauthorized);
+    let requestStarted!: () => void;
+    const started = new Promise<void>((resolve) => { requestStarted = resolve; });
+    let resolveResponse!: (response: HttpResponse) => void;
+    server.use(http.get(`${API_BASE_URL}/llm/models`, ({ request }) => {
+      expect(request.headers.get('authorization')).toBe('Bearer old-token');
+      requestStarted();
+      return new Promise<HttpResponse>((resolve) => { resolveResponse = resolve; });
+    }));
+
+    const pendingRequest = axiosClient.get('/llm/models');
+    await started;
+    localStorage.setItem(TOKEN_KEY, 'new-token');
+    resolveResponse(HttpResponse.json({ message: 'Unauthorized' }, { status: 401 }));
+    await expect(pendingRequest).rejects.toMatchObject({ response: { status: 401 } });
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('new-token');
+    expect(localStorage.getItem(USER_KEY)).not.toBeNull();
+    expect(unauthorized).not.toHaveBeenCalled();
+    window.removeEventListener('unauthorized-access', unauthorized);
+  });
+
+  it('logs out when a request using the current token receives 401', async () => {
+    localStorage.setItem(TOKEN_KEY, 'expired-token');
+    localStorage.setItem(USER_KEY, JSON.stringify({ id: 1 }));
+    const unauthorized = vi.fn();
+    window.addEventListener('unauthorized-access', unauthorized);
+    server.use(http.get(`${API_BASE_URL}/llm/models`, () =>
+      HttpResponse.json({ message: 'Unauthorized' }, { status: 401 }),
+    ));
+
+    await expect(axiosClient.get('/llm/models')).rejects.toMatchObject({ response: { status: 401 } });
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+    expect(localStorage.getItem(USER_KEY)).toBeNull();
+    expect(unauthorized).toHaveBeenCalledTimes(1);
+    window.removeEventListener('unauthorized-access', unauthorized);
+  });
+
+  it('does not send a bearer token or log out on rejected login credentials', async () => {
+    localStorage.setItem(TOKEN_KEY, 'existing-token');
+    const unauthorized = vi.fn();
+    window.addEventListener('unauthorized-access', unauthorized);
+    server.use(http.post(`${API_BASE_URL}/auth/login`, ({ request }) => {
+      expect(request.headers.get('authorization')).toBeNull();
+      return HttpResponse.json({ message: 'Invalid credentials' }, { status: 401 });
+    }));
+
+    await expect(axiosClient.post('/auth/login', {})).rejects.toMatchObject({ response: { status: 401 } });
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('existing-token');
+    expect(unauthorized).not.toHaveBeenCalled();
+    window.removeEventListener('unauthorized-access', unauthorized);
   });
 });

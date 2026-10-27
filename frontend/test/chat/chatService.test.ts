@@ -126,4 +126,35 @@ describe('chatService.streamGenerateMessage', () => {
     expect(eventListener).toHaveBeenCalledTimes(1);
     window.removeEventListener('unauthorized-access', eventListener);
   });
+
+  it('does not clear a newer token for an old streaming request failure', async () => {
+    localStorage.setItem(TOKEN_KEY, 'old-token');
+    localStorage.setItem(USER_KEY, JSON.stringify({ id: 1 }));
+    const unauthorized = vi.fn();
+    window.addEventListener('unauthorized-access', unauthorized);
+    let resolveResponse!: (response: Response) => void;
+    const fetchMock = vi.spyOn(window, 'fetch').mockReturnValue(
+      new Promise<Response>((resolve) => { resolveResponse = resolve; }),
+    );
+
+    const pendingRequest = chatService.streamGenerateMessage(
+      10,
+      { content: 'Hello', model: 'llama3.1' },
+      { workspaceId: 25, onEvent: vi.fn() },
+    );
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toMatchObject({
+      Authorization: 'Bearer old-token',
+    });
+    localStorage.setItem(TOKEN_KEY, 'new-token');
+    resolveResponse(new Response(JSON.stringify({ message: 'jwt expired' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    await expect(pendingRequest).rejects.toThrow('jwt expired');
+    expect(localStorage.getItem(TOKEN_KEY)).toBe('new-token');
+    expect(localStorage.getItem(USER_KEY)).not.toBeNull();
+    expect(unauthorized).not.toHaveBeenCalled();
+    window.removeEventListener('unauthorized-access', unauthorized);
+  });
 });

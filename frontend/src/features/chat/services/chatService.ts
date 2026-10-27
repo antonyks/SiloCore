@@ -139,7 +139,7 @@ export const chatService = {
     if (!response.ok) {
       const errorMessage = await getResponseErrorMessage(response);
 
-      if (isAuthSessionError(response.status, errorMessage)) {
+      if (isAuthSessionError(response.status, errorMessage) && storage.getToken() === token) {
         logoutAndRedirect();
       }
 
