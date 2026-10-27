@@ -8,8 +8,8 @@ import { SelectedJob } from '../modules/job/job.model';
 process.env.OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? `test-${Date.now()}`;
 
 type UserCreateResult = Awaited<ReturnType<PrismaClient['user']['create']>>;
-type chatSessionResult = Awaited<ReturnType<PrismaClient['chatSession']['create']>>;
-type chatMessageResult = Awaited<ReturnType<PrismaClient['chatMessage']['create']>>;
+type chatSessionResult = SelectedChatSession;
+type chatMessageResult = SelectedChatMessage;
 type jobResult = SelectedJob;
 type generationUsageResult = {
   id: number;
