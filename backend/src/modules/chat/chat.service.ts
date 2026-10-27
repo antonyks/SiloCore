@@ -141,12 +141,24 @@ function isIncompleteGeneration(data: {
     return undefined;
   }
 
-  const normalized = data.finishReason.toLowerCase();
+  const normalized = data.finishReason.trim().toLowerCase();
   if (normalized === 'length' || normalized === 'max_tokens') {
     return true;
   }
 
   return undefined;
+}
+
+function isTitleEligibleReply(data: {
+  content: string;
+  reasoning?: string;
+  finishReason?: string;
+}): boolean {
+  const finishReason = data.finishReason?.trim().toLowerCase();
+  return Boolean(data.content.trim())
+    && !isIncompleteGeneration(data)
+    && finishReason !== 'error'
+    && finishReason !== 'aborted';
 }
 
 export interface ChatServiceDependencies {
@@ -392,10 +404,16 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
             throw new LlmProviderError('Provider returned no response', prepared.providerMetadata.providerId, 'UPSTREAM_ERROR');
           }
           const latencyMs = Date.now() - prepared.startedAt;
-          const assistantMessage = await repository.createMessage({
+          const assistantMessage = await repository.createGeneratedAssistantMessage({
             content: completion.content,
-            author: MessageAuthor.ASSISTANT,
             sessionId: input.sessionId,
+            workspaceId: prepared.workspaceId,
+            triggeringUserMessageId: prepared.userMessage.id,
+            titleEligible: isTitleEligibleReply({
+              content: completion.content,
+              reasoning: completion.reasoning,
+              finishReason: completion.finishReason,
+            }),
             metadata: createAssistantMetadata({
               ...prepared.providerMetadata,
               model: prepared.request.model,
@@ -513,6 +531,7 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
         finishReason?: string;
         incomplete?: boolean;
         errorMessage?: string;
+        successful?: boolean;
       }): Promise<SelectedChatMessage | null> => {
         if (assistantMessagePersisted || (!content && !reasoning)) {
           return null;
@@ -520,10 +539,16 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
 
         assistantMessagePersisted = true;
         const resolvedFinishReason = options?.finishReason ?? finishReason;
-        return repository.createMessage({
+        return repository.createGeneratedAssistantMessage({
           content,
-          author: MessageAuthor.ASSISTANT,
           sessionId: input.sessionId,
+          workspaceId: prepared.workspaceId,
+          triggeringUserMessageId: prepared.userMessage.id,
+          titleEligible: options?.successful === true && isTitleEligibleReply({
+            content,
+            reasoning: reasoning || undefined,
+            finishReason: resolvedFinishReason,
+          }),
           metadata: createAssistantMetadata({
             ...prepared.providerMetadata,
             model: prepared.request.model,
@@ -546,9 +571,11 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
         while (true) {
           let attemptError: unknown;
           let emptyResponse = false;
+          let sawCompletion = false;
           const previousPrepared = prepared;
           try {
             for await (const chunk of streamFromAdapter(prepared.provider, prepared.request, prepared.operationContext)) {
+              sawCompletion ||= chunk.done === true;
               if (chunk.usage) {
                 usage = chunk.usage;
               }
@@ -582,6 +609,10 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
               attemptError = new LlmStreamingError(
                 'Provider returned no response', prepared.providerMetadata.providerId, 'UPSTREAM_STREAM_ERROR',
               );
+            } else if (!sawCompletion) {
+              attemptError = new LlmStreamingError(
+                'Provider stream ended before completion', prepared.providerMetadata.providerId, 'UPSTREAM_STREAM_ERROR',
+              );
             }
           } catch (error) {
             attemptError = error;
@@ -611,7 +642,7 @@ export function createChatService(dependencies: Partial<ChatServiceDependencies>
           throw attemptError;
         }
 
-        const assistantMessage = await persistAssistantMessage();
+        const assistantMessage = await persistAssistantMessage({ successful: true });
         completed = true;
         const latencyMs = Date.now() - prepared.startedAt;
         await recordGenerationUsageSafely({

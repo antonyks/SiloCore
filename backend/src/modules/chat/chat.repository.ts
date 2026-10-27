@@ -15,7 +15,16 @@ import {
   IChatSessionListParams
 } from './chat.types';
 import { prisma } from '../../config/database';
-import { ChatSessionTitleSource } from '@prisma/client';
+import { ChatSessionTitleSource, MessageAuthor, Prisma } from '@prisma/client';
+
+interface GeneratedAssistantMessageInput {
+  sessionId: number;
+  workspaceId: number;
+  triggeringUserMessageId: number;
+  content: string;
+  metadata: Prisma.InputJsonValue;
+  titleEligible: boolean;
+}
 
 export const ChatRepository = {
   async createSession(data: IChatSessionRepositoryCreateInput): Promise<SelectedChatSession> {
@@ -150,6 +159,43 @@ export const ChatRepository = {
         where: { id: data.sessionId },
         data: { updatedAt: new Date() },
       });
+      return message;
+    });
+  },
+
+  async createGeneratedAssistantMessage(data: GeneratedAssistantMessageInput): Promise<SelectedChatMessage> {
+    return prisma.$transaction(async (tx) => {
+      const message = await tx.chatMessage.create({
+        data: {
+          sessionId: data.sessionId,
+          author: MessageAuthor.ASSISTANT,
+          content: data.content,
+          metadata: data.metadata,
+          triggeringUserMessageId: data.triggeringUserMessageId,
+        },
+        select: SelectedChatMessageFields,
+      });
+
+      await tx.chatSession.update({
+        where: { id: data.sessionId },
+        data: { updatedAt: new Date() },
+      });
+
+      if (data.titleEligible) {
+        await tx.chatSession.updateMany({
+          where: {
+            id: data.sessionId,
+            workspaceId: data.workspaceId,
+            titleSource: ChatSessionTitleSource.PLACEHOLDER,
+            OR: [
+              { latestEligibleAssistantMessageId: null },
+              { latestEligibleAssistantMessageId: { lt: message.id } },
+            ],
+          },
+          data: { latestEligibleAssistantMessageId: message.id },
+        });
+      }
+
       return message;
     });
   },

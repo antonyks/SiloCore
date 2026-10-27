@@ -1,6 +1,8 @@
 import { ChatSessionTitleSource, MessageAuthor, WorkspaceStatus } from '@prisma/client';
 import { prisma } from '../../config/database';
 
+export const SESSION_TITLE_ASSISTANT_PAGE_SIZE = 25;
+
 /** Internal title-worker reads; never return these records through an API or job result. */
 export const SessionTitleRepository = {
   findEligibleSession(sessionId: number, assistantMessageId: number, workspaceId: number) {
@@ -16,16 +18,16 @@ export const SessionTitleRepository = {
     });
   },
 
-  findLinkedAssistants(sessionId: number, assistantMessageId: number) {
+  findLinkedAssistants(sessionId: number, assistantMessageId: number, beforeId?: number) {
     return prisma.chatMessage.findMany({
       where: {
         sessionId,
-        id: { lte: assistantMessageId },
+        id: { lte: assistantMessageId, ...(beforeId === undefined ? {} : { lt: beforeId }) },
         author: MessageAuthor.ASSISTANT,
         triggeringUserMessageId: { not: null },
       },
       orderBy: { id: 'desc' },
-      take: 3,
+      take: SESSION_TITLE_ASSISTANT_PAGE_SIZE,
       select: { id: true, content: true, metadata: true, triggeringUserMessageId: true },
     });
   },

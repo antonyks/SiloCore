@@ -717,6 +717,18 @@ describe('OllamaProvider shared lifecycle', () => {
     expect(logged[1]).toMatchObject({ operationId: logged[0].operationId, latencyMs: expect.any(Number) });
   });
 
+  it('reports clean EOF after partial output as a provider stream error', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      body: streamFromLines([{ message: { content: 'Partial answer' }, done: false }]),
+    }));
+    const iterator = createProvider().streamComplete({ model: TEST_MODEL_ID, messages: [] })[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toMatchObject({ value: { content: 'Partial answer', done: false } });
+    await expect(iterator.next()).rejects.toMatchObject({ code: 'UPSTREAM_STREAM_ERROR' });
+    expect(events('stream').map((event) => event.status)).toEqual(['started', 'error']);
+    expect(events('stream')[1]).toMatchObject({ errorCode: 'UPSTREAM_STREAM_ERROR' });
+  });
+
   it('keeps skipped initialization free of lifecycle events', async () => {
     await createProvider({ enabled: false }).initialise();
     expect(events('initialise')).toHaveLength(0);

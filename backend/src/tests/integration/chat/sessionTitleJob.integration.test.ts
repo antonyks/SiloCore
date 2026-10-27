@@ -214,6 +214,54 @@ describe('session title job', () => {
     } finally { await upstream.close(); }
   });
 
+  it('skips linked partial replies while collecting the latest three successful exchanges', async () => {
+    const upstream = await createMockLlmUpstream({
+      'POST /api/chat': (_request, response) => sendJson(response, 200, { message: { content: 'Maple Topic' } }),
+    });
+    try {
+      const data = await fixture(upstream.baseUrl);
+      const middleUser = await integrationPrisma.chatMessage.create({
+        data: { sessionId: data.session.id, author: MessageAuthor.USER, content: 'Middle successful prompt' },
+      });
+      await integrationPrisma.chatMessage.create({
+        data: { sessionId: data.session.id, author: MessageAuthor.ASSISTANT,
+          content: 'Middle successful reply', triggeringUserMessageId: middleUser.id,
+          metadata: { providerId: String(data.provider.id), model: 'actual-reply-model', finishReason: 'stop' } },
+      });
+      const partialUser = await integrationPrisma.chatMessage.create({
+        data: { sessionId: data.session.id, author: MessageAuthor.USER, content: 'Partial prompt' },
+      });
+      await integrationPrisma.chatMessage.createMany({
+        data: Array.from({ length: 26 }, (_, index) => ({
+          sessionId: data.session.id, author: MessageAuthor.ASSISTANT,
+          content: `Partial reply ${index}`, triggeringUserMessageId: partialUser.id,
+          metadata: { providerId: String(data.provider.id), model: 'actual-reply-model',
+            finishReason: 'error', incomplete: true },
+        })),
+      });
+      const latestUser = await integrationPrisma.chatMessage.create({
+        data: { sessionId: data.session.id, author: MessageAuthor.USER, content: 'Latest successful prompt' },
+      });
+      const latest = await integrationPrisma.chatMessage.create({
+        data: { sessionId: data.session.id, author: MessageAuthor.ASSISTANT,
+          content: 'Latest successful reply', triggeringUserMessageId: latestUser.id,
+          metadata: { providerId: String(data.provider.id), model: 'actual-reply-model', finishReason: 'stop' } },
+      });
+      await integrationPrisma.chatSession.update({
+        where: { id: data.session.id }, data: { latestEligibleAssistantMessageId: latest.id },
+      });
+
+      expect(await run(data.job, { sessionId: data.session.id, assistantMessageId: latest.id }))
+        .toEqual({ outcome: 'APPLIED' });
+      const request = JSON.parse(upstream.requests[0].body) as { messages: { content: string }[] };
+      const pairs = JSON.parse(request.messages[1].content) as { user: string; assistant: string }[];
+      expect(pairs.map((pair) => pair.user)).toEqual([
+        data.user.content, 'Middle successful prompt', 'Latest successful prompt',
+      ]);
+      expect(request.messages[1].content).not.toContain('Partial reply');
+    } finally { await upstream.close(); }
+  });
+
   it('rejects a linked user from another session before the model call', async () => {
     const upstream = await createMockLlmUpstream({});
     try {

@@ -30,8 +30,17 @@ is a successful model call even though a later title job would apply no title.
 The `(operation, createdAt)` index supports these filtered aggregates. The
 worker now has a `chat.session_title` handler that reads eligible linked
 exchanges, calls the reply's provider and model, records title-call usage, and
-conditionally applies a safe generated title. Chat replies do not yet mark
-eligibility, and no title jobs are scheduled until later tasks.
+conditionally applies a safe generated title. Generated assistant messages
+store their triggering user message ID. A complete successful reply with
+nonblank content advances `latestEligibleAssistantMessageId` in the same
+transaction as its assistant message, only while the title is a placeholder
+and only if the new ID is greater. Partial, aborted, failed, reasoning-only,
+and length-truncated replies do not advance it. Streaming replies also require
+a provider completion marker; a clean EOF after partial output is a failed
+reply. The title worker reads linked replies in bounded pages and skips
+unsuccessful ones until it has up to three successful exchanges. Chat replies
+do not enqueue title jobs or call the title model; scheduling belongs to a
+later task.
 
 The migration is `backend/prisma/migrations/20261026000200_session_title_usage_schema`.
 Under `instructions.txt`, the user applies it to the intended database and

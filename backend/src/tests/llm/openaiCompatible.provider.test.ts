@@ -646,6 +646,52 @@ describe('OpenAiCompatibleProvider completion', () => {
     expect(loggedText()).not.toContain('Hello');
   });
 
+  it('treats [DONE] without a finish reason as a terminal chunk', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      body: streamFromText('data: {"choices":[{"delta":{"content":"Complete answer"}}]}\n\ndata: [DONE]\n\n'),
+    }));
+
+    const chunks = [];
+    for await (const chunk of createProvider().streamComplete({ model: TEST_MODEL_ID, messages: [] })) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toEqual([
+      { content: 'Complete answer', reasoning: undefined, done: false, finishReason: undefined, usage: undefined },
+      { done: true },
+    ]);
+  });
+
+  it('accepts a finish-reason chunk without a later [DONE] frame', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      body: streamFromText(
+        'data: {"choices":[{"delta":{"content":"Complete answer"},"finish_reason":"stop"}]}\n\n',
+      ),
+    }));
+
+    const chunks = [];
+    for await (const chunk of createProvider().streamComplete({ model: TEST_MODEL_ID, messages: [] })) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toEqual([
+      { content: 'Complete answer', reasoning: undefined, done: true, finishReason: 'stop', usage: undefined },
+    ]);
+  });
+
+  it('reports clean EOF after partial output as a provider stream error', async () => {
+    mockedFetch.mockResolvedValue(mockResponse({
+      body: streamFromText('data: {"choices":[{"delta":{"content":"Partial answer"}}]}\n\n'),
+    }));
+    const iterator = createProvider().streamComplete({ model: TEST_MODEL_ID, messages: [] })[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toMatchObject({ value: { content: 'Partial answer', done: false } });
+    await expect(iterator.next()).rejects.toMatchObject({ code: 'UPSTREAM_STREAM_ERROR' });
+    expect(mockedLogger.error).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'provider.stream', status: 'error', errorCode: 'UPSTREAM_STREAM_ERROR',
+    }), 'provider.stream.error');
+  });
+
   it('maps malformed stream chunks to streaming errors', async () => {
     mockedFetch.mockResolvedValue(mockResponse({
       body: streamFromText('data: {"choices":[{"delta":{"content":"partial"}}]}\n\ndata: not-json\n\n'),

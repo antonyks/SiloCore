@@ -1,8 +1,9 @@
 import { ServerResponse } from 'node:http';
-import { MessageAuthor, Prisma, UserRole, WorkspaceStatus, WorkspaceType } from '@prisma/client';
+import { ChatSessionTitleSource, MessageAuthor, Prisma, UserRole, WorkspaceStatus, WorkspaceType } from '@prisma/client';
 import { logger } from '../../../config/logger';
 import { NotFoundError } from '../../../errors';
 import { ChatService } from '../../../modules/chat/chat.service';
+import { ChatRepository } from '../../../modules/chat/chat.repository';
 import { IChatWorkspaceContext } from '../../../modules/chat/chat.types';
 import { GenerationUsageOutcome, GenerationUsageTokenCountSource } from '../../../modules/generationUsage';
 import { WorkspaceService } from '../../../modules/workspace/workspace.service';
@@ -16,6 +17,7 @@ import {
 } from '../helpers/prisma';
 import {
   createMockLlmUpstream,
+  MockRouteMap,
   MockLlmUpstream,
   sendChunksThenDestroy,
   sendJson,
@@ -222,6 +224,49 @@ afterEach(() => {
 });
 
 describe('Chat generation PostgreSQL integration', () => {
+  it('advances concurrent placeholder replies monotonically and preserves a later manual title', async () => {
+    const owner = await createIntegrationTestUser({ email: 'chat-eligibility-concurrent@example.com' });
+    const { workspace } = await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(owner.id);
+    const session = await createIntegrationChatSession(owner.id, {
+      workspace: { connect: { id: workspace.id } },
+      title: 'New Chat',
+      titleSource: ChatSessionTitleSource.PLACEHOLDER,
+    });
+    const firstPrompt = await createIntegrationChatMessage(session.id, { content: 'First prompt' });
+    const secondPrompt = await createIntegrationChatMessage(session.id, { content: 'Second prompt' });
+    expect(session.latestEligibleAssistantMessageId).toBeNull();
+
+    const [first, second] = await Promise.all([
+      ChatRepository.createGeneratedAssistantMessage({
+        sessionId: session.id, workspaceId: workspace.id, triggeringUserMessageId: firstPrompt.id,
+        content: 'First reply', metadata: { finishReason: 'stop' }, titleEligible: true,
+      }),
+      ChatRepository.createGeneratedAssistantMessage({
+        sessionId: session.id, workspaceId: workspace.id, triggeringUserMessageId: secondPrompt.id,
+        content: 'Second reply', metadata: { finishReason: 'stop' }, titleEligible: true,
+      }),
+    ]);
+    const eligibleId = Math.max(first.id, second.id);
+    expect((await integrationPrisma.chatSession.findUniqueOrThrow({ where: { id: session.id } }))
+      .latestEligibleAssistantMessageId).toBe(eligibleId);
+    const messages = await getSessionMessages(session.id);
+    expect(messages.find((message) => message.id === first.id)?.triggeringUserMessageId).toBe(firstPrompt.id);
+    expect(messages.find((message) => message.id === second.id)?.triggeringUserMessageId).toBe(secondPrompt.id);
+
+    await ChatRepository.updateSessionInWorkspace(session.id, workspace.id, { title: 'My title' });
+    const thirdPrompt = await createIntegrationChatMessage(session.id, { content: 'Third prompt' });
+    await ChatRepository.createGeneratedAssistantMessage({
+      sessionId: session.id, workspaceId: workspace.id, triggeringUserMessageId: thirdPrompt.id,
+      content: 'Third reply', metadata: { finishReason: 'stop' }, titleEligible: true,
+    });
+    expect(await integrationPrisma.chatSession.findUniqueOrThrow({ where: { id: session.id } }))
+      .toMatchObject({
+        title: 'My title',
+        titleSource: ChatSessionTitleSource.USER,
+        latestEligibleAssistantMessageId: eligibleId,
+      });
+  });
+
   it('persists non-streaming user and assistant messages with provider metadata', async () => {
     const upstream = await createMockLlmUpstream(createOpenAiChatRoutes());
 
@@ -236,6 +281,8 @@ describe('Chat generation PostgreSQL integration', () => {
       });
       const session = await createIntegrationChatSession(owner.id, {
         workspace: { connect: { id: workspace.id } },
+        title: 'New Chat',
+        titleSource: ChatSessionTitleSource.PLACEHOLDER,
       });
       await createIntegrationChatMessage(session.id, {
         content: PRIOR_PROMPT,
@@ -289,6 +336,11 @@ describe('Chat generation PostgreSQL integration', () => {
         reasoning: ASSISTANT_REASONING,
         finishReason: 'stop',
       }));
+      expect(messages[2].triggeringUserMessageId).toBe(result.userMessage.id);
+      const titleSession = await integrationPrisma.chatSession.findUniqueOrThrow({ where: { id: session.id } });
+      expect(titleSession.latestEligibleAssistantMessageId).toBe(result.assistantMessage.id);
+      expect(titleSession.latestAttemptedAssistantMessageId).toBeNull();
+      expect(await integrationPrisma.job.count({ where: { type: 'chat.session_title' } })).toBe(0);
       const usageRows = await getGenerationUsageRows();
       expect(usageRows).toHaveLength(1);
       expect(usageRows[0]).toMatchObject({
@@ -427,6 +479,8 @@ describe('Chat generation PostgreSQL integration', () => {
       const provider = await createPersistedOpenAiProvider(upstream);
       const session = await createIntegrationChatSession(owner.id, {
         workspace: { connect: { id: workspace.id } },
+        title: 'New Chat',
+        titleSource: ChatSessionTitleSource.PLACEHOLDER,
       });
       const events = [];
 
@@ -471,6 +525,10 @@ describe('Chat generation PostgreSQL integration', () => {
           params: {},
         }),
       });
+      expect(messages[1].triggeringUserMessageId).toBe(messages[0].id);
+      expect((await integrationPrisma.chatSession.findUniqueOrThrow({ where: { id: session.id } }))
+        .latestEligibleAssistantMessageId).toBe(messages[1].id);
+      expect(await integrationPrisma.job.count({ where: { type: 'chat.session_title' } })).toBe(0);
       const usageRows = await getGenerationUsageRows();
       expect(usageRows).toHaveLength(1);
       expect(usageRows[0]).toMatchObject({
@@ -506,6 +564,86 @@ describe('Chat generation PostgreSQL integration', () => {
       await closeUpstream(upstream);
     }
   });
+
+  it('accepts an OpenAI-compatible [DONE] frame without a finish reason', async () => {
+    const upstream = await createMockLlmUpstream({
+      'POST /chat/completions': (_request, res) => {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        res.end(`data: ${JSON.stringify({ choices: [{ delta: { content: STREAM_CONTENT } }] })}\n\ndata: [DONE]\n\n`);
+      },
+    });
+    try {
+      const owner = await createIntegrationTestUser({ email: 'chat-stream-done-only@example.com' });
+      const { workspace } = await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(owner.id);
+      const provider = await createPersistedOpenAiProvider(upstream);
+      const session = await createIntegrationChatSession(owner.id, {
+        workspace: { connect: { id: workspace.id } },
+        title: 'New Chat', titleSource: ChatSessionTitleSource.PLACEHOLDER,
+      });
+      const events = [];
+      for await (const event of ChatService.streamAssistantResponse({
+        sessionId: session.id, content: USER_PROMPT, providerId: provider.id,
+      }, createChatWorkspaceContext({ workspace, actorUserId: owner.id }))) events.push(event.event);
+
+      expect(events).toEqual(['user_message', 'delta', 'assistant_message', 'done']);
+      const messages = await getSessionMessages(session.id);
+      expect((await integrationPrisma.chatSession.findUniqueOrThrow({ where: { id: session.id } }))
+        .latestEligibleAssistantMessageId).toBe(messages[1].id);
+      expect(messages[1].triggeringUserMessageId).toBe(messages[0].id);
+    } finally {
+      await closeUpstream(upstream);
+    }
+  });
+
+  it.each(['ollama', 'openai-compatible'] as const)(
+    'treats clean %s EOF after output as a failed, ineligible partial reply', async (providerType) => {
+      const routes: MockRouteMap = providerType === 'ollama'
+        ? { 'POST /api/chat': (_request: unknown, res: ServerResponse) => {
+          res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+          res.end(`${JSON.stringify({ message: { content: PARTIAL_CONTENT }, done: false })}\n`);
+        } }
+        : { 'POST /chat/completions': (_request: unknown, res: ServerResponse) => {
+          res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+          res.end(`data: ${JSON.stringify({ choices: [{ delta: { content: PARTIAL_CONTENT } }] })}\n\n`);
+        } };
+      const upstream = await createMockLlmUpstream(routes);
+      try {
+        const owner = await createIntegrationTestUser({ email: `chat-${providerType}-early-eof@example.com` });
+        const { workspace } = await WorkspaceProvisioningService.ensurePersonalWorkspaceForUser(owner.id);
+        const provider = providerType === 'ollama'
+          ? await createPersistedOllamaProvider(upstream) : await createPersistedOpenAiProvider(upstream);
+        const session = await createIntegrationChatSession(owner.id, {
+          workspace: { connect: { id: workspace.id } },
+          title: 'New Chat', titleSource: ChatSessionTitleSource.PLACEHOLDER,
+        });
+        const events: string[] = [];
+
+        await expect((async () => {
+          for await (const event of ChatService.streamAssistantResponse({
+            sessionId: session.id, content: USER_PROMPT, providerId: provider.id,
+          }, createChatWorkspaceContext({ workspace, actorUserId: owner.id }))) events.push(event.event);
+        })()).rejects.toMatchObject({ code: 'UPSTREAM_STREAM_ERROR' });
+
+        expect(events).toEqual(['user_message', 'delta', 'assistant_message']);
+        const messages = await getSessionMessages(session.id);
+        expect(messages).toHaveLength(2);
+        expect(messages[1]).toMatchObject({
+          content: PARTIAL_CONTENT,
+          triggeringUserMessageId: messages[0].id,
+          metadata: expect.objectContaining({ finishReason: 'error', incomplete: true }),
+        });
+        expect((await integrationPrisma.chatSession.findUniqueOrThrow({ where: { id: session.id } }))
+          .latestEligibleAssistantMessageId).toBeNull();
+        expect(await getGenerationUsageRows()).toEqual([
+          expect.objectContaining({ outcome: GenerationUsageOutcome.FAILED, errorCode: 'UPSTREAM_STREAM_ERROR' }),
+        ]);
+        expect(loggedEvents('provider.stream').map((event) => event.status)).toEqual(['started', 'error']);
+        expect(loggedEvents('chat.stream').map((event) => event.status)).toEqual(['started', 'error']);
+      } finally {
+        await closeUpstream(upstream);
+      }
+    },
+  );
 
   it('correlates an early stream close and records only selected-model abort usage', async () => {
     const upstream = await createMockLlmUpstream(createOpenAiChatRoutes());
@@ -553,6 +691,8 @@ describe('Chat generation PostgreSQL integration', () => {
       const provider = await createPersistedOpenAiProvider(upstream);
       const session = await createIntegrationChatSession(owner.id, {
         workspace: { connect: { id: workspace.id } },
+        title: 'New Chat',
+        titleSource: ChatSessionTitleSource.PLACEHOLDER,
       });
       const events = [];
       let caughtError: unknown;
@@ -595,6 +735,9 @@ describe('Chat generation PostgreSQL integration', () => {
           errorMessage: expect.any(String),
         }),
       });
+      expect(messages[1].triggeringUserMessageId).toBe(messages[0].id);
+      expect((await integrationPrisma.chatSession.findUniqueOrThrow({ where: { id: session.id } }))
+        .latestEligibleAssistantMessageId).toBeNull();
       const usageRows = await getGenerationUsageRows();
       expect(usageRows).toHaveLength(1);
       expect(usageRows[0]).toMatchObject({

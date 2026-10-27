@@ -12,6 +12,7 @@ import {
     LlmEmbeddingRequest,
     LlmEmbeddingResponse,
     LlmStreamChunk,
+    LlmStreamingError,
     LlmMessage,
     TokenUsage,
     LlmModelCapabilities,
@@ -246,6 +247,8 @@ export class OllamaProvider extends AbstractLlmProvider {
             const reader = res.body as NodeJS.ReadableStream;
             const decoder = new TextDecoder();
             let buffer = '';
+            let sawCompletion = false;
+            let sawOutput = false;
 
             for await (const chunk of reader) {
                 buffer += typeof chunk === 'string'
@@ -258,9 +261,13 @@ export class OllamaProvider extends AbstractLlmProvider {
                     if (!line.trim()) continue;
                     try {
                         const parsed = JSON.parse(line) as OllamaGenerateResponse;
+                        const content = parsed.message?.content || undefined;
+                        const reasoning = extractReasoning(parsed.message);
+                        sawOutput ||= Boolean(content || reasoning);
+                        sawCompletion ||= parsed.done === true;
                         yield {
-                            content: parsed.message?.content || undefined,
-                            reasoning: extractReasoning(parsed.message),
+                            content,
+                            reasoning,
                             done: parsed.done ?? false,
                             finishReason: parsed.done_reason,
                             usage:
@@ -282,9 +289,13 @@ export class OllamaProvider extends AbstractLlmProvider {
             if (buffer.trim()) {
                 try {
                     const parsed = JSON.parse(buffer) as OllamaGenerateResponse;
+                    const content = parsed.message?.content || undefined;
+                    const reasoning = extractReasoning(parsed.message);
+                    sawOutput ||= Boolean(content || reasoning);
+                    sawCompletion ||= parsed.done === true;
                     yield {
-                        content: parsed.message?.content || undefined,
-                        reasoning: extractReasoning(parsed.message),
+                        content,
+                        reasoning,
                         done: parsed.done ?? false,
                         finishReason: parsed.done_reason,
                         usage:
@@ -299,6 +310,9 @@ export class OllamaProvider extends AbstractLlmProvider {
                 } catch {
                     // Ignore
                 }
+            }
+            if (sawOutput && !sawCompletion) {
+                throw new LlmStreamingError('Ollama stream ended before completion', providerId, 'UPSTREAM_STREAM_ERROR');
             }
         });
     }

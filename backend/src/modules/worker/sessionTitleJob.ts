@@ -3,7 +3,7 @@ import { logger } from '../../config/logger';
 import { safeErrorDiagnostic } from '../../config/safeErrorDiagnostic';
 import { InvalidInputError, NotFoundError } from '../../errors';
 import { ChatRepository } from '../chat/chat.repository';
-import { SessionTitleRepository } from '../chat/sessionTitle.repository';
+import { SessionTitleRepository, SESSION_TITLE_ASSISTANT_PAGE_SIZE } from '../chat/sessionTitle.repository';
 import { createSessionTitleCompletionOptions } from '../chat/sessionTitleCompletion.options';
 import { GenerationUsageService, GenerationUsageServiceContract } from '../generationUsage/generationUsage.service';
 import { JobWorkerHandler } from '../job/job.worker';
@@ -47,7 +47,7 @@ function replyMetadata(assistant: Assistant): { providerId: number; model: strin
   const model = metadata.model;
   const finishReason = metadata.finishReason;
   if (metadata.incomplete === true || metadata.errorMessage !== undefined
-    || (typeof finishReason === 'string' && ['length', 'max_tokens', 'error', 'aborted'].includes(finishReason.toLowerCase()))
+    || (typeof finishReason === 'string' && ['length', 'max_tokens', 'error', 'aborted'].includes(finishReason.trim().toLowerCase()))
     || !assistant.content.trim()) return null;
   const parsedProviderId = typeof providerId === 'string' && /^\d+$/.test(providerId)
     ? Number(providerId) : providerId;
@@ -92,25 +92,38 @@ export function createSessionTitleJobHandler(dependencies: Partial<SessionTitleJ
 
     const session = await repository.findEligibleSession(sessionId, assistantMessageId, job.workspaceId);
     if (!session) return { outcome: 'NOT_ELIGIBLE' satisfies SessionTitleOutcome };
-    const assistants = await repository.findLinkedAssistants(sessionId, assistantMessageId);
-    if (assistants[0]?.id !== assistantMessageId) return { outcome: 'NOT_ELIGIBLE' satisfies SessionTitleOutcome };
-    const users = await repository.findTriggeringUsers(sessionId,
-      assistants.map((assistant) => assistant.triggeringUserMessageId).filter((id): id is number => id !== null));
-    const userById = new Map(users.map((user) => [user.id, user]));
-    const eligible = assistants[0];
-    const eligibleMetadata = replyMetadata(eligible);
-    const eligibleUser = eligible.triggeringUserMessageId === null
-      ? undefined : userById.get(eligible.triggeringUserMessageId);
-    if (!eligibleMetadata || !eligibleUser || eligibleUser.id >= eligible.id || !eligibleUser.content.trim()) {
-      return { outcome: 'NOT_ELIGIBLE' satisfies SessionTitleOutcome };
+    const successfulPairs: Pair[] = [];
+    let eligibleMetadata: ReturnType<typeof replyMetadata> = null;
+    let beforeId: number | undefined;
+    while (successfulPairs.length < MAX_EXCHANGES) {
+      const assistants = await repository.findLinkedAssistants(sessionId, assistantMessageId, beforeId);
+      if (beforeId === undefined && assistants[0]?.id !== assistantMessageId) {
+        return { outcome: 'NOT_ELIGIBLE' satisfies SessionTitleOutcome };
+      }
+      if (!assistants.length) break;
+      const users = await repository.findTriggeringUsers(sessionId,
+        assistants.map((assistant) => assistant.triggeringUserMessageId).filter((id): id is number => id !== null));
+      const userById = new Map(users.map((user) => [user.id, user]));
+      for (const assistant of assistants) {
+        const metadata = replyMetadata(assistant);
+        const user = assistant.triggeringUserMessageId === null
+          ? undefined : userById.get(assistant.triggeringUserMessageId);
+        if (assistant.id === assistantMessageId) {
+          if (!metadata || !user || user.id >= assistant.id || !user.content.trim()) {
+            return { outcome: 'NOT_ELIGIBLE' satisfies SessionTitleOutcome };
+          }
+          eligibleMetadata = metadata;
+        }
+        if (metadata && user && user.id < assistant.id && user.content.trim()) {
+          successfulPairs.push({ user: user.content, assistant: assistant.content });
+        }
+        if (successfulPairs.length === MAX_EXCHANGES) break;
+      }
+      if (assistants.length < SESSION_TITLE_ASSISTANT_PAGE_SIZE) break;
+      beforeId = assistants[assistants.length - 1].id;
     }
-    const pairs = boundedPairs(assistants.flatMap((assistant) => {
-      const user = assistant.triggeringUserMessageId === null
-        ? undefined : userById.get(assistant.triggeringUserMessageId);
-      if (!replyMetadata(assistant) || !user || user.id >= assistant.id || !user.content.trim()) return [];
-      return [{ user: user.content, assistant: assistant.content }];
-    }));
-    if (!pairs.length) return { outcome: 'NOT_ELIGIBLE' satisfies SessionTitleOutcome };
+    const pairs = boundedPairs(successfulPairs);
+    if (!eligibleMetadata || !pairs.length) return { outcome: 'NOT_ELIGIBLE' satisfies SessionTitleOutcome };
 
     let resolved: Awaited<ReturnType<LlmRuntimeServiceContract['resolveGenerationProvider']>>;
     try {

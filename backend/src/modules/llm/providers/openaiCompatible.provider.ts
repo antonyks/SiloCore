@@ -449,6 +449,8 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
   private async *readStreamChunks(reader: NodeJS.ReadableStream): AsyncIterable<LlmStreamChunk> {
     const decoder = new TextDecoder();
     let buffer = '';
+    let sawCompletion = false;
+    let sawOutput = false;
 
     for await (const rawChunk of reader) {
       buffer += typeof rawChunk === 'string'
@@ -461,9 +463,12 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
       for (const frame of frames) {
         const chunk = this.parseStreamFrame(frame);
         if (chunk === 'done') {
+          if (!sawCompletion) yield { done: true };
           return;
         }
         if (chunk) {
+          sawCompletion ||= chunk.done === true;
+          sawOutput ||= Boolean(chunk.content || chunk.reasoning);
           yield chunk;
         }
       }
@@ -471,9 +476,18 @@ export class OpenAiCompatibleProvider extends AbstractLlmProvider {
 
     if (buffer.trim()) {
       const chunk = this.parseStreamFrame(buffer);
-      if (chunk !== 'done' && chunk) {
+      if (chunk === 'done') {
+        if (!sawCompletion) yield { done: true };
+        return;
+      }
+      if (chunk) {
+        sawCompletion ||= chunk.done === true;
+        sawOutput ||= Boolean(chunk.content || chunk.reasoning);
         yield chunk;
       }
+    }
+    if (sawOutput && !sawCompletion) {
+      throw new LlmStreamingError('OpenAI-compatible stream ended before completion', this.id, 'UPSTREAM_STREAM_ERROR');
     }
   }
 

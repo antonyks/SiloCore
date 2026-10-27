@@ -543,6 +543,12 @@ describe('ChatService', () => {
       expect(complete).toHaveBeenCalledTimes(2);
       expect(complete.mock.calls[1][0].model).toBe('backup-model');
       expect(mockPrisma.chatMessage.create).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        data: expect.objectContaining({ triggeringUserMessageId: 1 }),
+      }));
+      expect(mockPrisma.chatSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: { latestEligibleAssistantMessageId: 2 },
+      }));
       expect(mockPrisma.llmDefaultProviderSwitch.create).toHaveBeenCalledWith({
         data: { oldProviderId: 1, newProviderId: 2, reason: 'AVAILABILITY_FAILURE' },
       });
@@ -606,6 +612,10 @@ describe('ChatService', () => {
       }, createWorkspaceContextFor(25));
 
       expect(result).toEqual({ userMessage, assistantMessage });
+      expect(mockPrisma.chatSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: { latestEligibleAssistantMessageId: assistantMessage.id },
+      }));
+      expect(mockPrisma.job.create).not.toHaveBeenCalled();
       expect(complete).toHaveBeenCalledWith(expect.objectContaining({
         model: TEST_MODEL_ID,
         temperature: 0.2,
@@ -680,6 +690,29 @@ describe('ChatService', () => {
       expect(JSON.stringify(loggedPayloads())).not.toContain('Hi there');
       expect(JSON.stringify(loggedPayloads())).not.toContain('I should greet the user.');
     });
+
+    it.each(['length', 'max_tokens', ' MAX_TOKENS ', 'error', 'aborted'])(
+      'does not mark a non-streaming reply with finish reason %s eligible',
+      async (finishReason) => {
+        mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+        mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
+        mockPrisma.chatMessage.create
+          .mockResolvedValueOnce({ id: 1, content: 'Hello', author: 'USER', sessionId: 1, metadata: null, createdAt: new Date() })
+          .mockResolvedValueOnce({ id: 2, content: 'Partial answer', author: 'ASSISTANT', sessionId: 1, metadata: null, createdAt: new Date() });
+        jest.spyOn(OllamaProvider.prototype, 'complete').mockResolvedValue({
+          content: 'Partial answer', model: TEST_MODEL_ID, finishReason,
+        });
+
+        await ChatService.generateAssistantResponse({
+          sessionId: 1, content: 'Hello',
+        }, createWorkspaceContextFor(25));
+
+        expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, expect.objectContaining({
+          data: expect.objectContaining({ triggeringUserMessageId: 1 }),
+        }));
+        expect(mockPrisma.chatSession.updateMany).not.toHaveBeenCalled();
+      },
+    );
 
     it('keeps usage-recording failures readable without exposing the failure text', async () => {
       mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
@@ -1087,6 +1120,9 @@ describe('ChatService', () => {
       expect(events.map((event) => event.event)).toEqual([
         'user_message', 'provider_switch', 'delta', 'assistant_message', 'provider_switch', 'done',
       ]);
+      expect(mockPrisma.chatSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: { latestEligibleAssistantMessageId: 1 },
+      }));
       expect(events[1]).toEqual({ event: 'provider_switch', data: {
         fromProviderName: 'Local Ollama', toProviderName: 'Backup', status: 'retrying',
       } });
@@ -1096,6 +1132,41 @@ describe('ChatService', () => {
       expect(mockPrisma.llmDefaultProviderSwitch.create).toHaveBeenCalledWith({
         data: { oldProviderId: 1, newProviderId: 2, reason: 'AVAILABILITY_FAILURE' },
       });
+    });
+
+    it('retains empty-stream failover and marks only the completed backup reply eligible', async () => {
+      const primary = createProvider();
+      const backup = createProvider({ id: 2, name: 'Backup', defaultModel: 'backup-model', isDefault: false, defaultSource: null });
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([primary, backup]);
+      mockPrisma.llmProviderConfig.findUnique.mockResolvedValue(backup);
+      mockPrisma.chatMessage.create
+        .mockResolvedValueOnce({ id: 1, content: 'Hello', author: 'USER', sessionId: 1, metadata: null, createdAt: new Date() })
+        .mockResolvedValueOnce({ id: 2, content: 'From backup', author: 'ASSISTANT', sessionId: 1, metadata: null, createdAt: new Date() });
+      jest.spyOn(OllamaProvider.prototype, 'streamComplete').mockImplementation(function (this: OllamaProvider) {
+        const id = this.id;
+        return (async function* () {
+          if (id === '2') {
+            yield { content: 'From backup' };
+            yield { done: true, finishReason: 'stop' };
+          }
+        })();
+      });
+
+      const events: string[] = [];
+      for await (const event of ChatService.streamAssistantResponse({
+        sessionId: 1, content: 'Hello',
+      }, createWorkspaceContextFor(25))) events.push(event.event);
+
+      expect(events).toEqual(['user_message', 'provider_switch', 'delta', 'assistant_message', 'provider_switch', 'done']);
+      expect(mockPrisma.chatMessage.create).toHaveBeenCalledTimes(2);
+      expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        data: expect.objectContaining({ triggeringUserMessageId: 1 }),
+      }));
+      expect(mockPrisma.chatSession.updateMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.chatSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: { latestEligibleAssistantMessageId: 2 },
+      }));
     });
 
     it('announces a retry before streaming and does not retry after reasoning appears', async () => {
@@ -1183,6 +1254,13 @@ describe('ChatService', () => {
         { event: 'assistant_message', data: assistantMessage },
         { event: 'done', data: { done: true } },
       ]);
+      expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        data: expect.objectContaining({ triggeringUserMessageId: userMessage.id }),
+      }));
+      expect(mockPrisma.chatSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: { latestEligibleAssistantMessageId: assistantMessage.id },
+      }));
+      expect(mockPrisma.job.create).not.toHaveBeenCalled();
       expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, {
         data: expect.objectContaining({
           content: 'Hi there',
@@ -1238,6 +1316,42 @@ describe('ChatService', () => {
       expect(JSON.stringify(loggedPayloads())).not.toContain('Hello');
       expect(JSON.stringify(loggedPayloads())).not.toContain('Hi there');
       expect(JSON.stringify(loggedPayloads())).not.toContain('Think first.');
+    });
+
+    it('treats clean EOF after a delta as a failed partial reply', async () => {
+      async function* earlyEofChunks() {
+        yield { content: 'Partial answer' };
+      }
+      const userMessage: SelectedChatMessage = {
+        id: 1, content: 'Hello', author: 'USER', sessionId: 1, metadata: null, createdAt: new Date(),
+      };
+      const assistantMessage: SelectedChatMessage = {
+        id: 2, content: 'Partial answer', author: 'ASSISTANT', sessionId: 1, metadata: null, createdAt: new Date(),
+      };
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
+      mockPrisma.chatMessage.create.mockResolvedValueOnce(userMessage).mockResolvedValueOnce(assistantMessage);
+      jest.spyOn(OllamaProvider.prototype, 'streamComplete').mockReturnValue(earlyEofChunks());
+
+      const events: string[] = [];
+      await expect((async () => {
+        for await (const event of ChatService.streamAssistantResponse({
+          sessionId: 1, content: 'Hello',
+        }, createWorkspaceContextFor(25))) events.push(event.event);
+      })()).rejects.toMatchObject({ code: 'UPSTREAM_STREAM_ERROR' });
+
+      expect(events).toEqual(['user_message', 'delta', 'assistant_message']);
+      expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        data: expect.objectContaining({
+          triggeringUserMessageId: userMessage.id,
+          metadata: expect.objectContaining({ finishReason: 'error', incomplete: true }),
+        }),
+      }));
+      expect(mockPrisma.chatSession.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.generationUsage.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ outcome: GenerationUsageOutcome.FAILED, errorCode: 'UPSTREAM_STREAM_ERROR' }),
+        select: expect.any(Object),
+      });
     });
 
     it('should reject unsupported streaming before persisting the user message or opening upstream', async () => {
@@ -1397,6 +1511,7 @@ describe('ChatService', () => {
         { event: 'delta', data: { reasoning: 'Partial reasoning.' } },
         { event: 'assistant_message', data: assistantMessage },
       ]);
+      expect(mockPrisma.chatSession.updateMany).not.toHaveBeenCalled();
       expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, {
         data: expect.objectContaining({
           content: 'Partial answer ',
@@ -1628,6 +1743,34 @@ describe('ChatService', () => {
         }),
         select: SelectedChatMessageFields,
       });
+      expect(mockPrisma.chatSession.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('does not mark a length-truncated streamed answer eligible', async () => {
+      async function* truncatedChunks() {
+        yield { content: 'Partial answer' };
+        yield { done: true, finishReason: 'length' };
+      }
+      mockPrisma.chatSession.findFirst.mockResolvedValue(createSession());
+      mockPrisma.llmProviderConfig.findMany.mockResolvedValue([createProvider()]);
+      mockPrisma.chatMessage.create
+        .mockResolvedValueOnce({ id: 1, content: 'Hello', author: 'USER', sessionId: 1, metadata: null, createdAt: new Date() })
+        .mockResolvedValueOnce({ id: 2, content: 'Partial answer', author: 'ASSISTANT', sessionId: 1, metadata: null, createdAt: new Date() });
+      jest.spyOn(OllamaProvider.prototype, 'streamComplete').mockReturnValue(truncatedChunks());
+
+      for await (const event of ChatService.streamAssistantResponse({
+        sessionId: 1, content: 'Hello',
+      }, createWorkspaceContextFor(25))) {
+        expect(event.event).toBeDefined();
+      }
+
+      expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        data: expect.objectContaining({
+          triggeringUserMessageId: 1,
+          metadata: expect.objectContaining({ finishReason: 'length', incomplete: true }),
+        }),
+      }));
+      expect(mockPrisma.chatSession.updateMany).not.toHaveBeenCalled();
     });
 
     it('should persist partial assistant output and log abort when the stream is closed early', async () => {
@@ -1669,6 +1812,7 @@ describe('ChatService', () => {
       await expect(stream.next()).resolves.toEqual({ done: false, value: { event: 'delta', data: { content: 'Partial answer' } } });
       await stream.return?.();
 
+      expect(mockPrisma.chatSession.updateMany).not.toHaveBeenCalled();
       expect(mockPrisma.chatMessage.create).toHaveBeenNthCalledWith(2, {
         data: expect.objectContaining({
           content: 'Partial answer',

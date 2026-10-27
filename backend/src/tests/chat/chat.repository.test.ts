@@ -401,6 +401,63 @@ describe('ChatRepository', () => {
     });
   });
 
+  describe('createGeneratedAssistantMessage', () => {
+    const input = {
+      sessionId: 1,
+      workspaceId: 25,
+      triggeringUserMessageId: 7,
+      content: 'A complete answer',
+      metadata: { finishReason: 'stop' },
+      titleEligible: true,
+    };
+
+    it('links the assistant and advances only a newer placeholder marker in the same transaction', async () => {
+      const message = { id: 9, content: input.content, author: MessageAuthor.ASSISTANT };
+      mockPrisma.chatMessage.create.mockResolvedValue(message as SelectedChatMessage);
+
+      await expect(ChatRepository.createGeneratedAssistantMessage(input)).resolves.toEqual(message);
+
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.chatMessage.create).toHaveBeenCalledWith({
+        data: {
+          sessionId: 1,
+          author: MessageAuthor.ASSISTANT,
+          content: input.content,
+          metadata: input.metadata,
+          triggeringUserMessageId: 7,
+        },
+        select: SelectedChatMessageFields,
+      });
+      expect(mockPrisma.chatSession.update).toHaveBeenCalledWith({
+        where: { id: 1 }, data: { updatedAt: expect.any(Date) },
+      });
+      expect(mockPrisma.chatSession.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 1,
+          workspaceId: 25,
+          titleSource: ChatSessionTitleSource.PLACEHOLDER,
+          OR: [
+            { latestEligibleAssistantMessageId: null },
+            { latestEligibleAssistantMessageId: { lt: 9 } },
+          ],
+        },
+        data: { latestEligibleAssistantMessageId: 9 },
+      });
+    });
+
+    it('links a partial assistant without advancing eligibility', async () => {
+      mockPrisma.chatMessage.create.mockResolvedValue({ id: 9 } as SelectedChatMessage);
+
+      await ChatRepository.createGeneratedAssistantMessage({ ...input, titleEligible: false });
+
+      expect(mockPrisma.chatMessage.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ triggeringUserMessageId: 7 }),
+      }));
+      expect(mockPrisma.chatSession.update).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.chatSession.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('listMessagesInWorkspace', () => {
     it('should return messages ordered by creation date ascending', async () => {
       const mockMessages: SelectedChatMessage[] = [
