@@ -51,10 +51,13 @@ function fixture() {
     destroy: jest.fn(async () => undefined),
   };
   const stopScheduler = jest.fn(() => { order.push('scheduler'); });
+  const stopTitleScheduler = jest.fn(async () => { order.push('titleScheduler'); });
   const createQueueClient = jest.fn(async () => queue as unknown as WorkerQueueClient);
   const createCpuPool = jest.fn(() => pool as WorkerCpuTaskPool);
   const startScheduler = jest.fn(() => ({ stop: stopScheduler }));
-  return { order, callbacks, job, jobs, queue, pool, createQueueClient, createCpuPool, startScheduler, stopScheduler };
+  const startTitleScheduler = jest.fn(() => ({ stop: stopTitleScheduler }));
+  return { order, callbacks, job, jobs, queue, pool, createQueueClient, createCpuPool,
+    startScheduler, stopScheduler, startTitleScheduler, stopTitleScheduler };
 }
 
 describe('worker composition', () => {
@@ -64,6 +67,7 @@ describe('worker composition', () => {
     expect(f.createCpuPool).not.toHaveBeenCalled();
     expect(f.createQueueClient).not.toHaveBeenCalled();
     expect(f.startScheduler).not.toHaveBeenCalled();
+    expect(f.startTitleScheduler).not.toHaveBeenCalled();
     await Promise.all([worker.start(), worker.start()]);
     expect(f.queue.start).toHaveBeenCalledTimes(1);
     expect([...f.callbacks.keys()]).toEqual([VALIDATION_JOB_QUEUE, PROVIDER_HEALTH_SAMPLING_JOB_QUEUE, SESSION_TITLE_JOB_QUEUE]);
@@ -77,9 +81,10 @@ describe('worker composition', () => {
     expect(f.jobs.markSucceeded).toHaveBeenCalledWith(5, expect.objectContaining({ checksum: 'checksum' }));
     expect(f.jobs.reconcileQueuedJobsWithoutQueueMessage).toHaveBeenCalledTimes(1);
     expect(f.jobs.recoverStaleRunningJobs).toHaveBeenCalledTimes(1);
+    expect(f.startTitleScheduler).toHaveBeenCalledTimes(1);
     await worker.stop();
     await worker.stop();
-    expect(f.order).toEqual(['scheduler', 'queue', 'pool']);
+    expect(f.order).toEqual(['titleScheduler', 'scheduler', 'queue', 'pool']);
   });
 
   it('uses replacement handler registrations and keeps compositions separate', async () => {
@@ -124,7 +129,22 @@ describe('worker composition', () => {
     expect(f.queue.stop).not.toHaveBeenCalled();
     release();
     await Promise.all([starting, stopping]);
-    expect(f.order).toEqual(['scheduler', 'queue', 'pool']);
+    expect(f.order).toEqual(['titleScheduler', 'scheduler', 'queue', 'pool']);
+  });
+
+  it('waits for the title scheduler to drain before closing the queue', async () => {
+    const f = fixture();
+    let release!: () => void;
+    f.stopTitleScheduler.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));
+    const worker = createWorkerComposition({ ...f });
+    await worker.start();
+
+    const stopping = worker.stop();
+    await Promise.resolve();
+    expect(f.queue.stop).not.toHaveBeenCalled();
+    release();
+    await stopping;
+    expect(f.queue.stop).toHaveBeenCalledTimes(1);
   });
 
   it('still closes the CPU pool after queue shutdown fails and destroys a pool that cannot close', async () => {
@@ -154,7 +174,7 @@ describe('worker composition', () => {
       const stopping = worker.stop();
       expect(worker.stop()).toBe(stopping);
       await expect(stopping).rejects.toBe(failure);
-      expect(f.order).toEqual(['scheduler', 'queue', 'pool']);
+      expect(f.order).toEqual(['titleScheduler', 'scheduler', 'queue', 'pool']);
       await expect(worker.stop()).resolves.toBeUndefined();
       expect(f.stopScheduler).toHaveBeenCalledTimes(1);
       expect(f.queue.stop).toHaveBeenCalledTimes(1);
@@ -165,7 +185,8 @@ describe('worker composition', () => {
       expect(f.createCpuPool).toHaveBeenCalledTimes(2);
       expect(f.startScheduler).toHaveBeenCalledTimes(2);
       await worker.stop();
-      expect(f.order).toEqual(['scheduler', 'queue', 'pool', 'scheduler', 'queue', 'pool']);
+      expect(f.order).toEqual(['titleScheduler', 'scheduler', 'queue', 'pool',
+        'titleScheduler', 'scheduler', 'queue', 'pool']);
     },
   );
 
@@ -202,6 +223,7 @@ describe('worker composition', () => {
     await expect(worker.start()).rejects.toBe(failure);
     expect(f.startScheduler).toHaveBeenCalledTimes(1);
     expect(f.order).toEqual(['scheduler', 'queue', 'pool']);
+    expect(f.startTitleScheduler).not.toHaveBeenCalled();
     await expect(worker.stop()).resolves.toBeUndefined();
     expect(f.stopScheduler).toHaveBeenCalledTimes(1);
     expect(f.queue.stop).toHaveBeenCalledTimes(1);

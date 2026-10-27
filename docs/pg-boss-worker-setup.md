@@ -62,6 +62,23 @@ npm run start:worker
 
 Use `npm run start` in another terminal for the compiled API. The normal build includes the loader, so no manual copy is needed. Docker Compose includes a separate `worker` service that uses the same backend image as the API and runs `npm run dev:worker`.
 
+## Session title scheduling
+
+The worker scans for eligible placeholder chat sessions every five seconds. Set
+`SESSION_TITLE_SCHEDULER_INTERVAL_MS` to change the interval and
+`SESSION_TITLE_SCHEDULER_BATCH_SIZE` to change the maximum candidates per scan
+(default 50, maximum 100). The scheduler starts after queue reconciliation and
+stale-job recovery, and drains before the queue closes on shutdown.
+
+For each session, it claims the latest eligible assistant reply under a
+PostgreSQL advisory lock and creates a `chat.session_title` application job
+through `JobService`. The application job contains only the session and
+assistant message IDs; the pg-boss message contains only the application job
+ID. A nonterminal title job blocks another attempt for the session. Once a
+reply is claimed, failures and insufficient-context results do not schedule
+that reply again. A later eligible reply permits another attempt after the
+current job reaches a terminal state.
+
 ## Validation jobs
 
 The current validation job is an internal deterministic queue check, not a frontend screen. An ADMIN can enqueue it with `POST /api/admin/system/validation-jobs` and optional JSON body `{ "mode": "success" }` or `{ "mode": "fail" }`. Supply `Authorization: Bearer <jwt>` and an owned workspace's numeric `X-Workspace-Id` on this and subsequent requests. The enqueue response is `202` with the public job under `data`.

@@ -52,11 +52,13 @@ async function startWorker() {
         workerJobHeartbeatIntervalMs: ENV.WORKER_JOB_HEARTBEAT_INTERVAL_MS,
         workerStaleJobMs: ENV.WORKER_STALE_JOB_MS,
         providerHealthSampleIntervalMs: ENV.PROVIDER_HEALTH_SAMPLE_INTERVAL_MS,
+        sessionTitleSchedulerIntervalMs: ENV.SESSION_TITLE_SCHEDULER_INTERVAL_MS,
+        sessionTitleSchedulerBatchSize: ENV.SESSION_TITLE_SCHEDULER_BATCH_SIZE,
         pgBossSchema: ENV.PGBOSS_SCHEMA,
         jobQueueReconciliation,
         staleRunningJobRecovery,
       },
-      'Worker started with job lifecycle execution infrastructure, validation job handler and provider health sampling handler.',
+      'Worker started with job lifecycle execution infrastructure and registered handlers and schedulers.',
     );
   } catch (error) {
     logger.error(

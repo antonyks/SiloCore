@@ -39,8 +39,12 @@ and length-truncated replies do not advance it. Streaming replies also require
 a provider completion marker; a clean EOF after partial output is a failed
 reply. The title worker reads linked replies in bounded pages and skips
 unsuccessful ones until it has up to three successful exchanges. Chat replies
-do not enqueue title jobs or call the title model; scheduling belongs to a
-later task.
+do not enqueue title jobs or call the title model. The worker scheduler scans
+eligible placeholder sessions in bounded batches, claims each session under a
+PostgreSQL advisory lock, and advances the attempted watermark before enqueue.
+It waits for the next eligible reply after insufficient context, enqueue
+failure, or an exhausted title attempt. A nonterminal title job blocks a new
+attempt for that session, even if another reply becomes eligible.
 
 The migration is `backend/prisma/migrations/20261026000200_session_title_usage_schema`.
 Under `instructions.txt`, the user applies it to the intended database and

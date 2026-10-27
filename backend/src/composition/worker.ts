@@ -8,6 +8,7 @@ import { importPgBoss } from '../modules/job/pgBoss.loader.cjs';
 import { createValidationJobHandler, VALIDATION_JOB_QUEUE } from '../modules/worker/validationJob';
 import { createProviderHealthSampling, PROVIDER_HEALTH_SAMPLING_JOB_QUEUE, ProviderHealthSamplingScheduler } from '../modules/worker/providerHealthSamplingJob';
 import { createSessionTitleJobHandler, SESSION_TITLE_JOB_QUEUE } from '../modules/worker/sessionTitleJob';
+import { createSessionTitleScheduling } from '../modules/worker/sessionTitleScheduler';
 import { createWorkerCpuTaskPool, WorkerCpuTaskPool } from '../modules/worker/workerTaskPool';
 import { CoreServices, CoreServiceOverrides, createCoreServices } from './coreServices';
 
@@ -23,15 +24,18 @@ export interface WorkerCompositionOverrides extends CoreServiceOverrides {
   createCpuPool?: typeof createWorkerCpuTaskPool;
   handlers?: (services: CoreServices, pool: WorkerCpuTaskPool) => readonly JobHandlerRegistration[];
   startScheduler?: ReturnType<typeof createProviderHealthSampling>['startProviderHealthSamplingScheduler'];
+  startTitleScheduler?: ReturnType<typeof createSessionTitleScheduling>['startSessionTitleScheduler'];
 }
 
 /** Every resource belongs to this composition and is created only by start(). */
 export function createWorkerComposition(overrides: WorkerCompositionOverrides = {}) {
   const services = createCoreServices(overrides);
   const sampling = createProviderHealthSampling({ jobService: services.jobs, llm: services.llm });
+  const titleScheduling = createSessionTitleScheduling({ jobService: services.jobs });
   let boss: WorkerQueueClient | undefined;
   let pool: WorkerCpuTaskPool | undefined;
   let scheduler: ProviderHealthSamplingScheduler | undefined;
+  let titleScheduler: ReturnType<typeof titleScheduling.startSessionTitleScheduler> | undefined;
   let startPromise: Promise<WorkerStartupResult> | undefined;
   let stopPromise: Promise<void> | undefined;
   let started: WorkerStartupResult | undefined;
@@ -74,6 +78,11 @@ export function createWorkerComposition(overrides: WorkerCompositionOverrides = 
       const staleRunningJobRecovery = await services.jobs.recoverStaleRunningJobs(transport, {
         staleJobMs: ENV.WORKER_STALE_JOB_MS,
       });
+      titleScheduler = (overrides.startTitleScheduler ?? titleScheduling.startSessionTitleScheduler)({
+        intervalMs: ENV.SESSION_TITLE_SCHEDULER_INTERVAL_MS,
+        batchSize: ENV.SESSION_TITLE_SCHEDULER_BATCH_SIZE,
+        queueTransport: transport,
+      });
       started = { jobQueueReconciliation, staleRunningJobRecovery };
       return started;
     } catch (error) {
@@ -101,13 +110,20 @@ export function createWorkerComposition(overrides: WorkerCompositionOverrides = 
 
   async function disposeResources(): Promise<void> {
     const healthScheduler = scheduler;
+    const sessionTitleScheduler = titleScheduler;
     const queue = boss;
     const cpuPool = pool;
     scheduler = undefined;
+    titleScheduler = undefined;
     boss = undefined;
     pool = undefined;
     started = undefined;
     let failure: unknown;
+    try {
+      await sessionTitleScheduler?.stop();
+    } catch (error) {
+      failure = error;
+    }
     try {
       await healthScheduler?.stop();
     } catch (error) {

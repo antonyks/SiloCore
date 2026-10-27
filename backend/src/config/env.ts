@@ -23,6 +23,14 @@ function positiveIntegerMsEnv(name: string, defaultValue: number): number {
   return positiveIntegerEnv(name, defaultValue);
 }
 
+function boundedPositiveIntegerEnv(name: string, defaultValue: number, maxValue: number): number {
+  const value = positiveIntegerEnv(name, defaultValue);
+  if (value > maxValue) {
+    throw new Error(`Environment variable ${name} must be at most ${maxValue}.`);
+  }
+  return value;
+}
+
 export const ENV = {
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: Number(process.env.PORT) || 5000,
@@ -38,5 +46,7 @@ export const ENV = {
   WORKER_STALE_JOB_MS: positiveIntegerMsEnv('WORKER_STALE_JOB_MS', 300_000),
   PROVIDER_HEALTH_SAMPLE_INTERVAL_MS: positiveIntegerMsEnv('PROVIDER_HEALTH_SAMPLE_INTERVAL_MS', 300_000),
   PROVIDER_HEALTH_SAMPLE_RECENT_MS: positiveIntegerMsEnv('PROVIDER_HEALTH_SAMPLE_RECENT_MS', 900_000),
+  SESSION_TITLE_SCHEDULER_INTERVAL_MS: positiveIntegerMsEnv('SESSION_TITLE_SCHEDULER_INTERVAL_MS', 5_000),
+  SESSION_TITLE_SCHEDULER_BATCH_SIZE: boundedPositiveIntegerEnv('SESSION_TITLE_SCHEDULER_BATCH_SIZE', 50, 100),
   PGBOSS_SCHEMA: process.env.PGBOSS_SCHEMA || 'pgboss',
 };

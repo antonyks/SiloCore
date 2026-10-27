@@ -175,6 +175,8 @@ Backend variables live in `backend/.env`:
 | `WORKER_SHUTDOWN_GRACE_MS` | Worker graceful shutdown timeout in milliseconds, default `30000` |
 | `WORKER_JOB_HEARTBEAT_INTERVAL_MS` | Worker application job heartbeat interval in milliseconds, default `10000` |
 | `WORKER_STALE_JOB_MS` | Running job stale recovery threshold in milliseconds, default `300000` |
+| `SESSION_TITLE_SCHEDULER_INTERVAL_MS` | Session title eligibility scan interval in milliseconds, default `5000` |
+| `SESSION_TITLE_SCHEDULER_BATCH_SIZE` | Maximum eligible sessions scanned per tick, default `50` and maximum `100` |
 | `PGBOSS_SCHEMA` | PostgreSQL schema used by pg-boss, default `pgboss` |
 
 Frontend variables live in `frontend/.env`:
