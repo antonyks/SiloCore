@@ -134,6 +134,7 @@ describe('ChatService', () => {
         data: {
           ...inputData,
           workspaceId: 25,
+          titleSource: 'USER',
         },
         select: SelectedChatSessionFields,
       });
@@ -324,7 +325,7 @@ describe('ChatService', () => {
       expect(result).toEqual(mockUpdatedSession);
       expect(mockPrisma.chatSession.updateMany).toHaveBeenCalledWith({
         where: { id: sessionId, workspaceId },
-        data: updateData,
+        data: { ...updateData, titleSource: 'USER' },
       });
       expect(mockPrisma.chatSession.findFirst).toHaveBeenCalledWith({
         where: { id: sessionId, workspaceId },

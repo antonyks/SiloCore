@@ -206,6 +206,11 @@ jest.mock('@prisma/client', () => ({
     ASSISTANT: 'ASSISTANT',
     SYSTEM: 'SYSTEM',
   },
+  ChatSessionTitleSource: {
+    PLACEHOLDER: 'PLACEHOLDER',
+    GENERATED: 'GENERATED',
+    USER: 'USER',
+  },
   LlmProviderConfigType: {
     OLLAMA: 'OLLAMA',
     OPENAI_COMPATIBLE: 'OPENAI_COMPATIBLE',

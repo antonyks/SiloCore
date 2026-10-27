@@ -717,7 +717,7 @@ const Home: React.FC = () => {
     }
 
     try {
-      const session = await createSession.mutateAsync({ title: "New Chat" });
+      const session = await createSession.mutateAsync({});
       setSelectedSessionId(session.id);
       setEditingSessionId(null);
       setOpenSessionMenuId(null);
@@ -743,7 +743,7 @@ const Home: React.FC = () => {
     event.preventDefault();
 
     const title = editingTitle.trim();
-    if (!title || title === session.title) {
+    if (!title) {
       cancelEditing();
       return;
     }

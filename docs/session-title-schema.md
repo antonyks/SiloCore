@@ -2,9 +2,11 @@
 
 `ChatSession.titleSource` records who owns the title: `PLACEHOLDER` for an
 untouched default, `GENERATED` for an applied automatic title, or `USER` for a
-supplied or explicitly renamed title. The database default is `USER` so
-existing session creation continues to mean a user-owned title until the
-creation flow changes. The migration classifies historical sessions titled
+supplied or explicitly renamed title. Session creation without a title now
+stores `New Chat` as `PLACEHOLDER`; a supplied title, even `New Chat`, is
+`USER`. Saving a title through the rename API also sets `USER`, including an
+unchanged title. The database default remains `USER` for direct database
+inserts. The migration classifies historical sessions titled
 exactly `New Chat` as `PLACEHOLDER`; every other historical title remains
 `USER`. A historical manual rename to `New Chat` cannot be distinguished from
 an untouched default. Both title watermarks start null, so historical sessions

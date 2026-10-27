@@ -98,7 +98,7 @@ export function createChatController(dependencies: Partial<ChatControllerDepende
 
   const service = {
     async createSession(req: AuthenticatedRequest, res: Response): Promise<void> {
-      const { title } = req.body;
+      const { title } = req.body ?? {};
       const userId = req.user?.id;
 
       if (!userId) {
@@ -149,7 +149,7 @@ export function createChatController(dependencies: Partial<ChatControllerDepende
       const idString: string = req.params.id;
       const id: number = parseSessionId(idString);
 
-      const data: IChatSessionUpdateInput = req.body;
+      const data: IChatSessionUpdateInput = { title: req.body?.title };
       const session = await serviceDependency.updateSession(id, data, getChatWorkspaceContext(req));
       res.status(200).json({ data: session });
     },

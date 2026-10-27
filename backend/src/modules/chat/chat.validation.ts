@@ -3,17 +3,24 @@ import { NextFunction, Request, Response } from 'express';
 
 export const validateChatSessionCreate = [
   body('title')
-    .isLength({ min: 1 })
-    .withMessage('Title is required')
+    .optional({ values: 'undefined' })
+    .isString()
+    .withMessage('Title must be a string')
+    .bail()
     .trim()
+    .notEmpty()
+    .withMessage('Title must be at least 1 character long')
 ];
 
 export const validateChatSessionUpdate = [
   body('title')
-    .optional()
-    .isLength({ min: 1 })
-    .withMessage('Title must be at least 1 character long')
+    .optional({ values: 'undefined' })
+    .isString()
+    .withMessage('Title must be a string')
+    .bail()
     .trim()
+    .notEmpty()
+    .withMessage('Title must be at least 1 character long')
 ];
 
 export const validateChatMessageCreate = [

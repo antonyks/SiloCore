@@ -35,7 +35,7 @@ export interface IChatMessage {
 }
 
 export interface IChatSessionCreateInput {
-  title: string;
+  title?: string;
   userId: number;
 }
 
@@ -44,7 +44,7 @@ export interface IChatSessionRepositoryCreateInput extends IChatSessionCreateInp
 }
 
 export interface IChatSessionUpdateInput {
-  title: string;
+  title?: string;
 }
 
 export interface IChatMessageCreateInput {

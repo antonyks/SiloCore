@@ -264,6 +264,86 @@ describe('Home workspace route context', () => {
     expect(screen.getAllByRole('button', { name: /New Chat/i }).length).toBeGreaterThan(0);
   });
 
+  it('creates a chat without supplying a title', async () => {
+    seedAuthStorage();
+    window.history.pushState({}, '', '/workspaces/25/chat/home');
+    const createBodies: unknown[] = [];
+    const session = {
+      id: 81,
+      title: 'New Chat',
+      userId: 1,
+      workspaceId: 25,
+      createdAt: personalWorkspace.createdAt,
+      updatedAt: personalWorkspace.updatedAt,
+    };
+
+    server.use(
+      http.get(`${API_BASE_URL}/workspaces`, () => HttpResponse.json({ data: [personalWorkspace] })),
+      http.get(`${API_BASE_URL}/chat`, () => HttpResponse.json({ data: [] })),
+      http.get(`${API_BASE_URL}/llm/models`, () =>
+        HttpResponse.json({ data: { models: [], providers: [] } }),
+      ),
+      http.post(`${API_BASE_URL}/chat`, async ({ request }) => {
+        createBodies.push(await request.json());
+        return HttpResponse.json({ data: session }, { status: 201 });
+      }),
+      http.get(`${API_BASE_URL}/chat/81`, () =>
+        HttpResponse.json({ data: { ...session, messages: [] } }),
+      ),
+      http.get(`${API_BASE_URL}/chat/81/messages`, () => HttpResponse.json({ data: [] })),
+    );
+
+    renderWithProviders(<Home />, {
+      workspaceLayout: true,
+      initialEntries: ['/workspaces/25/chat/home'],
+      routePath: '/workspaces/:workspaceId/chat/home',
+    });
+
+    await screen.findByText('Select a chat');
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'New Chat', exact: true })[0])
+      .toBeEnabled());
+    await userEvent.click(screen.getAllByRole('button', { name: 'New Chat', exact: true })[0]);
+    await waitFor(() => expect(createBodies).toEqual([{}]));
+  });
+
+  it('sends an unchanged title when the user saves a rename', async () => {
+    seedAuthStorage();
+    window.history.pushState({}, '', '/workspaces/25/chat/home');
+    const updateBodies: unknown[] = [];
+    const session = {
+      id: 82,
+      title: 'New Chat',
+      userId: 1,
+      workspaceId: 25,
+      createdAt: personalWorkspace.createdAt,
+      updatedAt: personalWorkspace.updatedAt,
+    };
+
+    server.use(
+      http.get(`${API_BASE_URL}/workspaces`, () => HttpResponse.json({ data: [personalWorkspace] })),
+      http.get(`${API_BASE_URL}/chat`, () => HttpResponse.json({ data: [session] })),
+      http.get(`${API_BASE_URL}/llm/models`, () =>
+        HttpResponse.json({ data: { models: [], providers: [] } }),
+      ),
+      http.put(`${API_BASE_URL}/chat/82`, async ({ request }) => {
+        updateBodies.push(await request.json());
+        return HttpResponse.json({ data: session });
+      }),
+    );
+
+    renderWithProviders(<Home />, {
+      workspaceLayout: true,
+      initialEntries: ['/workspaces/25/chat/home'],
+      routePath: '/workspaces/:workspaceId/chat/home',
+    });
+
+    await screen.findByRole('button', { name: 'Session actions for New Chat' });
+    await userEvent.click(screen.getByRole('button', { name: 'Session actions for New Chat' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save session title' }));
+    await waitFor(() => expect(updateBodies).toEqual([{ title: 'New Chat' }]));
+  });
+
   it.each([
     ['A readable model', 'Use default model (A readable model)'],
     [undefined, 'Use default model'],

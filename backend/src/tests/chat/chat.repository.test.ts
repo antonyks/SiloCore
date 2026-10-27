@@ -1,7 +1,7 @@
 import { mockPrisma } from '../setup';
 import { ChatRepository } from '../../modules/chat/chat.repository';
 import { SelectedChatSession, ChatSessionWithMessages, SelectedChatMessage, MessageAuthor, SelectedChatSessionFields, ChatSessionWithMessagesFields, SelectedChatMessageFields } from '../../modules/chat/chat.model';
-import { Prisma } from '@prisma/client';
+import { ChatSessionTitleSource, Prisma } from '@prisma/client';
 import { IChatMetadata } from '../../modules/chat/chat.types'
 
 const TEST_MODEL_ID = process.env.OLLAMA_MODEL as string;
@@ -34,11 +34,27 @@ describe('ChatRepository', () => {
       const result = await ChatRepository.createSession(sessionData);
 
       expect(mockPrisma.chatSession.create).toHaveBeenCalledWith({
-        data: sessionData,
+        data: { ...sessionData, titleSource: ChatSessionTitleSource.USER },
         select: SelectedChatSessionFields,
       });
 
       expect(result).toEqual(mockSession);
+    });
+
+    it('marks an omitted title as a placeholder', async () => {
+      (mockPrisma.chatSession.create as jest.Mock).mockResolvedValue({ title: 'New Chat' });
+
+      await ChatRepository.createSession({ userId: 1, workspaceId: 25 });
+
+      expect(mockPrisma.chatSession.create).toHaveBeenCalledWith({
+        data: {
+          title: 'New Chat',
+          titleSource: ChatSessionTitleSource.PLACEHOLDER,
+          userId: 1,
+          workspaceId: 25,
+        },
+        select: SelectedChatSessionFields,
+      });
     });
   });
 
@@ -195,7 +211,7 @@ describe('ChatRepository', () => {
 
       expect(mockPrisma.chatSession.updateMany).toHaveBeenCalledWith({
         where: { id: 1, workspaceId: 25 },
-        data: { title: 'Updated Conversation Title' },
+        data: { title: 'Updated Conversation Title', titleSource: ChatSessionTitleSource.USER },
       });
       expect(mockPrisma.chatSession.findFirst).toHaveBeenCalledWith({
         where: { id: 1, workspaceId: 25 },
@@ -219,6 +235,23 @@ describe('ChatRepository', () => {
       await expect(
         ChatRepository.updateSessionInWorkspace(999, 25, { title: 'Test' }),
       ).rejects.toThrow(error);
+    });
+  });
+
+  describe('applyGeneratedTitleInWorkspace', () => {
+    it('only replaces a placeholder in the specified workspace', async () => {
+      mockPrisma.chatSession.updateMany.mockResolvedValue({ count: 1 });
+
+      await expect(ChatRepository.applyGeneratedTitleInWorkspace(1, 25, 'Generated title'))
+        .resolves.toBe(true);
+      expect(mockPrisma.chatSession.updateMany).toHaveBeenCalledWith({
+        where: { id: 1, workspaceId: 25, titleSource: ChatSessionTitleSource.PLACEHOLDER },
+        data: { title: 'Generated title', titleSource: ChatSessionTitleSource.GENERATED },
+      });
+
+      mockPrisma.chatSession.updateMany.mockResolvedValue({ count: 0 });
+      await expect(ChatRepository.applyGeneratedTitleInWorkspace(1, 25, 'Generated title'))
+        .resolves.toBe(false);
     });
   });
 

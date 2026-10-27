@@ -64,7 +64,7 @@ export interface ChatSessionListParams {
 }
 
 export interface ChatSessionCreateInput {
-  title: string;
+  title?: string;
 }
 
 export interface ChatSessionUpdateInput {
